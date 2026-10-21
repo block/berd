@@ -385,13 +385,11 @@ fn start_session(
     spawn_stdout_reader(child.take_stdout()?, event_tx)?;
     let (audio_command_tx, audio_command_rx) = mpsc::sync_channel(16);
     let (failure_tx, failure_rx) = mpsc::sync_channel(1);
-    let audio_playing = Arc::new(AtomicBool::new(false));
     spawn_audio_host(
         child.take_audio()?,
         Arc::clone(&writer),
         audio_command_rx,
         failure_tx.clone(),
-        Arc::clone(&audio_playing),
     )?;
 
     send_request(
@@ -415,7 +413,6 @@ fn start_session(
         expert_spokesperson,
     );
     actor.saved = saved;
-    actor.audio_playing = audio_playing;
     actor
         .muted
         .store(muted.load(Ordering::SeqCst), Ordering::SeqCst);
@@ -957,6 +954,7 @@ struct PendingSpeak {
 }
 
 enum AudioCommand {
+    Drain(SyncSender<()>),
     Suspend(u64),
     Resume(u64),
 }
@@ -993,8 +991,8 @@ struct SessionActor {
     restart: Option<PendingRestart>,
     // When a restart waiting for speech to end stops waiting.
     restart_not_after: Instant,
-    // Set by the audio host while it plays speech, including the Spokesperson's own replies.
-    audio_playing: Arc<AtomicBool>,
+    // A restart needs the host to consume prior ingress and finish playback.
+    audio_drain: Option<Receiver<()>>,
     muted: Arc<AtomicBool>,
     status_sounds: Arc<Mutex<StatusSounds>>,
     // Requested sounds and any mode change, committed when the session applies them.
@@ -1094,7 +1092,7 @@ impl SessionActor {
             stopping: false,
             restart: None,
             restart_not_after: Instant::now(),
-            audio_playing: Arc::default(),
+            audio_drain: None,
             muted: Arc::new(AtomicBool::new(false)),
             status_sounds: Arc::default(),
             pending_status_sounds: BTreeMap::new(),
@@ -1216,13 +1214,32 @@ impl SessionActor {
 
     /// Shuts the session down for a requested restart once no speech is playing or queued, or the wait is up.
     fn start_restart_between_replies(&mut self) -> Result<(), String> {
-        let quiet = self.pending_speak.is_none()
-            && self.waiting_speaks.is_empty()
-            && !self.audio_playing.load(Ordering::SeqCst);
-        if !self.stopping
-            && self.restart.is_some()
-            && (quiet || Instant::now() >= self.restart_not_after)
-        {
+        if self.stopping || self.restart.is_none() {
+            return Ok(());
+        }
+        let expired = Instant::now() >= self.restart_not_after;
+        let mut drained = false;
+        if !expired && self.pending_speak.is_none() && self.waiting_speaks.is_empty() {
+            if let Some(acknowledged) = &self.audio_drain {
+                drained = match acknowledged.try_recv() {
+                    Ok(()) => true,
+                    Err(TryRecvError::Empty) => false,
+                    Err(TryRecvError::Disconnected) => {
+                        return Err("voice audio host stopped before restart drain".into())
+                    }
+                };
+            } else {
+                let (response, acknowledged) = mpsc::sync_channel(1);
+                match self.audio_commands.try_send(AudioCommand::Drain(response)) {
+                    Ok(()) => self.audio_drain = Some(acknowledged),
+                    Err(mpsc::TrySendError::Full(_)) => {}
+                    Err(mpsc::TrySendError::Disconnected(_)) => {
+                        return Err("voice audio host stopped before restart drain".into());
+                    }
+                }
+            }
+        }
+        if expired || drained {
             send_request(&self.writer, &SessionRequest::Shutdown)?;
             self.stopping = true;
         }
@@ -1365,6 +1382,10 @@ impl SessionActor {
                 non_blocking,
                 response,
             } => {
+                if self.stopping || self.audio_drain.is_some() {
+                    let _ = response.send(Err("voice session is restarting or stopping".into()));
+                    return Ok(());
+                }
                 if non_blocking && !self.transcript.delivers() {
                     let _ = response.send(Err(NON_BLOCKING_REQUIRES_DELIVERY.into()));
                     return Ok(());
@@ -2562,7 +2583,6 @@ fn spawn_audio_host(
     writer: Arc<Mutex<ChildStdin>>,
     commands: Receiver<AudioCommand>,
     failures: SyncSender<String>,
-    playing: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let flags = unsafe { libc::fcntl(audio.as_raw_fd(), libc::F_GETFL) };
     if flags < 0
@@ -2576,32 +2596,24 @@ fn spawn_audio_host(
     thread::Builder::new()
         .name("berd-call-audio-host".into())
         .spawn(move || {
-            // However this thread ends, it stops claiming that audio is playing.
-            struct Clear(Arc<AtomicBool>);
-            impl Drop for Clear {
-                fn drop(&mut self) {
-                    self.0.store(false, Ordering::SeqCst);
-                }
-            }
-            let playing = Clear(playing);
             let mut bytes = Vec::new();
             let mut playback = AudioPlaybackState::Idle;
+            let mut drain: Option<SyncSender<()>> = None;
             let mut pending_suspension: Option<PendingSuspension> = None;
             let suspension_latency = suspension_settle_time(
                 berd_call::macos_audio_route::playback_latency_safety_duration(None),
             );
             loop {
-                let mut chunk = [0_u8; 8192];
-                match audio.read(&mut chunk) {
-                    Ok(0) => break,
-                    Ok(count) => bytes.extend_from_slice(&chunk[..count]),
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                // A newly requested drain is checked after the next pipe read,
+                // so records already entering the host cannot be missed.
+                let drain_requested = drain.is_some();
+                let ingress_open = match read_available_audio(&mut audio, &mut bytes) {
+                    Ok(open) => open,
                     Err(error) => {
-                        report_failure(&failures, format!("berd-call audio pipe failed: {error}"));
+                        report_failure(&failures, error);
                         return;
                     }
-                }
+                };
                 loop {
                     match take_audio_record(&mut bytes) {
                         Ok(Some((kind, payload))) => {
@@ -2619,7 +2631,14 @@ fn spawn_audio_host(
                         }
                     }
                 }
+                if !ingress_open {
+                    break;
+                }
                 while let Ok(command) = commands.try_recv() {
+                    if let AudioCommand::Drain(response) = command {
+                        drain = Some(response);
+                        continue;
+                    }
                     if let Err(error) = handle_audio_command(
                         command,
                         &writer,
@@ -2677,10 +2696,19 @@ fn spawn_audio_host(
                 if let Some((speech_id, played_frames)) = finished {
                     playback.finish(speech_id, played_frames);
                 }
-                playing.0.store(
-                    matches!(playback, AudioPlaybackState::Playing(_)),
-                    Ordering::SeqCst,
-                );
+                if drain_requested
+                    && bytes.is_empty()
+                    && !matches!(playback, AudioPlaybackState::Playing(_))
+                {
+                    if let Some(response) = drain.take() {
+                        let _ = response.send(());
+                        // Park admission until the actor drops its sender. Keep the
+                        // pipe open while the actor shuts down the child, so no new
+                        // playback or premature audio EOF can race the acknowledgement.
+                        while commands.recv().is_ok() {}
+                        return;
+                    }
+                }
                 if pending_suspension
                     .as_ref()
                     .is_some_and(|pending| Instant::now() >= pending.ready_at)
@@ -2704,6 +2732,20 @@ fn spawn_audio_host(
         })
         .map(|_| ())
         .map_err(|error| format!("could not start voice audio host: {error}"))
+}
+
+/// Read through WouldBlock before deciding whether the audio ingress is empty.
+fn read_available_audio(audio: &mut impl Read, bytes: &mut Vec<u8>) -> Result<bool, String> {
+    let mut chunk = [0_u8; 8192];
+    loop {
+        match audio.read(&mut chunk) {
+            Ok(0) => return Ok(false),
+            Ok(count) => bytes.extend_from_slice(&chunk[..count]),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(format!("berd-call audio pipe failed: {error}")),
+        }
+    }
 }
 
 use std::os::fd::AsRawFd;
@@ -2852,6 +2894,7 @@ fn handle_audio_command(
     suspension_latency: Duration,
 ) -> Result<(), String> {
     match command {
+        AudioCommand::Drain(_) => unreachable!("the audio loop owns drain acknowledgements"),
         AudioCommand::Suspend(speech_id) => {
             if let Some(active) = playback.playing_mut(speech_id) {
                 active.player.pause();
@@ -3901,6 +3944,13 @@ mod tests {
         (command, reply)
     }
 
+    fn acknowledge_drain(commands: &Receiver<AudioCommand>) {
+        let AudioCommand::Drain(response) = commands.try_recv().unwrap() else {
+            panic!("expected a drain request");
+        };
+        response.send(()).unwrap();
+    }
+
     #[test]
     fn a_restart_waits_for_the_speech_in_progress_and_the_speech_queued_behind_it() {
         let mut child = Command::new("/bin/cat")
@@ -3911,7 +3961,7 @@ mod tests {
         let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
         let (events_tx, events) = mpsc::sync_channel(8);
         let (_commands_tx, commands) = mpsc::sync_channel(1);
-        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let (audio, audio_rx) = mpsc::sync_channel(1);
         let mut actor = test_actor(writer, events, commands, audio);
         let (playing_tx, playing) = mpsc::sync_channel(1);
         actor.pending_speak = Some(PendingSpeak {
@@ -3966,7 +4016,10 @@ mod tests {
             queued.try_recv().unwrap().unwrap(),
             json!({"spoke":true,"status":"completed"})
         );
-        // Between replies, the restart goes ahead.
+        // The actor waits for the host even after requested speech completes.
+        assert!(!actor.stopping);
+        acknowledge_drain(&audio_rx);
+        actor.poll().unwrap();
         assert!(actor.stopping);
         assert!(actor.restart.is_some());
         actor.finish_pending("voice session restarted");
@@ -4015,6 +4068,72 @@ mod tests {
     }
 
     #[test]
+    fn a_restart_waits_for_audio_ingress_before_playing_is_published() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio, audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        // An audio begin has reached the host, but it has not published playing yet.
+        let (accepted, ingress) = mpsc::sync_channel(1);
+        let (release, paused) = mpsc::sync_channel(1);
+        let (host_ready, drain_requested) = mpsc::sync_channel(1);
+        let (finished, drain_finished) = mpsc::sync_channel(1);
+        let worker = thread::spawn(move || {
+            let mut begin = Vec::new();
+            begin.extend_from_slice(&AUDIO_FRAME_MAGIC);
+            begin.extend_from_slice(&[AUDIO_FRAME_MARKER, AUDIO_BEGIN_KIND]);
+            begin.extend_from_slice(&16_u32.to_le_bytes());
+            begin.extend_from_slice(&7_u64.to_le_bytes());
+            begin.extend_from_slice(&24_000_u32.to_le_bytes());
+            begin.extend_from_slice(&1_f32.to_le_bytes());
+            assert_eq!(
+                take_audio_record(&mut begin).unwrap().unwrap().0,
+                AUDIO_BEGIN_KIND
+            );
+            accepted.send(()).unwrap();
+            paused.recv().unwrap();
+            let AudioCommand::Drain(response) =
+                audio_rx.recv_timeout(Duration::from_secs(2)).unwrap()
+            else {
+                panic!("expected a drain request");
+            };
+            host_ready.send(()).unwrap();
+            drain_finished.recv().unwrap();
+            response.send(()).unwrap();
+        });
+        ingress.recv().unwrap();
+        let (restart, _restarted) = restart_command();
+        actor.handle_command(restart).unwrap();
+        let waited_for_ingress = !actor.stopping;
+        release.send(()).unwrap();
+        drain_requested
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        actor.poll().unwrap();
+        let waited_for_playback = !actor.stopping;
+        finished.send(()).unwrap();
+        worker.join().unwrap();
+        assert!(
+            waited_for_ingress,
+            "restart must wait for the audio host to acknowledge drain"
+        );
+        assert!(
+            waited_for_playback,
+            "accepted audio must finish before shutdown"
+        );
+        actor.poll().unwrap();
+        assert!(actor.stopping);
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
     fn a_restart_waits_for_the_spokesperson_reply_playing_without_a_speak() {
         let mut child = Command::new("/bin/cat")
             .stdin(Stdio::piped())
@@ -4024,10 +4143,9 @@ mod tests {
         let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
         let (_events_tx, events) = mpsc::sync_channel(1);
         let (_commands_tx, commands) = mpsc::sync_channel(1);
-        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let (audio, audio_rx) = mpsc::sync_channel(1);
         let mut actor = test_actor(writer, events, commands, audio);
         // The Spokesperson is mid-reply: audio plays, but no speak was requested.
-        actor.audio_playing.store(true, Ordering::SeqCst);
         assert!(actor.pending_speak.is_none() && actor.waiting_speaks.is_empty());
         let (restart, _restarted) = restart_command();
         actor.handle_command(restart).unwrap();
@@ -4035,7 +4153,7 @@ mod tests {
         assert!(!actor.stopping);
         assert!(actor.restart.is_some());
         // Between replies, the restart goes ahead.
-        actor.audio_playing.store(false, Ordering::SeqCst);
+        acknowledge_drain(&audio_rx);
         actor.poll().unwrap();
         assert!(actor.stopping);
         drop(actor);
@@ -4054,7 +4172,6 @@ mod tests {
         let (_commands_tx, commands) = mpsc::sync_channel(1);
         let (audio, _audio_rx) = mpsc::sync_channel(1);
         let mut actor = test_actor(writer, events, commands, audio);
-        actor.audio_playing.store(true, Ordering::SeqCst);
         let (restart, _restarted) = restart_command();
         actor.handle_command(restart).unwrap();
         actor.poll().unwrap();
@@ -4067,7 +4184,7 @@ mod tests {
     }
 
     #[test]
-    fn a_restart_with_nothing_playing_starts_at_once() {
+    fn an_idle_restart_starts_after_the_host_acknowledges_drain() {
         let mut child = Command::new("/bin/cat")
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
@@ -4076,10 +4193,13 @@ mod tests {
         let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
         let (_events_tx, events) = mpsc::sync_channel(1);
         let (_commands_tx, commands) = mpsc::sync_channel(1);
-        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let (audio, audio_rx) = mpsc::sync_channel(1);
         let mut actor = test_actor(writer, events, commands, audio);
         let (restart, _restarted) = restart_command();
         actor.handle_command(restart).unwrap();
+        assert!(!actor.stopping);
+        acknowledge_drain(&audio_rx);
+        actor.poll().unwrap();
         assert!(actor.stopping);
         drop(actor);
         assert!(child.wait().unwrap().success());
@@ -5585,6 +5705,43 @@ mod tests {
         assert!(second[0]
             .iter()
             .all(|sample| (*sample - 0.2).abs() < 0.0001));
+    }
+
+    #[test]
+    fn audio_ingress_reads_past_one_chunk_and_retains_partial_records() {
+        struct Available(std::io::Cursor<Vec<u8>>);
+        impl Read for Available {
+            fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+                match self.0.read(bytes) {
+                    Ok(0) => Err(std::io::ErrorKind::WouldBlock.into()),
+                    result => result,
+                }
+            }
+        }
+        let mut record = Vec::new();
+        record.extend_from_slice(&AUDIO_FRAME_MAGIC);
+        record.extend_from_slice(&[AUDIO_FRAME_MARKER, AUDIO_CHUNK_KIND]);
+        record.extend_from_slice(&9000_u32.to_le_bytes());
+        record.extend_from_slice(&vec![0; 9000]);
+        let mut ingress = record.clone();
+        ingress.extend_from_slice(&record[..5]);
+        let mut audio = Available(std::io::Cursor::new(ingress.clone()));
+        let mut bytes = Vec::new();
+        assert!(read_available_audio(&mut audio, &mut bytes).unwrap());
+        assert_eq!(
+            bytes, ingress,
+            "a drain must inspect more than one read buffer"
+        );
+        assert_eq!(
+            take_audio_record(&mut bytes).unwrap().unwrap().1.len(),
+            9000
+        );
+        assert!(take_audio_record(&mut bytes).unwrap().is_none());
+        assert_eq!(bytes, record[..5]);
+        audio.0.get_mut().extend_from_slice(&record[5..]);
+        assert!(read_available_audio(&mut audio, &mut bytes).unwrap());
+        assert!(take_audio_record(&mut bytes).unwrap().is_some());
+        assert!(bytes.is_empty());
     }
 
     #[test]
