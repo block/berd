@@ -141,7 +141,8 @@ pub(crate) fn persistable_arguments(arguments: &[String]) -> Vec<String> {
         .filter(|pair| {
             !matches!(
                 pair[0].as_str(),
-                "--realtime-url" | "--stt-url" | "--tts-url"
+                // The caller keeps the Spokesperson's options and passes them each call.
+                "--realtime-url" | "--stt-url" | "--tts-url" | "--spokesperson-options"
             )
         })
         .flatten()

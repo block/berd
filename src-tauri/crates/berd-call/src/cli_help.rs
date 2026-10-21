@@ -151,6 +151,7 @@ Each form also accepts:
     [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH]
     [--mode conventional|expert-spokesperson] [--allow-direct-agent-speech]
     [--spokesperson-voice NAME] [--spokesperson-rate 0.25..1.5]
+    [--spokesperson-options JSON]
     [--realtime-url WS_URL] [--stt-url WS_URL] [--tts-url HTTP_URL]
 
 The host owns microphone capture, audio playback, transcript delivery, and
@@ -162,7 +163,13 @@ In expert-spokesperson mode, the Expert speaks through the Spokesperson.
 --allow-direct-agent-speech also lets it speak to the user itself, through the
 configured TTS backend, in its own voice beside the Spokesperson's. --spokesperson-voice then
 chooses the Spokesperson's own voice. It speaks as close to --rate as it can, unless
---spokesperson-rate chooses its own speed."#;
+--spokesperson-rate chooses its own speed. --spokesperson-options sets the rest of its
+realtime session, as Berd's Advanced settings do, with a JSON object of model,
+transcriptionModel, transcriptionLanguage, transcriptionPrompt, turnDetection
+(server_vad|semantic_vad), eagerness, interruptResponse, createResponse,
+vadThreshold, prefixPaddingMs, silenceDurationMs, idleTimeoutMs, noiseReduction
+(off|near_field|far_field), reasoningEffort and maxOutputTokens. Saved settings
+don't keep it, so pass it on each start."#;
 
 const SYNTHESIZE_HELP: &str = r#"Render text through a configured TTS backend into a new WAV file.
 
