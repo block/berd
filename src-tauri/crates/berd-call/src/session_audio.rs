@@ -887,6 +887,10 @@ impl PcmAudioOutput for RemotePcmAudioOutput {
         state.phase == Phase::Drained && state.suspension == SuspensionPhase::Running
     }
 
+    fn drain_timeout_paused(&self) -> bool {
+        self.state.lock().expect("remote output state").suspension == SuspensionPhase::Suspended
+    }
+
     fn check_health(&self) -> Result<(), String> {
         let state = self.state.lock().expect("remote output state");
         if state.phase == Phase::Failed {
@@ -1087,6 +1091,7 @@ mod tests {
         assert_eq!(kind, AUDIO_CHUNK_KIND);
 
         output.request_suspend().unwrap();
+        assert!(!output.drain_timeout_paused());
         assert_eq!(
             controls.recv_timeout(Duration::from_millis(30)).unwrap(),
             AudioOutputControlRequest::Suspend { speech_id: 7 }
@@ -1099,12 +1104,14 @@ mod tests {
                 played_frames: 4096,
             })
             .unwrap();
+        assert!(output.drain_timeout_paused());
         host.set_read_timeout(Some(Duration::from_millis(30)))
             .unwrap();
         let mut byte = [0];
         assert!(host.read(&mut byte).is_err());
 
         output.request_resume().unwrap();
+        assert!(!output.drain_timeout_paused());
         assert_eq!(
             controls.recv_timeout(Duration::from_millis(30)).unwrap(),
             AudioOutputControlRequest::Resume { speech_id: 7 }
@@ -1459,6 +1466,30 @@ mod tests {
                 played_frames: 4096,
             })
             .unwrap();
+        let current = Arc::clone(&output);
+        let (poll_sender, poll_receiver) = mpsc::channel();
+        let (result_sender, result_receiver) = mpsc::channel();
+        let drainer = thread::spawn(move || {
+            let active = AtomicBool::new(true);
+            let mut playback =
+                berd_call::OutboundPlayback::new(current.as_ref(), &active, 24_000, 0).unwrap();
+            let result = playback.finish(
+                berd_call::DrainPolicy {
+                    timeout: Some(Duration::from_millis(40)),
+                    ..berd_call::DrainPolicy::default()
+                },
+                &mut |_| {
+                    let _ = poll_sender.send(());
+                    Ok(())
+                },
+            );
+            result_sender.send(result).unwrap();
+        });
+        poll_receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(matches!(
+            result_receiver.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
         output.request_resume().unwrap();
         assert_eq!(
             controls.recv_timeout(Duration::from_millis(30)).unwrap(),
@@ -1471,6 +1502,14 @@ mod tests {
             .unwrap();
         assert!(output.is_drained());
         finisher.join().unwrap().unwrap();
+        assert_eq!(
+            result_receiver
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap()
+                .unwrap(),
+            berd_call::OutboundOutcome::Completed
+        );
+        drainer.join().unwrap();
     }
 
     #[test]
