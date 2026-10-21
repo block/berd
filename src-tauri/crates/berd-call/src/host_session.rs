@@ -385,11 +385,13 @@ fn start_session(
     spawn_stdout_reader(child.take_stdout()?, event_tx)?;
     let (audio_command_tx, audio_command_rx) = mpsc::sync_channel(16);
     let (failure_tx, failure_rx) = mpsc::sync_channel(1);
+    let audio_playing = Arc::new(AtomicBool::new(false));
     spawn_audio_host(
         child.take_audio()?,
         Arc::clone(&writer),
         audio_command_rx,
         failure_tx.clone(),
+        Arc::clone(&audio_playing),
     )?;
 
     send_request(
@@ -413,6 +415,7 @@ fn start_session(
         expert_spokesperson,
     );
     actor.saved = saved;
+    actor.audio_playing = audio_playing;
     actor
         .muted
         .store(muted.load(Ordering::SeqCst), Ordering::SeqCst);
@@ -990,6 +993,8 @@ struct SessionActor {
     restart: Option<PendingRestart>,
     // When a restart waiting for speech to end stops waiting.
     restart_not_after: Instant,
+    // Set by the audio host while it plays speech, including the Spokesperson's own replies.
+    audio_playing: Arc<AtomicBool>,
     muted: Arc<AtomicBool>,
     status_sounds: Arc<Mutex<StatusSounds>>,
     // Requested sounds and any mode change, committed when the session applies them.
@@ -1089,6 +1094,7 @@ impl SessionActor {
             stopping: false,
             restart: None,
             restart_not_after: Instant::now(),
+            audio_playing: Arc::default(),
             muted: Arc::new(AtomicBool::new(false)),
             status_sounds: Arc::default(),
             pending_status_sounds: BTreeMap::new(),
@@ -1210,7 +1216,9 @@ impl SessionActor {
 
     /// Shuts the session down for a requested restart once no speech is playing or queued, or the wait is up.
     fn start_restart_between_replies(&mut self) -> Result<(), String> {
-        let quiet = self.pending_speak.is_none() && self.waiting_speaks.is_empty();
+        let quiet = self.pending_speak.is_none()
+            && self.waiting_speaks.is_empty()
+            && !self.audio_playing.load(Ordering::SeqCst);
         if !self.stopping
             && self.restart.is_some()
             && (quiet || Instant::now() >= self.restart_not_after)
@@ -2554,6 +2562,7 @@ fn spawn_audio_host(
     writer: Arc<Mutex<ChildStdin>>,
     commands: Receiver<AudioCommand>,
     failures: SyncSender<String>,
+    playing: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let flags = unsafe { libc::fcntl(audio.as_raw_fd(), libc::F_GETFL) };
     if flags < 0
@@ -2567,6 +2576,14 @@ fn spawn_audio_host(
     thread::Builder::new()
         .name("berd-call-audio-host".into())
         .spawn(move || {
+            // However this thread ends, it stops claiming that audio is playing.
+            struct Clear(Arc<AtomicBool>);
+            impl Drop for Clear {
+                fn drop(&mut self) {
+                    self.0.store(false, Ordering::SeqCst);
+                }
+            }
+            let playing = Clear(playing);
             let mut bytes = Vec::new();
             let mut playback = AudioPlaybackState::Idle;
             let mut pending_suspension: Option<PendingSuspension> = None;
@@ -2660,6 +2677,10 @@ fn spawn_audio_host(
                 if let Some((speech_id, played_frames)) = finished {
                     playback.finish(speech_id, played_frames);
                 }
+                playing.0.store(
+                    matches!(playback, AudioPlaybackState::Playing(_)),
+                    Ordering::SeqCst,
+                );
                 if pending_suspension
                     .as_ref()
                     .is_some_and(|pending| Instant::now() >= pending.ready_at)
@@ -3989,6 +4010,58 @@ mod tests {
             playing.try_recv().unwrap().unwrap_err(),
             "voice session restarted"
         );
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn a_restart_waits_for_the_spokesperson_reply_playing_without_a_speak() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        // The Spokesperson is mid-reply: audio plays, but no speak was requested.
+        actor.audio_playing.store(true, Ordering::SeqCst);
+        assert!(actor.pending_speak.is_none() && actor.waiting_speaks.is_empty());
+        let (restart, _restarted) = restart_command();
+        actor.handle_command(restart).unwrap();
+        actor.poll().unwrap();
+        assert!(!actor.stopping);
+        assert!(actor.restart.is_some());
+        // Between replies, the restart goes ahead.
+        actor.audio_playing.store(false, Ordering::SeqCst);
+        actor.poll().unwrap();
+        assert!(actor.stopping);
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn a_restart_does_not_wait_forever_for_audio_that_never_ends() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        actor.audio_playing.store(true, Ordering::SeqCst);
+        let (restart, _restarted) = restart_command();
+        actor.handle_command(restart).unwrap();
+        actor.poll().unwrap();
+        assert!(!actor.stopping);
+        actor.restart_not_after = Instant::now();
+        actor.poll().unwrap();
+        assert!(actor.stopping);
         drop(actor);
         assert!(child.wait().unwrap().success());
     }
