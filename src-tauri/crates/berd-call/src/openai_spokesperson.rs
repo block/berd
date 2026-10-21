@@ -1752,6 +1752,7 @@ mod tests {
     async fn input_cutover_waits_for_committed_transcription_terminal() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+        let (transcribe, proceed) = tokio::sync::oneshot::channel();
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut socket = accept_hdr_async(stream, require_test_authorization)
@@ -1777,7 +1778,7 @@ mod tests {
             )
             .await;
             send_json(&mut socket, json!({"type":"input_audio_buffer.cleared"})).await;
-            tokio::time::sleep(Duration::from_millis(120)).await;
+            proceed.await.unwrap();
             send_json(
                 &mut socket,
                 json!({
@@ -1805,6 +1806,7 @@ mod tests {
             SpokespersonEvent::UserSpeaking { active: true, .. }
         ));
         assert!(events.recv_timeout(Duration::from_millis(60)).is_err());
+        transcribe.send(()).unwrap();
         assert!(matches!(
             events.recv_timeout(Duration::from_secs(2)).unwrap(),
             SpokespersonEvent::UserFinal { .. }
