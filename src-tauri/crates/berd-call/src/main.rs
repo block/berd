@@ -3230,9 +3230,8 @@ impl InputResets {
         while let Some(clearing) = self.clearing.front() {
             match clearing.try_recv() {
                 Err(mpsc::TryRecvError::Empty) => return Ok(()),
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    return Err("Spokesperson runtime is closed".into())
-                }
+                // The runtime ended; its terminal event decides what the clear meant.
+                Err(mpsc::TryRecvError::Disconnected) => return Ok(()),
                 Ok(result) => result?,
             }
             self.clearing.pop_front();
@@ -3240,6 +3239,12 @@ impl InputResets {
         self.replies
             .drain(..)
             .try_for_each(|reply| write_message(writer, &reply))
+    }
+
+    /// A lost session takes its input with it, so its outstanding clears are done.
+    fn session_ended(&mut self, writer: &mut impl Write) -> Result<(), String> {
+        self.clearing.clear();
+        self.poll(writer)
     }
 }
 
@@ -4057,6 +4062,7 @@ fn run_expert_spokesperson_session(
                             SpokespersonEvent::SessionLost(message) => (message, true),
                             _ => unreachable!("matched a session terminal event"),
                         };
+                        input_resets.session_ended(&mut writer)?;
                         if let Some(request) = queued_tts_settings.take() {
                             reject_spokesperson_tts_settings(
                                 request.id,
@@ -9133,6 +9139,32 @@ mod tests {
             )
             .unwrap_err(),
             "Spokesperson queued more than 15 seconds of audio in total"
+        );
+    }
+
+    #[test]
+    fn input_controls_waiting_on_a_lost_session_answer_once_it_ends() {
+        let (completed, result) = mpsc::sync_channel(1);
+        let mut resets = InputResets::default();
+        let mut output = Vec::new();
+        resets
+            .apply(
+                SessionMessage::InputResetApplied { id: 1 },
+                true,
+                || Ok(result),
+                &mut output,
+            )
+            .unwrap();
+        // The session is lost with the clear outstanding.
+        drop(completed);
+        resets.poll(&mut output).unwrap();
+        assert!(!resets.idle());
+        assert!(output.is_empty());
+        resets.session_ended(&mut output).unwrap();
+        assert!(resets.idle());
+        assert_eq!(
+            messages(&output),
+            [json!({"type":"input_reset_applied","id":1})]
         );
     }
 
