@@ -441,8 +441,12 @@ impl StatusSoundPlayer {
 const STATUS_SOUND_OUTPUT_TAIL: Duration = Duration::from_millis(100);
 
 #[cfg(target_os = "macos")]
+const STATUS_SOUND_DRAIN_GRACE: Duration = Duration::from_secs(2);
+
+#[cfg(target_os = "macos")]
 struct ActiveStatusSound {
-    player: crate::macos_audio_output::PocketAudioPlayer,
+    player: Box<dyn crate::PcmAudioOutput>,
+    drain_deadline: Instant,
     output_tail_deadline: Option<Instant>,
     _input_activity: Option<crate::input::AssistantActivityGuard>,
 }
@@ -500,7 +504,10 @@ impl StatusSoundPlayer {
             .transpose()?;
         player.enqueue(&samples)?;
         self.active = Some(ActiveStatusSound {
-            player,
+            player: Box::new(player),
+            drain_deadline: Instant::now()
+                + Duration::from_secs_f64(samples.len() as f64 / f64::from(asset.sample_rate))
+                + STATUS_SOUND_DRAIN_GRACE,
             output_tail_deadline: None,
             _input_activity: input_activity,
         });
@@ -510,7 +517,10 @@ impl StatusSoundPlayer {
     fn reap(&mut self) {
         let now = Instant::now();
         let should_clear = self.active.as_mut().is_some_and(|sound| {
-            if !sound.player.is_empty() {
+            if sound.player.check_health().is_err() || now >= sound.drain_deadline {
+                return true;
+            }
+            if !sound.player.is_drained() {
                 sound.output_tail_deadline = None;
                 return false;
             }
@@ -520,7 +530,7 @@ impl StatusSoundPlayer {
             now >= *deadline
         });
         if should_clear {
-            self.active = None;
+            self.stop();
         }
     }
 
@@ -530,7 +540,7 @@ impl StatusSoundPlayer {
 
     fn stop(&mut self) {
         if let Some(sound) = self.active.take() {
-            sound.player.stop();
+            sound.player.cancel();
         }
     }
 }
@@ -759,6 +769,78 @@ mod tests {
         runtime.set_conversation_active(false).unwrap();
         assert!(!runtime.inner.activity.lock().unwrap().is_active());
         runtime.finish().unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn failed_or_expired_pending_cue_releases_microphone_suppression() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        struct PendingOutput {
+            failed: bool,
+            cancelled: Arc<AtomicBool>,
+            controls: crate::input::VoiceInputControls,
+        }
+        impl crate::PcmAudioOutput for PendingOutput {
+            fn write(&self, _: &[f32]) -> Result<(), String> {
+                Ok(())
+            }
+            fn cancel(&self) {
+                assert!(
+                    self.controls.is_muted(),
+                    "cancel before releasing input suppression"
+                );
+                self.cancelled.store(true, Ordering::SeqCst);
+            }
+            fn is_drained(&self) -> bool {
+                false
+            }
+            fn check_health(&self) -> Result<(), String> {
+                if self.failed {
+                    Err("render failed while engine is running".into())
+                } else {
+                    Ok(())
+                }
+            }
+            fn played_frames(&self) -> u64 {
+                0
+            }
+        }
+        for (failed, expired) in [(false, false), (true, false), (false, true)] {
+            let controls = crate::input::VoiceInputControls::default();
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let mut player = StatusSoundPlayer {
+                working: Err("unused".into()),
+                waiting: Err("unused".into()),
+                active: Some(ActiveStatusSound {
+                    player: Box::new(PendingOutput {
+                        failed,
+                        cancelled: Arc::clone(&cancelled),
+                        controls: controls.clone(),
+                    }),
+                    drain_deadline: if expired {
+                        Instant::now() - Duration::from_secs(1)
+                    } else {
+                        Instant::now() + Duration::from_secs(10)
+                    },
+                    output_tail_deadline: None,
+                    _input_activity: Some(
+                        controls
+                            .begin_assistant_activity(
+                                0.65,
+                                crate::input::InputDuringTtsPolicy::SuppressInput,
+                            )
+                            .unwrap(),
+                    ),
+                }),
+            };
+            assert!(controls.is_muted());
+            player.reap();
+            assert_eq!(player.is_active(), !failed && !expired);
+            assert_eq!(controls.is_muted(), !failed && !expired);
+            assert_eq!(cancelled.load(Ordering::SeqCst), failed || expired);
+            player.stop();
+            assert!(!controls.is_muted());
+        }
     }
 
     #[cfg(target_os = "macos")]
