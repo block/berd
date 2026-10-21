@@ -4029,12 +4029,14 @@ fn run_expert_spokesperson_session(
                             LiveSideEvent::Handoff { call_id, .. } => call_id,
                             _ => return Err("live handoff did not produce a handoff ID".into()),
                         };
-                        runtime.as_ref().expect("initialized runtime").send(
+                        // A provider that expired right behind the handoff has already
+                        // closed the runtime. Its queued terminal event settles the handoff.
+                        let _ = runtime.as_ref().expect("initialized runtime").send(
                             SpokespersonCommand::Provider(accepted_handoff_tool_output(
                                 &call_id,
                                 &handoff_id,
                             )?),
-                        )?;
+                        );
                     }
                     event @ (SpokespersonEvent::Expired(_) | SpokespersonEvent::SessionLost(_)) => {
                         let (message, connection_lost) = match event {
