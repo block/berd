@@ -235,6 +235,13 @@ impl Transcript {
     }
 }
 
+fn input_activity_line(speaking: bool, recognizing: bool) -> String {
+    format!(
+        "0\tinput_activity\t{}",
+        json!({"speaking": speaking, "recognizing": recognizing})
+    )
+}
+
 fn print_flushed(line: &str) -> Result<(), String> {
     println!("{line}");
     std::io::stdout()
@@ -1440,8 +1447,18 @@ impl SessionActor {
 
     fn handle_event(&mut self, event: SessionMessage) -> Result<(), String> {
         match event {
-            SessionMessage::InputSpeaking { active } => self.input_speaking = active,
-            SessionMessage::RecognitionPending { active } => self.recognition_pending = active,
+            SessionMessage::InputSpeaking { active } => {
+                if self.input_speaking != active {
+                    self.input_speaking = active;
+                    self.stream_input_activity()?;
+                }
+            }
+            SessionMessage::RecognitionPending { active } => {
+                if self.recognition_pending != active {
+                    self.recognition_pending = active;
+                    self.stream_input_activity()?;
+                }
+            }
             SessionMessage::State {
                 id,
                 confirmed_token,
@@ -1539,6 +1556,7 @@ impl SessionActor {
             SessionMessage::InputMuteApplied { id, active } => {
                 // Commit before acknowledging so a restart cannot read a stale value.
                 self.muted.store(active, Ordering::SeqCst);
+                self.stream_input_activity()?;
                 if let Some(response) = self.pending_settings.remove(&id) {
                     let _ = response.send(Ok(json!({"muted":active})));
                 }
@@ -1666,6 +1684,17 @@ impl SessionActor {
                 }
             }
         }
+    }
+
+    /// Ephemeral UI state never enters the transcript or wakes a Codex task.
+    fn stream_input_activity(&self) -> Result<(), String> {
+        if matches!(&*self.transcript, Transcript::Stdout { .. }) {
+            print_flushed(&input_activity_line(
+                self.input_speaking && !self.muted.load(Ordering::SeqCst),
+                self.recognition_pending && !self.muted.load(Ordering::SeqCst),
+            ))?;
+        }
+        Ok(())
     }
 
     fn stream_live_event(
@@ -2198,6 +2227,8 @@ impl DefaultInputCapture {
             })?
         {
             actor.input_speaking = false;
+            actor.recognition_pending = false;
+            actor.stream_input_activity()?;
         }
         Ok(())
     }
@@ -3793,6 +3824,22 @@ mod tests {
             Arc::new(Transcript::Stdout { live: false }),
             false,
         )
+    }
+
+    #[test]
+    fn input_activity_is_cursorless_and_preserves_both_states() {
+        for speaking in [false, true] {
+            for recognizing in [false, true] {
+                let line = input_activity_line(speaking, recognizing);
+                let fields: Vec<_> = line.split('\t').collect();
+                assert_eq!(fields[..2], ["0", "input_activity"]);
+                let state: Value = serde_json::from_str(fields[2]).unwrap();
+                assert_eq!(
+                    state,
+                    json!({"speaking": speaking, "recognizing": recognizing})
+                );
+            }
+        }
     }
 
     #[test]

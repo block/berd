@@ -442,3 +442,7 @@ rejects a warmup-inclusive workload above 20 recognition commits or 120 seconds
 of streamed PCM. Endpoint and model overrides use the same environment variables
 as the session; reports record only which source supplied them and never include
 the key or endpoint value.
+
+### Input activity in stdout streams
+
+`start --stream` (including `--stream live`) emits ephemeral `0\tinput_activity\t{"speaking":true,"recognizing":false}` rows when input speech or recognition state changes. Both booleans are snapshots; show activity while either is true. These rows have cursor zero, are not utterances, and must never advance a speech cursor, trigger an agent turn, or enter transcript history. They are not delivered to Codex tasks. Clear client activity on session restart, stream end, or failure. Older CLIs omit these rows.
