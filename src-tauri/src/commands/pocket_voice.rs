@@ -396,13 +396,9 @@ pub(crate) enum VoiceInterruptionMode {
 }
 
 #[cfg_attr(not(any(test, target_os = "macos")), allow(dead_code))]
-pub(crate) fn resolve_input_during_tts_policy(
-    mode: VoiceInterruptionMode,
-    output_device: Option<&str>,
-) -> InputDuringTtsPolicy {
+pub(crate) fn resolve_input_during_tts_policy(mode: VoiceInterruptionMode) -> InputDuringTtsPolicy {
     match mode {
-        VoiceInterruptionMode::Automatic => InputDuringTtsPolicy::Auto
-            .resolve_for_speakers(output_device_uses_speakers(output_device)),
+        VoiceInterruptionMode::Automatic => InputDuringTtsPolicy::Auto,
         VoiceInterruptionMode::AllowInterruptions => InputDuringTtsPolicy::AllowBargeIn,
         VoiceInterruptionMode::PreventFeedback => InputDuringTtsPolicy::SuppressInput,
     }
@@ -781,9 +777,7 @@ pub fn start_pocket_voice_stream(
             .ok_or_else(|| format!("Unknown selected Pocket voice: {voice_id}"))?;
         let session = begin_playback(&state, "Pocket voice playback is already active", &base)?;
         let output_device = selected_output_device();
-        let effective_output_device = effective_output_device_name(output_device.as_deref());
-        let input_during_tts =
-            resolve_input_during_tts_policy(interruption_mode, effective_output_device.as_deref());
+        let input_during_tts = resolve_input_during_tts_policy(interruption_mode);
         let (sender, receiver) = mpsc::channel();
         {
             let mut playback = state
@@ -2510,46 +2504,15 @@ mod tests {
     #[test]
     fn interruption_mode_resolves_shared_input_policy() {
         assert_eq!(
-            resolve_input_during_tts_policy(
-                VoiceInterruptionMode::Automatic,
-                Some("MacBook Pro Speakers"),
-            ),
-            InputDuringTtsPolicy::SuppressInput
+            resolve_input_during_tts_policy(VoiceInterruptionMode::Automatic),
+            InputDuringTtsPolicy::Auto
         );
         assert_eq!(
-            resolve_input_during_tts_policy(VoiceInterruptionMode::Automatic, Some("AirPods Pro"),),
+            resolve_input_during_tts_policy(VoiceInterruptionMode::AllowInterruptions),
             InputDuringTtsPolicy::AllowBargeIn
         );
         assert_eq!(
-            resolve_input_during_tts_policy(
-                VoiceInterruptionMode::Automatic,
-                Some("USB Headphones"),
-            ),
-            InputDuringTtsPolicy::AllowBargeIn
-        );
-        assert_eq!(
-            resolve_input_during_tts_policy(
-                VoiceInterruptionMode::Automatic,
-                Some("Studio Display Audio"),
-            ),
-            InputDuringTtsPolicy::AllowBargeIn
-        );
-        assert_eq!(
-            resolve_input_during_tts_policy(VoiceInterruptionMode::Automatic, None,),
-            InputDuringTtsPolicy::AllowBargeIn
-        );
-        assert_eq!(
-            resolve_input_during_tts_policy(
-                VoiceInterruptionMode::AllowInterruptions,
-                Some("MacBook Pro Speakers"),
-            ),
-            InputDuringTtsPolicy::AllowBargeIn
-        );
-        assert_eq!(
-            resolve_input_during_tts_policy(
-                VoiceInterruptionMode::PreventFeedback,
-                Some("AirPods Pro"),
-            ),
+            resolve_input_during_tts_policy(VoiceInterruptionMode::PreventFeedback),
             InputDuringTtsPolicy::SuppressInput
         );
     }
