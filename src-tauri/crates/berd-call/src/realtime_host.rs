@@ -36,6 +36,7 @@ struct Playback {
     output: Box<dyn PcmAudioOutput>,
     delivery: RealtimeAudioDelivery,
     server_response_done: bool,
+    loudness: crate::spokesperson_loudness::SpokespersonLoudness,
 }
 
 #[derive(Default)]
@@ -82,7 +83,7 @@ impl RealtimePlaybackHost {
                 item_id,
                 output_index,
                 content_index,
-                samples,
+                mut samples,
             } => {
                 if self.interrupted_responses.contains(&response_id) {
                     return Ok(false);
@@ -102,6 +103,7 @@ impl RealtimePlaybackHost {
                         output: create_output()?,
                         delivery: RealtimeAudioDelivery::default(),
                         server_response_done: false,
+                        loudness: Default::default(),
                     });
                 }
                 let active = self.playback.as_mut().expect("playback was created");
@@ -112,6 +114,7 @@ impl RealtimePlaybackHost {
                     samples.len() as u64,
                     false,
                 )?;
+                active.loudness.process(&mut samples);
                 active.output.write(&samples)?;
             }
             SpokespersonEvent::ResponseFinished { response_id, .. } => {
@@ -902,7 +905,7 @@ fn reject_managed_update(
 #[cfg(test)]
 mod tests {
     use std::{
-        sync::{atomic::AtomicU64, mpsc, Arc},
+        sync::{atomic::AtomicU64, mpsc, Arc, Mutex},
         time::Duration,
     };
 
@@ -1142,6 +1145,46 @@ mod tests {
             .unwrap();
         host.finish().unwrap();
         server.await.unwrap();
+    }
+
+    #[test]
+    fn playback_levels_spokesperson_audio_before_the_output_sink() {
+        struct RecordingOutput(Arc<Mutex<Vec<f32>>>);
+        impl PcmAudioOutput for RecordingOutput {
+            fn write(&self, samples: &[f32]) -> Result<(), String> {
+                self.0.lock().unwrap().extend_from_slice(samples);
+                Ok(())
+            }
+            fn cancel(&self) {}
+            fn is_drained(&self) -> bool {
+                true
+            }
+            fn check_health(&self) -> Result<(), String> {
+                Ok(())
+            }
+            fn played_frames(&self) -> u64 {
+                0
+            }
+        }
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let mut host = RealtimePlaybackHost::default();
+        host.handle(
+            SpokespersonEvent::AudioDelta {
+                response_id: "response".into(),
+                item_id: "item".into(),
+                output_index: 0,
+                content_index: 0,
+                samples: vec![0.1, 0.9, -0.9],
+            },
+            &mut |_| Ok(()),
+            &mut || Ok(Box::new(RecordingOutput(Arc::clone(&captured))) as Box<dyn PcmAudioOutput>),
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+        let output = captured.lock().unwrap();
+        assert!((output[0] - 0.16).abs() < 0.00001);
+        assert!(output.iter().all(|sample| sample.abs() <= 0.95));
+        assert_eq!(output.len(), 3);
     }
 
     #[test]
