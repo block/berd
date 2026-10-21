@@ -3,9 +3,9 @@ use std::io::{self, BufWriter, Read, Write};
 use std::os::fd::RawFd;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc::{self, Receiver, SyncSender},
-    Arc,
+    Arc, Mutex,
 };
 use std::thread;
 use std::time::{Duration, Instant};
@@ -2187,7 +2187,17 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
         controls: control_tx.clone(),
         pending: HashSet::new(),
     };
-    thread::spawn(move || read_framed_requests(io::stdin().lock(), control_tx, pcm_tx));
+    let input_progress = Arc::new(SessionInputProgress::default());
+    let reader_progress = Arc::clone(&input_progress);
+    thread::spawn(move || {
+        read_framed_requests(
+            io::stdin().lock(),
+            control_tx,
+            pcm_tx,
+            &reader_progress,
+            &mut io::stderr(),
+        )
+    });
     let audio_transport = Arc::new(unsafe { AudioPipeTransport::from_raw_fd(pcm_output_fd)? });
     let (playback_tx, playback_rx) = mpsc::channel();
     let (audio_control_tx, audio_control_rx) = mpsc::channel();
@@ -2208,9 +2218,11 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
     let mut processed_pcm = 0_u64;
     let mut held: Option<HeldPrepare> = None;
     let mut active: Option<ActivePlayback> = None;
+    input_progress.enter("status_assets");
     let mut status_sound_runtime = StatusSoundRuntime::default();
 
     loop {
+        input_progress.enter("voice_events");
         if let Some(events) = input_events.as_mut() {
             while let Ok(event) = events.try_recv() {
                 handle_voice_input_event(
@@ -2222,6 +2234,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 )?;
             }
         }
+        input_progress.enter("playback");
         while let Ok(request) = audio_control_rx.try_recv() {
             write_audio_control_request(request, active.as_ref(), &mut writer)?;
         }
@@ -2249,6 +2262,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 return Err(message);
             }
         }
+        input_progress.enter("maintenance");
         poll_tts_configuration_update(
             Instant::now(),
             &tts_configuration_rx,
@@ -2279,11 +2293,13 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
             )?;
         }
         let conversation_active = standard_session_status_cues_suppressed(&core, active.is_some());
+        input_progress.enter("status_sounds");
         let status_sound_result = status_sound_runtime.poll(conversation_active);
         if let Err(message) = status_sound_result {
             eprintln!("status sound playback disabled: {message}");
         }
 
+        input_progress.enter("receive");
         let Some(input) = receive_session_input(
             &control_rx,
             &pcm_rx,
@@ -2292,6 +2308,14 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
         ) else {
             continue;
         };
+        input_progress
+            .processed
+            .store(processed_pcm, Ordering::Relaxed);
+        input_progress.enter(match &input {
+            Input::Pcm(_) => "pcm",
+            Input::Request(SessionRequest::Hello { .. }) => "hello_tts",
+            _ => "control",
+        });
         let Some(input) = voice_builds.filter(input, tts_slot.as_ref(), &mut writer)? else {
             continue;
         };
@@ -2408,6 +2432,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                         return Ok(());
                     }
                 };
+                input_progress.enter("hello_stt");
                 let (runtime, mut events) =
                     match create_input_runtime(&config.stt, config.endpoints.stt.as_deref()) {
                         Ok(runtime) => runtime,
@@ -2433,6 +2458,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     finish_result?;
                     return Ok(());
                 }
+                input_progress.enter("hello_ready");
                 input_controls = Some(runtime.controls());
                 input_runtime = Some(runtime);
                 input_events = Some(events);
@@ -3530,7 +3556,17 @@ fn run_expert_spokesperson_session(
         controls: control_tx.clone(),
         pending: HashSet::new(),
     };
-    thread::spawn(move || read_framed_requests(io::stdin().lock(), control_tx, pcm_tx));
+    let input_progress = Arc::new(SessionInputProgress::default());
+    let reader_progress = Arc::clone(&input_progress);
+    thread::spawn(move || {
+        read_framed_requests(
+            io::stdin().lock(),
+            control_tx,
+            pcm_tx,
+            &reader_progress,
+            &mut io::stderr(),
+        )
+    });
     let audio_transport = Arc::new(unsafe { AudioPipeTransport::from_raw_fd(pcm_output_fd)? });
     let (audio_control_tx, audio_control_rx) = mpsc::channel();
     let (playback_tx, playback_rx) = mpsc::channel::<LivePlaybackResult>();
@@ -3572,9 +3608,11 @@ fn run_expert_spokesperson_session(
     let mut input_resets = InputResets::default();
     let mut queued_tts_settings = VoiceUpdateQueue::<PendingSpokespersonSettingsUpdate>::default();
     let mut pending_voice_update: Option<VoiceUpdateTransaction> = None;
+    input_progress.enter("status_assets");
     let mut status_sound_runtime = StatusSoundRuntime::default();
 
     loop {
+        input_progress.enter("maintenance");
         if route_checked.elapsed() >= Duration::from_millis(100) {
             auto_input_policy = InputDuringTtsPolicy::Auto.resolve(None);
             route_checked = Instant::now();
@@ -3727,6 +3765,7 @@ fn run_expert_spokesperson_session(
                 }
             };
         }
+        input_progress.enter("voice_events");
         if let Some(events) = runtime_events.as_ref() {
             if let Ok(event) = events.try_recv() {
                 match event {
@@ -4330,6 +4369,7 @@ fn run_expert_spokesperson_session(
             }
         }
         flush_active_live_playback(&active, &mut responses)?;
+        input_progress.enter("playback");
         while let Ok(request) = audio_control_rx.try_recv() {
             let speech_id = match request {
                 AudioOutputControlRequest::Suspend { speech_id }
@@ -4443,6 +4483,7 @@ fn run_expert_spokesperson_session(
                 }
             }
         }
+        input_progress.enter("maintenance");
         poll_tts_configuration_update(
             Instant::now(),
             &tts_configuration_rx,
@@ -4573,11 +4614,13 @@ fn run_expert_spokesperson_session(
         }
         let conversation_active =
             expert_session_status_cues_suppressed(&turn_gate, active.is_some());
+        input_progress.enter("status_sounds");
         let status_sound_result = status_sound_runtime.poll(conversation_active);
         if let Err(message) = status_sound_result {
             eprintln!("status sound playback disabled: {message}");
         }
 
+        input_progress.enter("receive");
         let Some(input) = receive_session_input(
             &control_rx,
             &pcm_rx,
@@ -4586,6 +4629,14 @@ fn run_expert_spokesperson_session(
         ) else {
             continue;
         };
+        input_progress
+            .processed
+            .store(processed_pcm, Ordering::Relaxed);
+        input_progress.enter(match &input {
+            Input::Pcm(_) => "pcm",
+            Input::Request(SessionRequest::Hello { .. }) => "hello_tts",
+            _ => "control",
+        });
         let Some(input) = voice_builds.filter(input, reply_tts.as_ref(), &mut writer)? else {
             continue;
         };
@@ -4730,6 +4781,7 @@ fn run_expert_spokesperson_session(
                     input_during_tts: input_policy.snapshot()?,
                     spokesperson: reply_tts.is_some().then(|| tts.clone()),
                 };
+                input_progress.enter("hello_stt");
                 let (created, events) =
                     OpenAiSpokespersonRuntime::spawn_observed(spokesperson_config.clone())?;
                 let readiness_deadline = Instant::now() + Duration::from_secs(30);
@@ -4750,6 +4802,7 @@ fn run_expert_spokesperson_session(
                         Err(_) => return Err("Spokesperson startup timed out".into()),
                     }
                 }
+                input_progress.enter("hello_ready");
                 runtime = Some(created);
                 runtime_events = Some(events);
                 runtime_config = Some(spokesperson_config);
@@ -8209,6 +8262,41 @@ fn write_message(writer: &mut impl Write, message: &SessionMessage) -> Result<()
         .map_err(|error| error.to_string())
 }
 
+struct SessionInputProgress {
+    phase: Mutex<(&'static str, Instant)>,
+    processed: AtomicU64,
+}
+
+impl Default for SessionInputProgress {
+    fn default() -> Self {
+        Self {
+            phase: Mutex::new(("init", Instant::now())),
+            processed: AtomicU64::new(0),
+        }
+    }
+}
+
+impl SessionInputProgress {
+    fn enter(&self, phase: &'static str) {
+        *self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = (phase, Instant::now());
+    }
+
+    fn overflow(&self, accepted: u64) -> String {
+        // Never wait on the consumer. The phase lock is held only while replacing this tuple.
+        let (phase, age) = self
+            .phase
+            .try_lock()
+            .map(|state| (state.0, state.1.elapsed().as_millis()))
+            .unwrap_or(("transition", 0));
+        // Processed counts dequeued frames, not completed recognition work; this snapshot may race.
+        let processed = self.processed.load(Ordering::Relaxed);
+        format!("berd-call: PCM overflow accepted={accepted} processed={processed} phase={phase} phase_age_ms={age}")
+    }
+}
+
 fn receive_session_input(
     control_rx: &Receiver<OrderedControl>,
     pcm_rx: &Receiver<Box<VoiceInputFrame>>,
@@ -8258,6 +8346,8 @@ fn read_framed_requests(
     mut reader: impl Read,
     control_sender: mpsc::Sender<OrderedControl>,
     pcm_sender: SyncSender<Box<VoiceInputFrame>>,
+    progress: &SessionInputProgress,
+    diagnostics: &mut impl Write,
 ) {
     let mut sent_pcm = 0_u64;
     loop {
@@ -8275,6 +8365,7 @@ fn read_framed_requests(
             Input::Pcm(frame) => match pcm_sender.try_send(frame) {
                 Ok(()) => sent_pcm = sent_pcm.saturating_add(1),
                 Err(mpsc::TrySendError::Full(_)) => {
+                    let _ = writeln!(diagnostics, "{}", progress.overflow(sent_pcm));
                     let _ = control_sender.send(OrderedControl {
                         after_pcm: sent_pcm,
                         input: Input::Invalid("session PCM input queue is full".into()),
@@ -12068,7 +12159,13 @@ mod tests {
         let (control_sender, control_receiver) = mpsc::channel();
         let (pcm_sender, pcm_receiver) = mpsc::sync_channel(3);
 
-        read_framed_requests(Cursor::new(bytes), control_sender, pcm_sender);
+        read_framed_requests(
+            Cursor::new(bytes),
+            control_sender,
+            pcm_sender,
+            &SessionInputProgress::default(),
+            &mut Vec::new(),
+        );
 
         assert!(matches!(
             control_receiver.recv().unwrap().input,
@@ -12114,7 +12211,13 @@ mod tests {
             header.extend_from_slice(&(length as u32).to_le_bytes());
             let (control_sender, control_receiver) = mpsc::channel();
             let (pcm_sender, _pcm_receiver) = mpsc::sync_channel(1);
-            read_framed_requests(Cursor::new(header), control_sender, pcm_sender);
+            read_framed_requests(
+                Cursor::new(header),
+                control_sender,
+                pcm_sender,
+                &SessionInputProgress::default(),
+                &mut Vec::new(),
+            );
             let Input::Invalid(message) = control_receiver.recv().unwrap().input else {
                 panic!("invalid frame must be terminal")
             };
@@ -12131,7 +12234,13 @@ mod tests {
         let (control_sender, control_receiver) = mpsc::channel();
         let (pcm_sender, pcm_receiver) = mpsc::sync_channel(1);
 
-        read_framed_requests(Cursor::new(bytes), control_sender, pcm_sender);
+        read_framed_requests(
+            Cursor::new(bytes),
+            control_sender,
+            pcm_sender,
+            &SessionInputProgress::default(),
+            &mut Vec::new(),
+        );
 
         assert!(pcm_receiver.recv().is_ok());
         let control = control_receiver.recv().unwrap();
@@ -12141,6 +12250,115 @@ mod tests {
         };
         assert_eq!(message, "session PCM input queue is full");
         assert!(control_receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn pcm_overflow_diagnostic_does_not_wait_for_a_phase_transition() {
+        let progress = SessionInputProgress::default();
+        let _transition = progress.phase.lock().unwrap();
+        assert_eq!(
+            progress.overflow(32),
+            "berd-call: PCM overflow accepted=32 processed=0 phase=transition phase_age_ms=0"
+        );
+    }
+
+    #[test]
+    fn pcm_overflow_reports_stalled_phase_without_reordering_input() {
+        struct GatedReader {
+            first: Cursor<Vec<u8>>,
+            rest: Cursor<Vec<u8>>,
+            reached: mpsc::Sender<()>,
+            resume: mpsc::Receiver<()>,
+            resumed: bool,
+        }
+        impl Read for GatedReader {
+            fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+                if self.first.position() < self.first.get_ref().len() as u64 {
+                    return self.first.read(bytes);
+                }
+                if !self.resumed {
+                    self.reached.send(()).unwrap();
+                    self.resume.recv_timeout(Duration::from_secs(2)).unwrap();
+                    self.resumed = true;
+                }
+                self.rest.read(bytes)
+            }
+        }
+        let frame = framed(PCM_FRAME_KIND, &[0_u8; PCM_FRAME_BYTES]);
+        let mut rest = frame.repeat(INPUT_QUEUE_CAPACITY + 1);
+        rest.extend_from_slice(&framed(JSON_FRAME_KIND, br#"{"type":"shutdown"}"#));
+        let (reached_tx, reached_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let reader = GatedReader {
+            first: Cursor::new(frame),
+            rest: Cursor::new(rest),
+            reached: reached_tx,
+            resume: resume_rx,
+            resumed: false,
+        };
+        let progress = Arc::new(SessionInputProgress::default());
+        let reader_progress = Arc::clone(&progress);
+        let (control_tx, control_rx) = mpsc::channel();
+        let (pcm_tx, pcm_rx) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
+        let worker = thread::spawn(move || {
+            let mut diagnostics = Vec::new();
+            read_framed_requests(
+                reader,
+                control_tx,
+                pcm_tx,
+                &reader_progress,
+                &mut diagnostics,
+            );
+            diagnostics
+        });
+        reached_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let mut pending = None;
+        let mut processed = 0;
+        assert!(matches!(
+            receive_session_input(&control_rx, &pcm_rx, &mut pending, &mut processed),
+            Some(Input::Pcm(_))
+        ));
+        progress.processed.store(processed, Ordering::Relaxed);
+        *progress.phase.lock().unwrap() =
+            ("status_sounds", Instant::now() - Duration::from_secs(1));
+        resume_tx.send(()).unwrap();
+        let control = control_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(control.after_pcm, 1 + INPUT_QUEUE_CAPACITY as u64);
+        assert!(
+            matches!(control.input, Input::Invalid(ref message) if message == "session PCM input queue is full")
+        );
+        assert!(control_rx.recv_timeout(Duration::from_secs(2)).is_err());
+        let diagnostic = String::from_utf8(worker.join().unwrap()).unwrap();
+        assert!(
+            diagnostic.starts_with(
+                "berd-call: PCM overflow accepted=33 processed=1 phase=status_sounds phase_age_ms="
+            ),
+            "{diagnostic:?}"
+        );
+        assert!(
+            diagnostic
+                .trim()
+                .rsplit('=')
+                .next()
+                .unwrap()
+                .parse::<u64>()
+                .unwrap()
+                >= 1000
+        );
+        assert_eq!(diagnostic.lines().count(), 1);
+        assert!(diagnostic.len() < 200);
+        // The fatal control remains behind every accepted frame.
+        pending = Some(control);
+        for _ in 0..INPUT_QUEUE_CAPACITY {
+            assert!(matches!(
+                receive_session_input(&control_rx, &pcm_rx, &mut pending, &mut processed),
+                Some(Input::Pcm(_))
+            ));
+        }
+        assert!(matches!(
+            receive_session_input(&control_rx, &pcm_rx, &mut pending, &mut processed),
+            Some(Input::Invalid(_))
+        ));
     }
 
     #[test]
