@@ -8,6 +8,7 @@ use std::net::TcpListener;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 
 const CAPABILITY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -16,12 +17,14 @@ struct Fixture(PathBuf);
 
 impl Fixture {
     fn new(port: u16) -> Self {
+        static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
+        let sequence = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         let dir = std::env::temp_dir().join(format!(
-            "berdctl-discovery-integration-{}-{unique}",
+            "berdctl-discovery-integration-{}-{unique}-{sequence}",
             std::process::id()
         ));
         fs::create_dir(&dir).unwrap();
