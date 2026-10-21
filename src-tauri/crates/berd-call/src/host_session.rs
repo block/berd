@@ -2216,7 +2216,7 @@ impl DefaultInputCapture {
             .map_err(Clone::clone);
         let writer = &self.writer;
         let failures = &self.failures;
-        if self
+        let change = self
             .recovery
             .reconcile(now, key, failed, InputCapture::stop, || {
                 // The previous stream and its forwarder have stopped before this reset.
@@ -2230,8 +2230,8 @@ impl DefaultInputCapture {
                     self.muted.clone(),
                     self.mute_epoch.clone(),
                 )
-            })?
-        {
+            })?;
+        if change.invalidated || change.opened {
             actor.reset_input_activity()?;
         }
         Ok(())
@@ -3878,6 +3878,12 @@ mod tests {
                 (false, true),
                 (true, true),
                 (false, false),
+                (true, false),
+                (true, true),
+                (false, false),
+                (true, false),
+                (true, true),
+                (false, false),
             ]
             .into_iter()
             .map(|(speaking, recognizing)| json!({"speaking":speaking, "recognizing":recognizing}))
@@ -3923,6 +3929,39 @@ mod tests {
             actor
                 .handle_event(SessionMessage::InputSpeaking { active: false })
                 .unwrap();
+            for device_missing in [true, false] {
+                actor
+                    .handle_event(SessionMessage::InputSpeaking { active: true })
+                    .unwrap();
+                actor
+                    .handle_event(SessionMessage::RecognitionPending { active: true })
+                    .unwrap();
+                let mut recovery =
+                    crate::microphone_recovery::MicrophoneRecovery::new("input".into(), ());
+                let change = recovery
+                    .reconcile(
+                        Instant::now(),
+                        if device_missing {
+                            Err("unavailable".into())
+                        } else {
+                            Ok("input".into())
+                        },
+                        true,
+                        |_| Ok(()),
+                        || Err("replacement open failed".into()),
+                    )
+                    .unwrap();
+                assert!(change.invalidated);
+                assert!(!change.opened);
+                if change.invalidated || change.opened {
+                    actor.reset_input_activity().unwrap();
+                }
+                assert!(
+                    !actor.input_speaking && !actor.recognition_pending,
+                    "invalidated capture must clear activity before recovery retries"
+                );
+                assert!(recovery.capture().is_none());
+            }
             assert_eq!(actor.next_id, next_id);
             assert!(actor.transcribed.is_empty());
             child.kill().unwrap();
