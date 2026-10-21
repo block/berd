@@ -82,7 +82,9 @@ pub enum VoiceInputEngineConfig {
         model_dir: PathBuf,
     },
     #[cfg(target_os = "macos")]
-    MacSpeech,
+    MacSpeech {
+        hints: Vec<String>,
+    },
     OpenAi {
         endpoint: String,
         api_key: String,
@@ -437,7 +439,7 @@ impl VoiceInputRuntime {
                 }),
             ),
             #[cfg(target_os = "macos")]
-            VoiceInputEngineConfig::MacSpeech => (
+            VoiceInputEngineConfig::MacSpeech { hints } => (
                 "berd-macos-stt",
                 Box::new(move || {
                     mac_speech_worker(
@@ -448,6 +450,7 @@ impl VoiceInputRuntime {
                         worker_shutdown_epoch,
                         worker_controls,
                         speech_threshold,
+                        hints,
                     )
                 }),
             ),
@@ -1284,14 +1287,16 @@ fn complete_parakeet_recognition(
 }
 
 #[cfg(target_os = "macos")]
-fn new_mac_recognizer() -> Result<
+fn new_mac_recognizer(
+    hints: &[String],
+) -> Result<
     (
         crate::mac_speech::MacSpeechRecognizer,
         tokio_mpsc::UnboundedReceiver<crate::mac_speech::MacSpeechRecognitionEvent>,
     ),
     String,
 > {
-    crate::mac_speech::MacSpeechRecognizer::new()
+    crate::mac_speech::MacSpeechRecognizer::with_hints(hints)
 }
 
 #[cfg(target_os = "macos")]
@@ -1383,10 +1388,11 @@ fn mac_speech_worker(
     shutdown_mute_epoch: Arc<AtomicU64>,
     controls: VoiceInputControls,
     speech_vad_threshold: f32,
+    hints: Vec<String>,
 ) {
     use rubato::{Fft, FixedSync, Resampler};
 
-    let (mut recognizer, mut recognition_events) = match new_mac_recognizer() {
+    let (mut recognizer, mut recognition_events) = match new_mac_recognizer(&hints) {
         Ok(session) => session,
         Err(error) => {
             let _ = events.blocking_send(VoiceInputEvent::Failed(error));
@@ -1440,7 +1446,7 @@ fn mac_speech_worker(
             leftover_16k.clear();
             silence_frames = 0;
             vad = earshot::Detector::new(earshot::DefaultPredictor::new());
-            match new_mac_recognizer() {
+            match new_mac_recognizer(&hints) {
                 Ok((next, next_events)) => {
                     recognizer = next;
                     recognition_events = next_events;
@@ -1473,7 +1479,7 @@ fn mac_speech_worker(
             if shutting_down {
                 break;
             }
-            match new_mac_recognizer() {
+            match new_mac_recognizer(&hints) {
                 Ok((next, next_events)) => {
                     recognizer = next;
                     recognition_events = next_events;

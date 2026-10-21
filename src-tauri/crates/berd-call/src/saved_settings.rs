@@ -141,7 +141,7 @@ pub(crate) fn persistable_arguments(arguments: &[String]) -> Vec<String> {
         .filter(|pair| {
             !matches!(
                 pair[0].as_str(),
-                "--realtime-url" | "--stt-url" | "--tts-url"
+                "--realtime-url" | "--stt-url" | "--tts-url" | "--stt-hint"
             )
         })
         .flatten()
@@ -361,5 +361,22 @@ mod tests {
                 "expert-spokesperson"
             ])
         );
+    }
+}
+
+#[cfg(test)]
+mod speech_hint_tests {
+    #[test]
+    fn conversation_hints_are_not_saved_for_other_calls() {
+        let args = [
+            "--voice",
+            "Aaron",
+            "--stt-hint",
+            "Nora",
+            "--stt-hint",
+            "Zack",
+        ]
+        .map(String::from);
+        assert_eq!(super::persistable_arguments(&args), ["--voice", "Aaron"]);
     }
 }

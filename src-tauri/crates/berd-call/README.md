@@ -61,6 +61,8 @@ berd-call speak --voice Nora "Sol here: the tests pass."
 berd-call stop
 ```
 
+Apple speech recognition accepts repeated `--stt-hint PHRASE` options on `start` or `session`. Pass agent names or domain terms to bias its vocabulary without restricting normal transcription, for example `berd-call start --stt-hint Nora --stt-hint Zack`. Up to 100 nonempty phrases of 256 bytes each are accepted. Hints apply to macOS speech recognition and survive recognition restarts within the call; other speech backends ignore them.
+
 `speak --voice` speaks one reply in another voice of the call's reply backend
 without changing the call's voice, so agents sharing a call can sound distinct.
 

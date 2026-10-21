@@ -244,6 +244,7 @@ private final class SpeechSession: @unchecked Sendable {
 
     static func make(
         requestedLocale: Locale,
+        hints: [String],
         callback: @escaping BerdMacSpeechEventCallback,
         context: CallbackContext
     ) async throws -> SpeechSession {
@@ -255,6 +256,11 @@ private final class SpeechSession: @unchecked Sendable {
             throw BridgeError.modelUnavailable(locale.identifier(.bcp47))
         }
         let analyzer = SpeechAnalyzer(modules: [transcriber])
+        if !hints.isEmpty {
+            let analysisContext = AnalysisContext()
+            analysisContext.contextualStrings[.general] = hints
+            try await analyzer.setContext(analysisContext)
+        }
         let (input, continuation) = AsyncStream<AnalyzerInput>.makeStream(
             bufferingPolicy: .bufferingOldest(64)
         )
@@ -539,6 +545,7 @@ public func berdMacSTTInstallModel(
 @_cdecl("berd_macos_stt_create")
 public func berdMacSTTCreate(
     _ identifier: UnsafePointer<CChar>?,
+    _ hintsJSON: UnsafePointer<CChar>?,
     _ callback: BerdMacSpeechEventCallback?,
     _ context: UnsafeMutableRawPointer?,
     _ errorOut: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
@@ -555,9 +562,10 @@ public func berdMacSTTCreate(
     let requested = locale(from: identifier)
     let callbackContext = CallbackContext(pointer: context)
     do {
+        let hints = try hintsJSON.map { try JSONDecoder().decode([String].self, from: Data(String(cString: $0).utf8)) } ?? []
         let session = try wait {
             try await SpeechSession.make(
-                requestedLocale: requested, callback: callback, context: callbackContext
+                requestedLocale: requested, hints: hints, callback: callback, context: callbackContext
             )
         }
         return Unmanaged.passRetained(session).toOpaque()

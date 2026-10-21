@@ -1,7 +1,7 @@
 //! Safe macOS SpeechTranscriber model and recognition primitives.
 
 use std::{
-    ffi::{c_char, c_void, CStr},
+    ffi::{c_char, c_void, CStr, CString},
     ptr,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -42,6 +42,7 @@ unsafe extern "C" {
     ) -> bool;
     fn berd_macos_stt_create(
         locale: *const c_char,
+        hints_json: *const c_char,
         event: Option<unsafe extern "C" fn(i32, *const c_char, *mut c_void)>,
         context: *mut c_void,
         error_out: *mut *mut c_char,
@@ -187,12 +188,23 @@ pub struct MacSpeechRecognizer {
 impl MacSpeechRecognizer {
     /// Creates a recognizer for the current system locale.
     pub fn new() -> Result<(Self, mpsc::UnboundedReceiver<MacSpeechRecognitionEvent>), String> {
+        Self::with_hints(&[])
+    }
+
+    /// Biases recognition toward these phrases without restricting its vocabulary.
+    pub fn with_hints(
+        hints: &[String],
+    ) -> Result<(Self, mpsc::UnboundedReceiver<MacSpeechRecognitionEvent>), String> {
+        let hints_json =
+            CString::new(serde_json::to_string(hints).map_err(|error| error.to_string())?)
+                .map_err(|error| error.to_string())?;
         let (events, receiver) = mpsc::unbounded_channel();
         let context = Box::into_raw(Box::new(RecognitionContext { events }));
         let mut error = ptr::null_mut();
         let handle = unsafe {
             berd_macos_stt_create(
                 ptr::null(),
+                hints_json.as_ptr(),
                 Some(recognition_event),
                 context.cast(),
                 &mut error,
