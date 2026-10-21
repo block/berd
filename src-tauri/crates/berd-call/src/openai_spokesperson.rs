@@ -121,9 +121,7 @@ pub enum SpokespersonCommand {
     BeginInputCutover {
         request_id: u64,
     },
-    AbortInputCutover {
-        completed: std::sync::mpsc::SyncSender<Result<(), String>>,
-    },
+    AbortInputCutover,
     TruncateOutput {
         response_id: String,
         item_id: String,
@@ -246,7 +244,6 @@ struct PendingInputCutover {
     event_id: String,
     cleared: bool,
     deadline: tokio::time::Instant,
-    abort_completion: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
 }
 
 struct PendingInputReset {
@@ -262,10 +259,7 @@ fn complete_input_cutover_if_ready(
     events: &std::sync::mpsc::Sender<SpokespersonEvent>,
 ) -> Result<(), String> {
     if pending.as_ref().is_some_and(|cutover| {
-        cutover.abort_completion.is_none()
-            && cutover.cleared
-            && started_items.is_empty()
-            && committed_items.is_empty()
+        cutover.cleared && started_items.is_empty() && committed_items.is_empty()
     }) {
         let request_id = pending.take().expect("ready input cutover").request_id;
         send_event(
@@ -374,7 +368,9 @@ impl OpenAiSpokespersonRuntime {
         match command {
             // Input and the clears that discard it share one queue, so they stay in order.
             command @ (SpokespersonCommand::InputPcm48Khz(_)
-            | SpokespersonCommand::ResetInput { .. }) => {
+            | SpokespersonCommand::ResetInput { .. }
+            | SpokespersonCommand::BeginInputCutover { .. }
+            | SpokespersonCommand::AbortInputCutover) => {
                 self.audio.try_send(command).map_err(|error| match error {
                     mpsc::error::TrySendError::Full(_) => "Spokesperson input queue is full".into(),
                     mpsc::error::TrySendError::Closed(_) => "Spokesperson runtime is closed".into(),
@@ -394,12 +390,9 @@ impl OpenAiSpokespersonRuntime {
         Ok(result)
     }
 
+    /// Abandons a pending input cutover without waiting for the provider to confirm its clear.
     pub fn abort_input_cutover(&self) -> Result<(), String> {
-        let (completed, result) = std::sync::mpsc::sync_channel(1);
-        self.send(SpokespersonCommand::AbortInputCutover { completed })?;
-        result
-            .recv_timeout(std::time::Duration::from_secs(5))
-            .map_err(|_| "Spokesperson input cutover abort timed out".to_string())?
+        self.send(SpokespersonCommand::AbortInputCutover)
     }
 
     pub fn finish(mut self) -> Result<(), String> {
@@ -507,6 +500,8 @@ async fn run_inner(
     let mut pending_input_cutover: Option<PendingInputCutover> = None;
     // Clears in the order sent; the provider confirms them in that order.
     let mut pending_input_resets = VecDeque::<PendingInputReset>::new();
+    // Aborted cutovers whose clears the provider has yet to confirm, oldest first.
+    let mut aborted_input_cutovers = VecDeque::<PendingInputCutover>::new();
     let mut started_input_items = HashSet::<String>::new();
     let mut committed_input_items = HashSet::<String>::new();
     let mut seed_turns = VecDeque::from(std::mem::take(&mut config.semantic_transcript));
@@ -540,8 +535,10 @@ async fn run_inner(
             .map(|truncation| truncation.deadline)
             .min();
         let cutover_deadline = pending_input_cutover
-            .as_ref()
-            .map(|cutover| cutover.deadline);
+            .iter()
+            .chain(&aborted_input_cutovers)
+            .map(|cutover| cutover.deadline)
+            .min();
         let reset_deadline = pending_input_resets.front().map(|reset| reset.deadline);
         tokio::select! {
             _ = async {
@@ -582,16 +579,11 @@ async fn run_inner(
                     None => std::future::pending().await,
                 }
             }, if cutover_deadline.is_some() => {
-                if pending_input_cutover
-                    .as_ref()
-                    .is_some_and(|cutover| tokio::time::Instant::now() >= cutover.deadline)
+                if let Some(cutover) = pending_input_cutover
+                    .iter()
+                    .chain(&aborted_input_cutovers)
+                    .find(|cutover| tokio::time::Instant::now() >= cutover.deadline)
                 {
-                    let mut cutover = pending_input_cutover
-                        .take()
-                        .expect("expired input cutover");
-                    if let Some(completed) = cutover.abort_completion.take() {
-                        let _ = completed.send(Err("Spokesperson input cutover timed out".into()));
-                    }
                     return Err(format!(
                         "Spokesperson input cutover {} timed out; provider input state is indeterminate",
                         cutover.request_id
@@ -621,24 +613,18 @@ async fn run_inner(
                         })).await?;
                     }
                     Some(SpokespersonCommand::ResetInput { completed }) => {
-                        if pending_input_cutover.is_some() {
-                            let _ = completed.send(Err(
-                                "another Spokesperson input clear is in progress".into(),
-                            ));
-                        } else {
-                            let event_id = format!("berd-reset-{next_control_event_id}");
-                            next_control_event_id = next_control_event_id.checked_add(1)
-                                .ok_or("Spokesperson control event space is exhausted")?;
-                            send_json(&mut socket, serde_json::json!({
-                                "event_id": event_id,
-                                "type": "input_audio_buffer.clear",
-                            })).await?;
-                            pending_input_resets.push_back(PendingInputReset {
-                                event_id,
-                                deadline: tokio::time::Instant::now() + CONTROL_ACK_TIMEOUT,
-                                completed,
-                            });
-                        }
+                        let event_id = format!("berd-reset-{next_control_event_id}");
+                        next_control_event_id = next_control_event_id.checked_add(1)
+                            .ok_or("Spokesperson control event space is exhausted")?;
+                        send_json(&mut socket, serde_json::json!({
+                            "event_id": event_id,
+                            "type": "input_audio_buffer.clear",
+                        })).await?;
+                        pending_input_resets.push_back(PendingInputReset {
+                            event_id,
+                            deadline: tokio::time::Instant::now() + CONTROL_ACK_TIMEOUT,
+                            completed,
+                        });
                     }
                     Some(SpokespersonCommand::CancelResponses { response_ids }) => {
                         for response_id in response_ids {
@@ -669,33 +655,14 @@ async fn run_inner(
                             event_id,
                             cleared: false,
                             deadline: tokio::time::Instant::now() + CONTROL_ACK_TIMEOUT,
-                            abort_completion: None,
                         });
                     }
-                    Some(SpokespersonCommand::AbortInputCutover { completed }) => {
-                        if pending_input_cutover
-                            .as_ref()
-                            .is_some_and(|cutover| cutover.cleared)
-                        {
-                            let request_id = pending_input_cutover
-                                .take()
-                                .expect("cleared input cutover")
-                                .request_id;
-                            let _ = completed.send(Ok(()));
-                            send_event(events, SpokespersonEvent::InputCutoverFinished {
-                                request_id,
-                                result: Err("Spokesperson input cutover was aborted".into()),
-                            })?;
-                        } else if let Some(cutover) = pending_input_cutover.as_mut() {
-                            if cutover.abort_completion.is_some() {
-                                let _ = completed.send(Err(
-                                    "Spokesperson input cutover abort is already pending".into(),
-                                ));
-                            } else {
-                                cutover.abort_completion = Some(completed);
+                    Some(SpokespersonCommand::AbortInputCutover) => {
+                        // Its clear stays in flight; only the cutover's readiness is abandoned.
+                        if let Some(cutover) = pending_input_cutover.take() {
+                            if !cutover.cleared {
+                                aborted_input_cutovers.push_back(cutover);
                             }
-                        } else {
-                            let _ = completed.send(Ok(()));
                         }
                     }
                     Some(SpokespersonCommand::TruncateOutput {
@@ -917,27 +884,22 @@ async fn run_inner(
                             })?;
                             send_event(events, SpokespersonEvent::UserTurnDiscarded { item_id })?;
                         }
-                        if let Some(cutover) = pending_input_cutover.as_mut() {
-                            if let Some(completed) = cutover.abort_completion.take() {
-                                let request_id = cutover.request_id;
-                                let _ = completed.send(Ok(()));
-                                pending_input_cutover = None;
-                                send_event(events, SpokespersonEvent::InputCutoverFinished {
-                                    request_id,
-                                    result: Err("Spokesperson input cutover was aborted".into()),
-                                })?;
-                                continue;
-                            }
+                        // Confirmations arrive in the order the clears were sent.
+                        if aborted_input_cutovers.pop_front().is_some() {
+                            // An abandoned cutover's clear.
+                        } else if let Some(cutover) =
+                            pending_input_cutover.as_mut().filter(|cutover| !cutover.cleared)
+                        {
                             cutover.cleared = true;
-                            complete_input_cutover_if_ready(
-                                &mut pending_input_cutover,
-                                &started_input_items,
-                                &committed_input_items,
-                                events,
-                            )?;
                         } else if let Some(reset) = pending_input_resets.pop_front() {
                             let _ = reset.completed.send(Ok(()));
                         }
+                        complete_input_cutover_if_ready(
+                            &mut pending_input_cutover,
+                            &started_input_items,
+                            &committed_input_items,
+                            events,
+                        )?;
                     }
                     "conversation.item.added" | "conversation.item.created" => {
                         let item_id = value.pointer("/item/id").and_then(|value| value.as_str());
@@ -1049,19 +1011,18 @@ async fn run_inner(
                     "error" => {
                         let message = value.pointer("/error/message").and_then(|value| value.as_str()).unwrap_or("OpenAI Realtime failed").to_string();
                         let event_id = value.pointer("/error/event_id").and_then(|value| value.as_str());
-                        if let Some(index) = pending_input_resets.iter().position(|reset| Some(reset.event_id.as_str()) == event_id) {
+                        if let Some(index) = aborted_input_cutovers.iter().position(|cutover| Some(cutover.event_id.as_str()) == event_id) {
+                            aborted_input_cutovers.remove(index);
+                        } else if let Some(index) = pending_input_resets.iter().position(|reset| Some(reset.event_id.as_str()) == event_id) {
                             let reset = pending_input_resets.remove(index).expect("matched input reset");
                             let _ = reset.completed.send(Err(message));
                         } else if pending_input_cutover.as_ref().is_some_and(|cutover| {
                             value.pointer("/error/event_id").and_then(|value| value.as_str())
                                 == Some(cutover.event_id.as_str())
                         }) {
-                            let mut cutover = pending_input_cutover
+                            let cutover = pending_input_cutover
                                 .take()
                                 .expect("matched pending input cutover");
-                            if let Some(completed) = cutover.abort_completion.take() {
-                                let _ = completed.send(Err(message.clone()));
-                            }
                             send_event(events, SpokespersonEvent::InputCutoverFinished {
                                 request_id: cutover.request_id,
                                 result: Err(message),
@@ -1818,6 +1779,104 @@ mod tests {
         ));
         runtime.finish().unwrap();
         server.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn aborting_a_cutover_returns_before_the_provider_acknowledges_its_clear() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+        let (began, cutover_began) = std::sync::mpsc::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_hdr_async(stream, require_test_authorization)
+                .await
+                .unwrap();
+            let update = receive_json(&mut socket).await;
+            acknowledge_initial_session(&mut socket, &update, "test-model").await;
+            for _ in 0..2 {
+                assert_eq!(
+                    receive_json(&mut socket).await["type"],
+                    "input_audio_buffer.clear"
+                );
+                let _ = began.send(());
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            for _ in 0..2 {
+                send_json(&mut socket, json!({"type":"input_audio_buffer.cleared"})).await;
+            }
+            let _ = socket.next().await;
+        });
+        let (runtime, events) =
+            OpenAiSpokespersonRuntime::spawn(test_config(endpoint, "old-voice", 1.0, Vec::new()))
+                .unwrap();
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::Ready
+        ));
+        runtime
+            .send(SpokespersonCommand::BeginInputCutover { request_id: 7 })
+            .unwrap();
+        cutover_began.recv_timeout(Duration::from_secs(2)).unwrap();
+        let started = std::time::Instant::now();
+        tokio::task::block_in_place(|| runtime.abort_input_cutover()).unwrap();
+        assert!(started.elapsed() < Duration::from_millis(500));
+        // The abandoned clear's confirmation must not complete the reset sent after it.
+        let reset = runtime.reset_input().unwrap();
+        assert_eq!(reset.recv_timeout(Duration::from_secs(3)).unwrap(), Ok(()));
+        assert!(started.elapsed() >= Duration::from_secs(1));
+        assert!(!events
+            .try_iter()
+            .any(|event| matches!(event, SpokespersonEvent::InputCutoverFinished { .. })));
+        runtime.finish().unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn input_replayed_after_an_aborted_cutover_follows_its_clear() {
+        const ROUNDS: usize = 20;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_hdr_async(stream, require_test_authorization)
+                .await
+                .unwrap();
+            let update = receive_json(&mut socket).await;
+            acknowledge_initial_session(&mut socket, &update, "test-model").await;
+            let mut kinds = Vec::new();
+            for _ in 0..2 * ROUNDS {
+                kinds.push(receive_json(&mut socket).await["type"].clone());
+            }
+            for _ in 0..ROUNDS {
+                send_json(&mut socket, json!({"type":"input_audio_buffer.cleared"})).await;
+            }
+            let _ = socket.next().await;
+            kinds
+        });
+        let (runtime, events) =
+            OpenAiSpokespersonRuntime::spawn(test_config(endpoint, "old-voice", 1.0, Vec::new()))
+                .unwrap();
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::Ready
+        ));
+        for request_id in 0..ROUNDS as u64 {
+            runtime
+                .send(SpokespersonCommand::BeginInputCutover { request_id })
+                .unwrap();
+            runtime.abort_input_cutover().unwrap();
+            runtime
+                .send(SpokespersonCommand::InputPcm48Khz(vec![0.5; 960]))
+                .unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        runtime.finish().unwrap();
+        let kinds = server.await.unwrap();
+        assert!(kinds.chunks(2).all(|round| round
+            == [
+                json!("input_audio_buffer.clear"),
+                json!("input_audio_buffer.append")
+            ]));
     }
 
     #[tokio::test(flavor = "multi_thread")]

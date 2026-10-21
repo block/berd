@@ -325,7 +325,7 @@ impl VoiceUpdateTransaction {
             ))?;
         }
         if let Some(runtime) = self.runtime.take() {
-            runtime.finish()?;
+            runtime.retire_in_background();
         }
         Ok(self.id)
     }
