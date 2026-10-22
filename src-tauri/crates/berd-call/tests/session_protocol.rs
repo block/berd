@@ -31,7 +31,7 @@ struct ExpertSpokespersonTestSession {
     stdin: Option<Arc<Mutex<ChildStdin>>>,
     output: mpsc::Receiver<Value>,
     stderr: mpsc::Receiver<String>,
-    audio_host: Option<std::thread::JoinHandle<()>>,
+    audio_host: Option<std::thread::JoinHandle<std::io::Result<()>>>,
     ready: Value,
 }
 
@@ -192,12 +192,24 @@ impl ExpertSpokespersonTestSession {
         self.wait_with_stderr().0
     }
 
-    fn wait_with_stderr(mut self) -> (Vec<Value>, Vec<String>) {
+    fn wait_with_stderr(self) -> (Vec<Value>, Vec<String>) {
+        self.wait_with_audio_policy(false)
+    }
+
+    fn wait_with_audio_policy(
+        mut self,
+        allow_truncated_payload: bool,
+    ) -> (Vec<Value>, Vec<String>) {
         self.stdin.take();
         let status = self.child.0.as_mut().unwrap().wait().unwrap();
         self.child.0 = None;
         assert!(status.success());
-        self.audio_host.take().unwrap().join().unwrap();
+        // Only an explicitly expected disconnect may end a partial audio frame,
+        // and only after the child itself has exited successfully.
+        check_audio_host_result(
+            self.audio_host.take().unwrap().join().unwrap(),
+            allow_truncated_payload,
+        );
         (self.output.iter().collect(), self.stderr.iter().collect())
     }
 }
@@ -351,7 +363,7 @@ fn session_command() -> (Command, File, UnixStream) {
 fn spawn_audio_host(
     reader: UnixStream,
     stdin: Arc<Mutex<std::process::ChildStdin>>,
-) -> std::thread::JoinHandle<()> {
+) -> std::thread::JoinHandle<std::io::Result<()>> {
     spawn_audio_host_with_played_limit(reader, stdin, None, None, None, false)
 }
 
@@ -362,7 +374,7 @@ fn spawn_audio_host_with_played_limit<W: Write + Send + 'static>(
     mut played_ready: Option<mpsc::SyncSender<()>>,
     mut cancellation_gate: Option<AudioCancellationGate>,
     mut fail_at_limit: bool,
-) -> std::thread::JoinHandle<()> {
+) -> std::thread::JoinHandle<std::io::Result<()>> {
     std::thread::spawn(move || {
         let mut current = None::<(u64, u64, u64)>;
         // The speech whose player failed, and what it played: like the real host, it ignores what the session sent before hearing.
@@ -371,14 +383,14 @@ fn spawn_audio_host_with_played_limit<W: Write + Send + 'static>(
             let mut header = [0_u8; 8];
             match reader.read_exact(&mut header) {
                 Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return,
+                Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
                 Err(error) => panic!("audio pipe read failed: {error}"),
             }
             assert_eq!(&header[..2], b"BA");
             assert_eq!(header[2], FRAME_MARKER);
             let length = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
             let mut payload = vec![0_u8; length];
-            reader.read_exact(&mut payload).unwrap();
+            reader.read_exact(&mut payload)?;
             let message = match header[3] {
                 1 => {
                     assert_eq!(payload.len(), 16);
@@ -413,7 +425,7 @@ fn spawn_audio_host_with_played_limit<W: Write + Send + 'static>(
                         replies.push(json!({"type":"audio_failed","speech_id":speech_id,"played_frames":played_frames,"message":"PCM audio output stopped unexpectedly"}));
                     }
                     if !write_audio_replies(&mut *writer, &replies) {
-                        return;
+                        return Ok(());
                     }
                     if reached_limit {
                         if let Some(ready) = played_ready.take() {
@@ -434,7 +446,7 @@ fn spawn_audio_host_with_played_limit<W: Write + Send + 'static>(
                     if let Some(gate) = cancellation_gate.take_if(|gate| gate.at_drain) {
                         let _ = gate.observed.send(());
                         if gate.release.recv().is_err() {
-                            return;
+                            return Ok(());
                         }
                         continue;
                     }
@@ -452,7 +464,7 @@ fn spawn_audio_host_with_played_limit<W: Write + Send + 'static>(
                                 json!({"type":"audio_cancelled","speech_id":speech_id,"played_frames":played_frames}),
                             ],
                         ) {
-                            return;
+                            return Ok(());
                         }
                         continue;
                     }
@@ -472,10 +484,64 @@ fn spawn_audio_host_with_played_limit<W: Write + Send + 'static>(
             };
             let mut writer = stdin.lock().unwrap();
             if !write_audio_replies(&mut *writer, &[message]) {
-                return;
+                return Ok(());
             }
         }
     })
+}
+
+fn check_audio_host_result(result: std::io::Result<()>, allow_truncated_payload: bool) {
+    if let Err(error) = result {
+        assert!(
+            allow_truncated_payload && error.kind() == std::io::ErrorKind::UnexpectedEof,
+            "fixture audio read failed: {error}"
+        );
+    }
+}
+
+#[test]
+fn audio_fixture_payload_errors_require_explicit_shutdown_allowance() {
+    for allow in [false, true] {
+        check_audio_host_result(Ok(()), allow);
+        for kind in [
+            std::io::ErrorKind::UnexpectedEof,
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::ConnectionReset,
+        ] {
+            let accepted =
+                std::panic::catch_unwind(|| check_audio_host_result(Err(kind.into()), allow))
+                    .is_ok();
+            assert_eq!(accepted, allow && kind == std::io::ErrorKind::UnexpectedEof);
+        }
+    }
+}
+
+#[test]
+fn audio_fixture_truncated_payload_does_not_panic_before_shutdown_is_checked() {
+    let (input, _peer) = UnixStream::pair().unwrap();
+    let (mut audio, reader) = UnixStream::pair().unwrap();
+    audio.write_all(b"BA").unwrap();
+    audio.write_all(&[FRAME_MARKER, 1]).unwrap();
+    audio.write_all(&16_u32.to_le_bytes()).unwrap();
+    // The child exits halfway through a valid begin payload.
+    audio.write_all(&1_u64.to_le_bytes()).unwrap();
+    drop(audio);
+    let host = spawn_audio_host_with_played_limit(
+        reader,
+        Arc::new(Mutex::new(input)),
+        None,
+        None,
+        None,
+        false,
+    );
+    let result = host
+        .join()
+        .expect("payload EOF panicked before child status was checked");
+    assert_eq!(
+        result.as_ref().unwrap_err().kind(),
+        std::io::ErrorKind::UnexpectedEof
+    );
+    check_audio_host_result(result, true);
 }
 
 #[test]
@@ -524,10 +590,9 @@ fn audio_fixture_can_finish_a_queued_reply_after_child_input_closes() {
         None,
         false,
     );
-    assert!(
-        host.join().is_ok(),
-        "late fixture reply panicked after child shutdown"
-    );
+    host.join()
+        .expect("late fixture reply panicked after child shutdown")
+        .unwrap();
 }
 
 #[test]
@@ -1013,7 +1078,7 @@ fn active_spokesperson_disconnect_is_specific_terminal_and_does_not_replay() {
         fatal["message"],
         "Spokesperson connection was lost during an active turn"
     );
-    let (remaining, stderr) = session.wait_with_stderr();
+    let (remaining, stderr) = session.wait_with_audio_policy(true);
     assert!(remaining
         .iter()
         .all(|message| message["type"] != "live_event"));
@@ -3331,7 +3396,7 @@ fn siri_remote_output_supports_consecutive_turns_and_cancellation() {
     let mut child_process = child.0.take().unwrap();
     assert!(child_process.wait().unwrap().success());
     reader.join().unwrap();
-    audio_host.join().unwrap();
+    audio_host.join().unwrap().unwrap();
 }
 
 #[test]
@@ -3392,7 +3457,7 @@ fn speech_whose_player_stops_is_interrupted_where_it_was_heard_and_the_call_goes
     send(json!({"type":"shutdown"}));
     drop(stdin);
     assert!(child.0.take().unwrap().wait().unwrap().success());
-    audio_host.join().unwrap();
+    audio_host.join().unwrap().unwrap();
 }
 
 /// Accepts one OpenAI transcription session that never hears anything.
