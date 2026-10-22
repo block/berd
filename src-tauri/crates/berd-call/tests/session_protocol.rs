@@ -203,13 +203,29 @@ impl ExpertSpokespersonTestSession {
 }
 
 fn write_session_json(writer: &mut impl Write, value: &Value) {
+    try_write_session_json(writer, value).unwrap();
+}
+
+fn try_write_session_json(writer: &mut impl Write, value: &Value) -> std::io::Result<()> {
     let payload = serde_json::to_vec(value).unwrap();
-    writer.write_all(b"BV").unwrap();
-    writer.write_all(&[FRAME_MARKER, 1]).unwrap();
-    writer
-        .write_all(&(payload.len() as u32).to_le_bytes())
-        .unwrap();
-    writer.write_all(&payload).unwrap();
+    writer.write_all(b"BV")?;
+    writer.write_all(&[FRAME_MARKER, 1])?;
+    writer.write_all(&(payload.len() as u32).to_le_bytes())?;
+    writer.write_all(&payload)
+}
+
+fn write_audio_replies(writer: &mut impl Write, replies: &[Value]) -> bool {
+    let result = replies
+        .iter()
+        .try_for_each(|reply| try_write_session_json(writer, reply))
+        .and_then(|()| writer.flush());
+    match result {
+        Ok(()) => true,
+        // The child may terminate with audio records still queued. The fixture
+        // waiter independently checks its exit status and protocol terminals.
+        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => false,
+        Err(error) => panic!("fixture audio reply failed: {error}"),
+    }
 }
 
 fn write_session_pcm(writer: &mut impl Write, value: f32) {
@@ -339,9 +355,9 @@ fn spawn_audio_host(
     spawn_audio_host_with_played_limit(reader, stdin, None, None, None, false)
 }
 
-fn spawn_audio_host_with_played_limit(
+fn spawn_audio_host_with_played_limit<W: Write + Send + 'static>(
     mut reader: UnixStream,
-    stdin: Arc<Mutex<std::process::ChildStdin>>,
+    stdin: Arc<Mutex<W>>,
     played_frame_limit: Option<u64>,
     mut played_ready: Option<mpsc::SyncSender<()>>,
     mut cancellation_gate: Option<AudioCancellationGate>,
@@ -385,25 +401,20 @@ fn spawn_audio_host_with_played_limit(
                     state.2 += frames;
                     let reached_limit = played_frame_limit.is_some_and(|limit| state.2 >= limit);
                     let mut writer = stdin.lock().unwrap();
-                    write_session_json(
-                        &mut *writer,
-                        &json!({"type":"audio_chunk_accepted","speech_id":speech_id,"sequence":sequence}),
-                    );
-                    write_session_json(
-                        &mut *writer,
-                        &json!({"type":"audio_played","speech_id":speech_id,"played_frames":played_frame_limit.map_or(state.2, |limit| state.2.min(limit))}),
-                    );
+                    let mut replies = vec![
+                        json!({"type":"audio_chunk_accepted","speech_id":speech_id,"sequence":sequence}),
+                        json!({"type":"audio_played","speech_id":speech_id,"played_frames":played_frame_limit.map_or(state.2, |limit| state.2.min(limit))}),
+                    ];
                     if reached_limit && fail_at_limit {
                         fail_at_limit = false;
                         let played_frames = played_frame_limit.unwrap();
                         failed = Some((speech_id, played_frames));
                         current = None;
-                        write_session_json(
-                            &mut *writer,
-                            &json!({"type":"audio_failed","speech_id":speech_id,"played_frames":played_frames,"message":"PCM audio output stopped unexpectedly"}),
-                        );
+                        replies.push(json!({"type":"audio_failed","speech_id":speech_id,"played_frames":played_frames,"message":"PCM audio output stopped unexpectedly"}));
                     }
-                    writer.flush().unwrap();
+                    if !write_audio_replies(&mut *writer, &replies) {
+                        return;
+                    }
                     if reached_limit {
                         if let Some(ready) = played_ready.take() {
                             let _ = ready.send(());
@@ -435,11 +446,14 @@ fn spawn_audio_host_with_played_limit(
                     let speech_id = u64::from_le_bytes(payload.try_into().unwrap());
                     if let Some((_, played_frames)) = failed.filter(|(id, _)| *id == speech_id) {
                         let mut writer = stdin.lock().unwrap();
-                        write_session_json(
+                        if !write_audio_replies(
                             &mut *writer,
-                            &json!({"type":"audio_cancelled","speech_id":speech_id,"played_frames":played_frames}),
-                        );
-                        writer.flush().unwrap();
+                            &[
+                                json!({"type":"audio_cancelled","speech_id":speech_id,"played_frames":played_frames}),
+                            ],
+                        ) {
+                            return;
+                        }
                         continue;
                     }
                     let played_frames = current
@@ -457,10 +471,63 @@ fn spawn_audio_host_with_played_limit(
                 kind => panic!("unknown audio record kind {kind}"),
             };
             let mut writer = stdin.lock().unwrap();
-            write_session_json(&mut *writer, &message);
-            writer.flush().unwrap();
+            if !write_audio_replies(&mut *writer, &[message]) {
+                return;
+            }
         }
     })
+}
+
+#[test]
+fn audio_fixture_reply_errors_remain_visible_except_for_closed_input() {
+    struct FailingWriter(std::io::ErrorKind);
+    impl Write for FailingWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(self.0.into())
+        }
+    }
+    let reply = json!({"type":"audio_cancelled","speech_id":1,"played_frames":0});
+    assert!(!write_audio_replies(
+        &mut FailingWriter(std::io::ErrorKind::BrokenPipe),
+        std::slice::from_ref(&reply)
+    ));
+    assert!(std::panic::catch_unwind(|| {
+        write_audio_replies(
+            &mut FailingWriter(std::io::ErrorKind::PermissionDenied),
+            &[reply],
+        );
+    })
+    .is_err());
+}
+
+#[test]
+fn audio_fixture_can_finish_a_queued_reply_after_child_input_closes() {
+    let (input, closed) = UnixStream::pair().unwrap();
+    drop(closed);
+    let (mut audio, reader) = UnixStream::pair().unwrap();
+    // Queue a valid begin record after the child has closed its input. No sleeps
+    // or scheduler assumptions: the fixture's first acknowledgement must fail.
+    audio.write_all(b"BA").unwrap();
+    audio.write_all(&[FRAME_MARKER, 1]).unwrap();
+    audio.write_all(&16_u32.to_le_bytes()).unwrap();
+    audio.write_all(&1_u64.to_le_bytes()).unwrap();
+    audio.write_all(&24_000_u64.to_le_bytes()).unwrap();
+    drop(audio);
+    let host = spawn_audio_host_with_played_limit(
+        reader,
+        Arc::new(Mutex::new(input)),
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(
+        host.join().is_ok(),
+        "late fixture reply panicked after child shutdown"
+    );
 }
 
 #[test]
