@@ -11,6 +11,7 @@ import type { SectionId } from "./settingsSections";
 import { ExperimentsSettings } from "@/features/experiments/ExperimentsSettings";
 import { KeyboardShortcutsSettings } from "@/features/shortcuts/ui/KeyboardShortcutsSettings";
 import { ConnectionsSettings } from "@/features/connections/ui/ConnectionsSettings";
+import { MeSettings } from "@/features/me/ui/MeSettings";
 import { VoiceSettings } from "@/features/voice-conversation/ui/VoiceSettings";
 import type { AuthStatus } from "@/features/auth/api/auth";
 import { SettingsPane } from "@/shared/ui/SettingsPage";
@@ -86,6 +87,7 @@ export function SettingsView({
           onReturnToAgentDraft={onReturnToAgentDraft}
         />
       )}
+      {activeSection === "me" && <MeSettings />}
       {activeSection === "notifications" && <NotificationSettings />}
       {activeSection === "shortcuts" && <KeyboardShortcutsSettings />}
       {activeSection === "voice" && voiceConversationEnabled && (

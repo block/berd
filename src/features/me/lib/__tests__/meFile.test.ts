@@ -4,17 +4,24 @@ const mocks = vi.hoisted(() => ({
   getHomeDir: vi.fn(),
   pathExists: vi.fn(),
   readTextFile: vi.fn(),
-  createTextFile: vi.fn(),
-  writeTextFile: vi.fn(),
+  saveMemoryDocument: vi.fn(),
 }));
 
-vi.mock("@/shared/api/system", () => mocks);
+vi.mock("@/shared/api/system", () => ({
+  getHomeDir: mocks.getHomeDir,
+  pathExists: mocks.pathExists,
+  readTextFile: mocks.readTextFile,
+}));
+vi.mock("../saveMemoryDocument", () => ({
+  saveMemoryDocument: mocks.saveMemoryDocument,
+}));
 
 import { createMeFile, ME_FILE_TEMPLATE, saveMeFile } from "../meFile";
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getHomeDir.mockResolvedValue("/home/u");
+  mocks.saveMemoryDocument.mockResolvedValue(undefined);
 });
 
 describe("me file writes", () => {
@@ -24,23 +31,21 @@ describe("me file writes", () => {
 
     await createMeFile();
 
-    expect(mocks.createTextFile).toHaveBeenCalledTimes(1);
-    expect(mocks.createTextFile).toHaveBeenCalledWith(
-      "/home/u/.me/me.md",
-      ME_FILE_TEMPLATE,
-    );
-    expect(mocks.writeTextFile).not.toHaveBeenCalled();
+    expect(mocks.saveMemoryDocument).toHaveBeenCalledWith({
+      path: "/home/u/.me/me.md",
+      contents: ME_FILE_TEMPLATE,
+      topic: null,
+    });
   });
 
   it("saves only the user-owned memory file without automatic sharing", async () => {
     await saveMeFile("/home/u/.me/me.md", "## Preferences\n\n- Keep it brief.");
 
-    expect(mocks.writeTextFile).toHaveBeenCalledTimes(1);
-    expect(mocks.writeTextFile).toHaveBeenCalledWith(
-      "/home/u/.me/me.md",
-      "## Preferences\n\n- Keep it brief.",
-    );
-    expect(mocks.createTextFile).not.toHaveBeenCalled();
+    expect(mocks.saveMemoryDocument).toHaveBeenCalledWith({
+      path: "/home/u/.me/me.md",
+      contents: "## Preferences\n\n- Keep it brief.",
+      topic: null,
+    });
   });
 
   it("documents the plaintext local-filesystem boundary in the starter file", () => {

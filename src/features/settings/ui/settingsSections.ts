@@ -9,6 +9,7 @@ import {
   Settings2,
   Shield,
   SlidersHorizontal,
+  UserRound,
 } from "lucide-react";
 import { IconPlug, IconServer } from "@tabler/icons-react";
 import type {
@@ -93,6 +94,7 @@ type SettingsSectionDefinition = {
 export const SETTINGS_SECTIONS = [
   { id: "appearance", labelKey: "nav.appearance", icon: Palette },
   { id: "behavior", labelKey: "nav.behavior", icon: SlidersHorizontal },
+  { id: "me", labelKey: "nav.me", icon: UserRound },
   { id: "connections", labelKey: "nav.connections", icon: IconPlug },
   { id: "providers", labelKey: "nav.providers", icon: IconServer },
   { id: "notifications", labelKey: "nav.notifications", icon: Bell },
