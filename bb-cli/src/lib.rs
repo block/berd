@@ -5,6 +5,8 @@ mod cli;
 mod kgoose;
 mod proto;
 mod runtime;
+#[cfg(test)]
+mod test_server;
 
 pub use bb::agents_models;
 pub use bb::skills_api::{AgentMarketplace, MarketplaceClient};
