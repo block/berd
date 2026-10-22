@@ -283,6 +283,10 @@ fn asset_voice_name(paths: &[String]) -> Option<String> {
             .windows(3)
             .find(|window| window[0] == "assets")
             .map(|window| window[1])?;
+        // Newer assets use assets/voices/natural/<opaque id>, not a named build.
+        if directory.eq_ignore_ascii_case("voices") {
+            return None;
+        }
         let word = directory.split('_').next()?;
         (word.len() > 1 && word.bytes().all(|byte| byte.is_ascii_alphabetic())).then(|| {
             let word = word.to_ascii_lowercase();
@@ -311,6 +315,9 @@ fn parse_catalog_json(json: &str) -> Result<Vec<SiriVoice>, String> {
                         // Known names for when the asset isn't installed or readable.
                         "en-US-F" => "Zack".into(),
                         "en-US-G" => "Gigi".into(),
+                        "en-AU-C" => "Australian Siri Voice 3 (Male)".into(),
+                        "en-GB-C" => "British Siri Voice 3 (Female)".into(),
+                        "en-GB-D" => "British Siri Voice 4 (Male)".into(),
                         _ if !raw.localized_name.is_empty() => {
                             format!("Siri {}", raw.localized_name)
                         }
@@ -928,9 +935,31 @@ mod tests {
                 ("en-US-F", "Zack"),
                 ("en-US-G", "Gigi"),
                 ("de-DE-C", "Siri Voice 3"),
-                ("en-GB-C", "en-GB-C"),
+                ("en-GB-C", "British Siri Voice 3 (Female)"),
                 ("Li-Mu", "Li-Mu"),
                 ("Aaron", "Aaron")
+            ]
+        );
+    }
+
+    #[test]
+    fn regional_voice_labels_survive_generic_installed_names() {
+        let voices = parse_catalog_json(
+            r#"[
+                {"name":"en-AU-C","localizedName":"Voices","language":"en-AU","sizeBytes":1,"installed":true,"assetPaths":["s3://tts-platform/assets/voices/natural/2rMa84BAIPlFlwdcAytdZdfQwKK/fs2_device"]},
+                {"name":"en-GB-C","localizedName":"Voices","language":"en-GB","sizeBytes":1,"installed":true},
+                {"name":"en-GB-D","localizedName":"Voices","language":"en-GB","sizeBytes":1,"installed":true}
+            ]"#,
+        ).unwrap();
+        assert_eq!(
+            voices
+                .iter()
+                .map(|v| v.display_name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "Australian Siri Voice 3 (Male)",
+                "British Siri Voice 3 (Female)",
+                "British Siri Voice 4 (Male)"
             ]
         );
     }
