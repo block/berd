@@ -657,6 +657,24 @@ describe("AgentBuilderRail", () => {
     expect(promoteDraft).not.toHaveBeenCalled();
   });
 
+  it("reports local edits while a save is still in flight", () => {
+    // Between "save pressed" and "write landed" the disk still shows the old
+    // content. The session must not look untouched during that window.
+    mockHook({ saveStatus: "saving" });
+    const onLocalEditStateChange = vi.fn();
+
+    renderWithProviders(
+      <AgentBuilderRail
+        sessionId="s1"
+        targetAgentPath={baseSource.path}
+        targetAgentSlug="draft-1"
+        onLocalEditStateChange={onLocalEditStateChange}
+      />,
+    );
+
+    expect(onLocalEditStateChange).toHaveBeenLastCalledWith(true);
+  });
+
   it("allows existing agents to save without draft-only required metadata", async () => {
     const { saveNow } = mockHook({
       data: {
