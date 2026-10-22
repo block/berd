@@ -1718,6 +1718,25 @@ mod tests {
     }
 
     #[test]
+    fn cancel_request_wakes_a_waiter_that_checked_the_flag_before_waiting() {
+        let (output, _host) = fixture();
+        // Like the worker: the flag was checked under the lock, but the wait has not begun.
+        let state = output.state.lock().unwrap();
+        let current = Arc::clone(&output);
+        let canceller = thread::spawn(move || {
+            current.active.store(false, Ordering::SeqCst);
+            current.notify_cancel_requested();
+        });
+        thread::sleep(Duration::from_millis(50));
+        let (_state, wait) = output
+            .changed
+            .wait_timeout(state, Duration::from_secs(1))
+            .unwrap();
+        assert!(!wait.timed_out(), "cancellation wake was lost");
+        canceller.join().unwrap();
+    }
+
+    #[test]
     fn cancel_waits_for_quiescence_and_returns_the_settled_snapshot() {
         let (output, mut host) = fixture();
         start(&output, &mut host);
