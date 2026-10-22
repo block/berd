@@ -4134,6 +4134,117 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "opens the default CoreAudio output and queues silent PCM"]
+    fn audio_host_drain_waits_for_audio_end_and_playback() {
+        use std::os::fd::IntoRawFd;
+        use std::os::unix::net::UnixStream;
+
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (requests_tx, requests) = mpsc::channel();
+        let mut stdout = child.stdout.take().unwrap();
+        let reader = thread::spawn(move || {
+            let mut header = [0; crate::session_framing::FRAME_HEADER_BYTES];
+            while stdout.read_exact(&mut header).is_ok() {
+                assert_eq!(&header[..2], &crate::session_framing::FRAME_MAGIC);
+                assert_eq!(header[3], JSON_FRAME_KIND);
+                let length = u32::from_le_bytes(header[4..].try_into().unwrap()) as usize;
+                let mut payload = vec![0; length];
+                stdout.read_exact(&mut payload).unwrap();
+                let request: Value = serde_json::from_slice(&payload).unwrap();
+                if requests_tx.send(request).is_err() {
+                    break;
+                }
+            }
+        });
+        let receive = |kind: &str| loop {
+            let request = requests
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap_or_else(|error| panic!("waiting for {kind}: {error}"));
+            if request["type"] == kind {
+                break request;
+            }
+            assert_eq!(
+                request["type"], "audio_played",
+                "unexpected host response: {request}"
+            );
+        };
+        let (host, mut session) = UnixStream::pair().unwrap();
+        // SAFETY: ownership of the host socket descriptor transfers to File.
+        let audio = unsafe { File::from_raw_fd(host.into_raw_fd()) };
+        let (commands, commands_rx) = mpsc::channel();
+        let (failures_tx, failures) = mpsc::sync_channel(1);
+        spawn_audio_host(audio, Arc::clone(&writer), commands_rx, failures_tx).unwrap();
+        let mut record = |kind, payload: &[u8]| {
+            session.write_all(&AUDIO_FRAME_MAGIC).unwrap();
+            session.write_all(&[AUDIO_FRAME_MARKER, kind]).unwrap();
+            session
+                .write_all(&(payload.len() as u32).to_le_bytes())
+                .unwrap();
+            session.write_all(payload).unwrap();
+        };
+        let speech_id = 7_u64.to_le_bytes();
+        record(
+            AUDIO_BEGIN_KIND,
+            &[
+                speech_id.as_slice(),
+                &24_000_u32.to_le_bytes(),
+                &1_f32.to_le_bytes(),
+            ]
+            .concat(),
+        );
+        assert_eq!(receive("audio_begin_accepted")["speech_id"], 7);
+        commands.send(AudioCommand::Suspend(7)).unwrap();
+        receive("audio_suspended");
+        record(
+            AUDIO_CHUNK_KIND,
+            &[speech_id.as_slice(), &1_u64.to_le_bytes(), &[0; 960 * 4]].concat(),
+        );
+        receive("audio_chunk_accepted");
+
+        let (acknowledge, drained) = mpsc::sync_channel(1);
+        commands.send(AudioCommand::Drain(acknowledge)).unwrap();
+        // Suspension acknowledgement is emitted after the drain guard in the
+        // real host loop, proving it processed Drain while AUDIO_END is absent.
+        commands.send(AudioCommand::Suspend(7)).unwrap();
+        receive("audio_suspended");
+        assert_eq!(drained.try_recv(), Err(TryRecvError::Empty));
+
+        record(
+            AUDIO_END_KIND,
+            &[
+                speech_id.as_slice(),
+                &1_u64.to_le_bytes(),
+                &960_u64.to_le_bytes(),
+            ]
+            .concat(),
+        );
+        commands.send(AudioCommand::Suspend(7)).unwrap();
+        receive("audio_suspended");
+        assert_eq!(
+            drained.try_recv(),
+            Err(TryRecvError::Empty),
+            "ended audio still has paused playback queued"
+        );
+        commands.send(AudioCommand::Resume(7)).unwrap();
+        receive("audio_resumed");
+        let completed = receive("audio_drained");
+        assert_eq!(completed["sequence"], 1);
+        assert_eq!(completed["played_frames"], 960);
+        drained.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(failures.try_recv().is_err());
+        drop(commands);
+        drop(session);
+        drop(writer);
+        assert!(child.wait().unwrap().success());
+        reader.join().unwrap();
+    }
+
+    #[test]
     fn a_restart_waits_for_the_spokesperson_reply_playing_without_a_speak() {
         let mut child = Command::new("/bin/cat")
             .stdin(Stdio::piped())
