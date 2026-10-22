@@ -1,4 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::thread;
 use std::time::Duration;
 
@@ -231,6 +235,13 @@ pub struct OpenAiSpokespersonRuntime {
     commands: mpsc::UnboundedSender<SpokespersonCommand>,
     audio: mpsc::Sender<SpokespersonCommand>,
     worker: Option<thread::JoinHandle<()>>,
+    terminal_published: Arc<AtomicBool>,
+}
+
+#[derive(Debug)]
+enum RuntimeExit {
+    Shutdown,
+    Terminal,
 }
 
 struct PendingTruncation {
@@ -322,9 +333,11 @@ impl OpenAiSpokespersonRuntime {
         config: OpenAiSpokespersonConfig,
         forward_provider_events: bool,
     ) -> Result<(Self, std::sync::mpsc::Receiver<SpokespersonEvent>), String> {
-        let (commands, command_rx) = mpsc::unbounded_channel();
-        let (audio, audio_rx) = mpsc::channel(INPUT_QUEUE_FRAMES);
+        let (commands, mut command_rx) = mpsc::unbounded_channel();
+        let (audio, mut audio_rx) = mpsc::channel(INPUT_QUEUE_FRAMES);
         let (events, event_rx) = std::sync::mpsc::channel();
+        let terminal_published = Arc::new(AtomicBool::new(false));
+        let worker_terminal = Arc::clone(&terminal_published);
         let worker = thread::Builder::new()
             .name("berd-call-spokesperson".into())
             .spawn(move || {
@@ -338,15 +351,22 @@ impl OpenAiSpokespersonRuntime {
                         return;
                     }
                 };
-                if let Err(error) = runtime.block_on(run_inner(
+                let terminal = match runtime.block_on(run_inner(
                     config,
-                    command_rx,
-                    audio_rx,
+                    &mut command_rx,
+                    &mut audio_rx,
                     &events,
                     forward_provider_events,
                 )) {
-                    let _ = events.send(SpokespersonEvent::Failed(error));
-                }
+                    Ok(RuntimeExit::Terminal) => true,
+                    Ok(RuntimeExit::Shutdown) => false,
+                    Err(error) => events.send(SpokespersonEvent::Failed(error)).is_ok(),
+                };
+                // Publish the terminal before dropping the command receiver. A late handoff
+                // acknowledgement can then defer to that ordered event instead of masking it.
+                worker_terminal.store(terminal, Ordering::Release);
+                drop(command_rx);
+                drop(audio_rx);
                 let _ = events.send(SpokespersonEvent::Closed);
             })
             .map_err(|error| error.to_string())?;
@@ -355,9 +375,21 @@ impl OpenAiSpokespersonRuntime {
                 commands,
                 audio,
                 worker: Some(worker),
+                terminal_published,
             },
             event_rx,
         ))
+    }
+
+    /// Acknowledge a handoff unless an ordered provider terminal already ended it.
+    pub fn acknowledge_handoff(&self, call_id: &str, handoff_id: &str) -> Result<(), String> {
+        let command = SpokespersonCommand::Provider(
+            crate::openai_realtime_protocol::accepted_handoff_tool_output(call_id, handoff_id)?,
+        );
+        match self.send(command) {
+            Err(_) if self.terminal_published.load(Ordering::Acquire) => Ok(()),
+            result => result,
+        }
     }
 
     pub fn send(&self, command: SpokespersonCommand) -> Result<(), String> {
@@ -437,11 +469,13 @@ fn reap_spokesperson_worker(
 #[cfg(test)]
 async fn run(
     config: OpenAiSpokespersonConfig,
-    commands: mpsc::UnboundedReceiver<SpokespersonCommand>,
+    mut commands: mpsc::UnboundedReceiver<SpokespersonCommand>,
     events: &std::sync::mpsc::Sender<SpokespersonEvent>,
 ) -> Result<(), String> {
-    let (_audio_tx, audio_rx) = mpsc::channel(INPUT_QUEUE_FRAMES);
-    run_inner(config, commands, audio_rx, events, false).await
+    let (_audio_tx, mut audio_rx) = mpsc::channel(INPUT_QUEUE_FRAMES);
+    run_inner(config, &mut commands, &mut audio_rx, events, false)
+        .await
+        .map(|_| ())
 }
 
 /// The next command, or `None` once the runtime is shut down.
@@ -457,11 +491,11 @@ async fn next_command(
 
 async fn run_inner(
     mut config: OpenAiSpokespersonConfig,
-    mut commands: mpsc::UnboundedReceiver<SpokespersonCommand>,
-    mut audio: mpsc::Receiver<SpokespersonCommand>,
+    commands: &mut mpsc::UnboundedReceiver<SpokespersonCommand>,
+    audio: &mut mpsc::Receiver<SpokespersonCommand>,
     events: &std::sync::mpsc::Sender<SpokespersonEvent>,
     forward_provider_events: bool,
-) -> Result<(), String> {
+) -> Result<RuntimeExit, String> {
     if let Err(existing) = rustls::crypto::aws_lc_rs::default_provider().install_default() {
         drop(existing);
     }
@@ -488,7 +522,7 @@ async fn run_inner(
             .map_err(|_| "connect OpenAI Realtime timed out".to_string())?
             .map_err(|error| format!("connect OpenAI Realtime: {error}"))?,
         command = commands.recv() => match command {
-            Some(SpokespersonCommand::Shutdown) | None => return Ok(()),
+            Some(SpokespersonCommand::Shutdown) | None => return Ok(RuntimeExit::Shutdown),
             Some(_) => return Err("Spokesperson command arrived before readiness".into()),
         }
     };
@@ -528,7 +562,7 @@ async fn run_inner(
             && committed_input_items.is_empty()
         {
             let _ = socket.close(None).await;
-            return Ok(());
+            return Ok(RuntimeExit::Shutdown);
         }
         let truncation_deadline = pending_truncations
             .values()
@@ -556,7 +590,7 @@ async fn run_inner(
                 }
             }, if shutdown_deadline.is_some() => {
                 let _ = socket.close(None).await;
-                return Ok(());
+                return Ok(RuntimeExit::Shutdown);
             }
             _ = async {
                 match reset_deadline {
@@ -600,7 +634,7 @@ async fn run_inner(
                     return Err("Spokesperson output truncation timed out; server context is indeterminate".into());
                 }
             }
-            command = next_command(&mut commands, &mut audio), if shutdown_deadline.is_none() => {
+            command = next_command(commands, audio), if shutdown_deadline.is_none() => {
                 match command? {
                     Some(SpokespersonCommand::Provider(event)) => {
                         send_json(&mut socket, event).await?;
@@ -730,7 +764,7 @@ async fn run_inner(
                                 "OpenAI Realtime connection closed {detail}"
                             )),
                         )?;
-                        return Ok(());
+                        return Ok(RuntimeExit::Terminal);
                     }
                     None => {
                         send_event(
@@ -739,7 +773,7 @@ async fn run_inner(
                                 "OpenAI Realtime connection ended without a close frame".into(),
                             ),
                         )?;
-                        return Ok(());
+                        return Ok(RuntimeExit::Terminal);
                     }
                     Some(Ok(_)) => continue,
                     Some(Err(error)) => {
@@ -749,7 +783,7 @@ async fn run_inner(
                                 "OpenAI Realtime transport failed: {error}"
                             )),
                         )?;
-                        return Ok(());
+                        return Ok(RuntimeExit::Terminal);
                     }
                 };
                 let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
@@ -1041,7 +1075,7 @@ async fn run_inner(
                             || message == "Your session hit the maximum duration of 60 minutes."
                         {
                             send_event(events, SpokespersonEvent::Expired(message))?;
-                            return Ok(());
+                            return Ok(RuntimeExit::Terminal);
                         } else {
                             return Err(message);
                         }
@@ -1158,6 +1192,7 @@ mod tests {
             commands,
             audio,
             worker: Some(worker),
+            terminal_published: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         let caller = std::thread::spawn(move || {
             runtime.retire_in_background();
@@ -1285,6 +1320,7 @@ mod tests {
             commands,
             audio,
             worker: None,
+            terminal_published: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
 
         runtime
@@ -1414,8 +1450,8 @@ mod tests {
             .await;
             let _ = socket.close(None).await;
         });
-        let (commands, command_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (_audio, audio_rx) = tokio::sync::mpsc::channel(1);
+        let (commands, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (_audio, mut audio_rx) = tokio::sync::mpsc::channel(1);
         let (events, event_rx) = std::sync::mpsc::channel();
         let ready = tokio::task::spawn_blocking(move || {
             let mut observed = Vec::new();
@@ -1434,8 +1470,8 @@ mod tests {
             Duration::from_secs(5),
             super::run_inner(
                 test_config(endpoint, "test-voice", 1.0, Vec::new()),
-                command_rx,
-                audio_rx,
+                &mut command_rx,
+                &mut audio_rx,
                 &events,
                 true,
             ),
@@ -2095,6 +2131,84 @@ mod tests {
         assert_eq!(second, Err("refused".into()));
         runtime.finish().unwrap();
         server.await.unwrap();
+    }
+
+    #[test]
+    fn handoff_acknowledgement_does_not_hide_unexplained_closure() {
+        let (commands, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (audio, _audio_rx) = tokio::sync::mpsc::channel(1);
+        drop(receiver);
+        let runtime = super::OpenAiSpokespersonRuntime {
+            commands,
+            audio,
+            worker: None,
+            terminal_published: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+        assert_eq!(
+            runtime.acknowledge_handoff("handoff-1", "handoff-external-1"),
+            Err("Spokesperson runtime is closed".into()),
+        );
+    }
+
+    #[tokio::test]
+    async fn handoff_acknowledgement_after_provider_terminal_preserves_its_attribution() {
+        for terminal in [
+            json!({"type":"error","error":{"code":"session_expired","message":"expiry detail"}}),
+            json!({"type":"error","error":{"code":"test_failure","message":"failure detail"}}),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+            let server =
+                tokio::spawn(async move {
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let mut socket = accept_hdr_async(stream, require_test_authorization)
+                        .await
+                        .unwrap();
+                    let initial = receive_json(&mut socket).await;
+                    acknowledge_initial_session(&mut socket, &initial, "test-model").await;
+                    send_json(&mut socket, json!({
+                    "type":"response.function_call_arguments.done",
+                    "response_id":"response-handoff", "call_id":"handoff-1", "name":"handoff",
+                    "arguments":"{\"message\":\"inspect the repository\"}"
+                })).await;
+                    send_json(&mut socket, terminal).await;
+                    while socket.next().await.is_some() {}
+                });
+            let (mut runtime, events) = OpenAiSpokespersonRuntime::spawn(test_config(
+                endpoint,
+                "test-voice",
+                1.0,
+                Vec::new(),
+            ))
+            .unwrap();
+            // Joining makes receiver closure precede acknowledgement without a timing assumption.
+            runtime = tokio::time::timeout(
+                Duration::from_secs(5),
+                tokio::task::spawn_blocking(move || {
+                    runtime.worker.take().unwrap().join().unwrap();
+                    runtime
+                }),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(matches!(events.recv().unwrap(), SpokespersonEvent::Ready));
+            assert!(matches!(
+                events.recv().unwrap(),
+                SpokespersonEvent::Handoff { .. }
+            ));
+            runtime
+                .acknowledge_handoff("handoff-1", "handoff-external-1")
+                .unwrap();
+            match events.recv().unwrap() {
+                SpokespersonEvent::Expired(message) => assert_eq!(message, "expiry detail"),
+                SpokespersonEvent::Failed(message) => assert_eq!(message, "failure detail"),
+                event => panic!("original terminal was lost: {event:?}"),
+            }
+            assert!(matches!(events.recv().unwrap(), SpokespersonEvent::Closed));
+            assert!(runtime.send(SpokespersonCommand::Shutdown).is_err());
+            server.await.unwrap();
+        }
     }
 
     #[test]
