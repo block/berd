@@ -321,6 +321,8 @@ impl RemotePcmAudioOutput {
     /// Wakes the playback worker so it can serialize Cancel on the audio pipe.
     /// The caller owns only the cancellation flag; pipe writes remain worker-owned.
     pub fn notify_cancel_requested(&self) {
+        // Waiters check the flag under this lock, so taking it orders the wake after any check.
+        drop(self.state.lock().expect("remote output state"));
         self.changed.notify_all();
     }
 
