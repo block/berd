@@ -18,7 +18,7 @@ Call runtime:
 
 Speech and models:
   synthesize              Render text to a WAV file
-  voices                  List or download Siri voices
+  voices                  List, download, or preview Siri voices
   models                  Inspect or install speech models
 
 Diagnostics:
@@ -93,7 +93,7 @@ Usage:
   berd-call settings [--port PORT] --spokesperson-voice NAME
   berd-call settings [--port PORT] --spokesperson-rate FLOAT
   berd-call settings [--port PORT] --tts JSON
-  berd-call settings [--port PORT] --input-during-tts allow|suppress
+  berd-call settings [--port PORT] --input-during-tts auto|allow|suppress
   berd-call settings [--port PORT] --muted true|false
   berd-call settings [--port PORT] --status-sounds off|working|working-and-waiting
   berd-call settings [--port PORT] --conversation-status working|waiting
@@ -148,9 +148,10 @@ Usage:
 
 Each form also accepts:
     [--rate FLOAT]
-    [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH]
+    [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH] [--stt-hint PHRASE]...
     [--mode conventional|expert-spokesperson] [--allow-direct-agent-speech]
     [--spokesperson-voice NAME] [--spokesperson-rate 0.25..1.5]
+    [--spokesperson-options JSON]
     [--realtime-url WS_URL] [--stt-url WS_URL] [--tts-url HTTP_URL]
 
 The host owns microphone capture, audio playback, transcript delivery, and
@@ -162,7 +163,13 @@ In expert-spokesperson mode, the Expert speaks through the Spokesperson.
 --allow-direct-agent-speech also lets it speak to the user itself, through the
 configured TTS backend, in its own voice beside the Spokesperson's. --spokesperson-voice then
 chooses the Spokesperson's own voice. It speaks as close to --rate as it can, unless
---spokesperson-rate chooses its own speed."#;
+--spokesperson-rate chooses its own speed. --spokesperson-options sets the rest of its
+realtime session, as Berd's Advanced settings do, with a JSON object of model,
+transcriptionModel, transcriptionLanguage, transcriptionPrompt, turnDetection
+(server_vad|semantic_vad), eagerness, interruptResponse, createResponse,
+vadThreshold, prefixPaddingMs, silenceDurationMs, idleTimeoutMs, noiseReduction
+(off|near_field|far_field), reasoningEffort and maxOutputTokens. Saved settings
+don't keep it, so pass it on each start."#;
 
 const SYNTHESIZE_HELP: &str = r#"Render text through a configured TTS backend into a new WAV file.
 
@@ -174,12 +181,18 @@ Usage:
 The command never overwrites an existing output file. OpenAI synthesis requires
 explicit --allow-paid-openai consent."#;
 
-const VOICES_HELP: &str = r#"Inspect or download Siri voices.
+const VOICES_HELP: &str = r#"Inspect, download, or preview Siri voices.
 
 Usage:
   berd-call voices list [--language BCP47]
   berd-call voices download --voice NAME --language BCP47
-    [--availability-wait-seconds 1..1800]"#;
+    [--availability-wait-seconds 1..1800]
+  berd-call voices preview --voice NAME --language BCP47 [--rate 0.5..2.0]
+
+preview plays the voice through the default output and exits when playback
+ends. It plays Apple's system sample, which works before the voice is
+downloaded, or else speaks a short sentence with an installed voice. SIGINT or
+SIGTERM stops playback and exits."#;
 
 const MODELS_HELP: &str = r#"Inspect or install speech models.
 
@@ -248,7 +261,7 @@ fn help_for(topic: &[&str]) -> Option<&'static str> {
         ["stop"] => Some(STOP_HELP),
         ["session"] => Some(SESSION_HELP),
         ["synthesize"] => Some(SYNTHESIZE_HELP),
-        ["voices"] | ["voices", "list" | "download"] => Some(VOICES_HELP),
+        ["voices"] | ["voices", "list" | "download" | "preview"] => Some(VOICES_HELP),
         ["models"]
         | ["models", "macos", "status" | "install"]
         | ["models", "openai", "voices"]

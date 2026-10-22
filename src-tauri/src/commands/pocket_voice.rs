@@ -383,23 +383,8 @@ pub(crate) fn effective_output_device_name(configured: Option<&str>) -> Option<S
 }
 
 pub(crate) fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
-    if output_device.is_some_and(|name| {
-        let normalized = name.to_lowercase();
-        ["speaker", "altavo"]
-            .iter()
-            .any(|keyword| normalized.contains(keyword))
-    }) {
-        return true;
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        output_device.is_some()
-            && berd_call::macos_audio_route::output_device_is_builtin_speaker(output_device)
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    false
+    // No configured/effective route remains unknown to the desktop host.
+    output_device.is_some() && berd_call::input::output_device_uses_speakers(output_device)
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -413,18 +398,16 @@ pub(crate) enum VoiceInterruptionMode {
 #[cfg_attr(not(any(test, target_os = "macos")), allow(dead_code))]
 pub(crate) fn resolve_input_during_tts_policy(
     mode: VoiceInterruptionMode,
-    output_device: Option<&str>,
+    configured_output_device: Option<&str>,
 ) -> InputDuringTtsPolicy {
-    match mode {
-        // Automatic is best-effort because macOS cannot classify every external route.
-        // Prevent feedback remains the reliable fallback when this heuristic misses one.
-        VoiceInterruptionMode::Automatic if output_device_uses_speakers(output_device) => {
-            InputDuringTtsPolicy::SuppressInput
+    match (mode, configured_output_device) {
+        // Only the system default follows route changes during playback.
+        (VoiceInterruptionMode::Automatic, Some(output)) => {
+            InputDuringTtsPolicy::Auto.resolve(Some(output))
         }
-        VoiceInterruptionMode::Automatic | VoiceInterruptionMode::AllowInterruptions => {
-            InputDuringTtsPolicy::AllowBargeIn
-        }
-        VoiceInterruptionMode::PreventFeedback => InputDuringTtsPolicy::SuppressInput,
+        (VoiceInterruptionMode::Automatic, None) => InputDuringTtsPolicy::Auto,
+        (VoiceInterruptionMode::AllowInterruptions, _) => InputDuringTtsPolicy::AllowBargeIn,
+        (VoiceInterruptionMode::PreventFeedback, _) => InputDuringTtsPolicy::SuppressInput,
     }
 }
 
@@ -801,9 +784,8 @@ pub fn start_pocket_voice_stream(
             .ok_or_else(|| format!("Unknown selected Pocket voice: {voice_id}"))?;
         let session = begin_playback(&state, "Pocket voice playback is already active", &base)?;
         let output_device = selected_output_device();
-        let effective_output_device = effective_output_device_name(output_device.as_deref());
         let input_during_tts =
-            resolve_input_during_tts_policy(interruption_mode, effective_output_device.as_deref());
+            resolve_input_during_tts_policy(interruption_mode, output_device.as_deref());
         let (sender, receiver) = mpsc::channel();
         {
             let mut playback = state
@@ -2530,48 +2512,47 @@ mod tests {
     #[test]
     fn interruption_mode_resolves_shared_input_policy() {
         assert_eq!(
-            resolve_input_during_tts_policy(
-                VoiceInterruptionMode::Automatic,
-                Some("MacBook Pro Speakers"),
-            ),
+            resolve_input_during_tts_policy(VoiceInterruptionMode::Automatic, None),
+            InputDuringTtsPolicy::Auto
+        );
+        assert_eq!(
+            resolve_input_during_tts_policy(VoiceInterruptionMode::AllowInterruptions, None),
+            InputDuringTtsPolicy::AllowBargeIn
+        );
+        assert_eq!(
+            resolve_input_during_tts_policy(VoiceInterruptionMode::PreventFeedback, None),
             InputDuringTtsPolicy::SuppressInput
         );
-        assert_eq!(
-            resolve_input_during_tts_policy(VoiceInterruptionMode::Automatic, Some("AirPods Pro"),),
-            InputDuringTtsPolicy::AllowBargeIn
-        );
-        assert_eq!(
-            resolve_input_during_tts_policy(
-                VoiceInterruptionMode::Automatic,
-                Some("USB Headphones"),
+    }
+
+    #[test]
+    fn configured_output_route_controls_automatic_interruption_policy() {
+        for (output, automatic) in [
+            (
+                Some("External Speakers"),
+                InputDuringTtsPolicy::SuppressInput,
             ),
-            InputDuringTtsPolicy::AllowBargeIn
-        );
-        assert_eq!(
-            resolve_input_during_tts_policy(
-                VoiceInterruptionMode::Automatic,
-                Some("Studio Display Audio"),
-            ),
-            InputDuringTtsPolicy::AllowBargeIn
-        );
-        assert_eq!(
-            resolve_input_during_tts_policy(VoiceInterruptionMode::Automatic, None,),
-            InputDuringTtsPolicy::AllowBargeIn
-        );
-        assert_eq!(
-            resolve_input_during_tts_policy(
-                VoiceInterruptionMode::AllowInterruptions,
-                Some("MacBook Pro Speakers"),
-            ),
-            InputDuringTtsPolicy::AllowBargeIn
-        );
-        assert_eq!(
-            resolve_input_during_tts_policy(
-                VoiceInterruptionMode::PreventFeedback,
-                Some("AirPods Pro"),
-            ),
-            InputDuringTtsPolicy::SuppressInput
-        );
+            (Some("USB Headphones"), InputDuringTtsPolicy::AllowBargeIn),
+            (None, InputDuringTtsPolicy::Auto),
+        ] {
+            for (mode, expected) in [
+                (VoiceInterruptionMode::Automatic, automatic),
+                (
+                    VoiceInterruptionMode::AllowInterruptions,
+                    InputDuringTtsPolicy::AllowBargeIn,
+                ),
+                (
+                    VoiceInterruptionMode::PreventFeedback,
+                    InputDuringTtsPolicy::SuppressInput,
+                ),
+            ] {
+                assert_eq!(
+                    resolve_input_during_tts_policy(mode, output),
+                    expected,
+                    "{mode:?}: {output:?}"
+                );
+            }
+        }
     }
 
     #[cfg(target_os = "macos")]

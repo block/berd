@@ -904,7 +904,7 @@ pub fn start_siri_voice_stream(
         let output_device = selected_output_device();
         let effective_output_device = effective_output_device_name(output_device.as_deref());
         let input_during_tts =
-            resolve_input_during_tts_policy(interruption_mode, effective_output_device.as_deref());
+            resolve_input_during_tts_policy(interruption_mode, output_device.as_deref());
         let playback_latency_safety_duration =
             playback_latency_safety_duration(effective_output_device.as_deref());
         let Some(admission) = native_voice.claim_assistant_speech(

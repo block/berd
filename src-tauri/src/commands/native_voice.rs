@@ -1510,7 +1510,7 @@ pub async fn start_native_voice_conversation(
         VoiceInputBackend::Macos => {
             #[cfg(target_os = "macos")]
             {
-                Ok(berd_call::input::VoiceInputEngineConfig::MacSpeech)
+                Ok(berd_call::input::VoiceInputEngineConfig::MacSpeech { hints: vec![] })
             }
             #[cfg(not(target_os = "macos"))]
             {

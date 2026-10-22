@@ -23,7 +23,7 @@ pub const OPENAI_REALTIME_VOICE_IDS: &[&str] = &[
 static SPOKESPERSON_INSTRUCTIONS: LazyLock<String> =
     LazyLock::new(|| realtime_role_instructions("Spokesperson"));
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum RealtimeTurnDetection {
     #[default]
@@ -31,7 +31,7 @@ pub enum RealtimeTurnDetection {
     SemanticVad,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum RealtimeEagerness {
     Low,
@@ -41,7 +41,7 @@ pub enum RealtimeEagerness {
     Auto,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum RealtimeNoiseReduction {
     Off,
@@ -49,7 +49,7 @@ pub enum RealtimeNoiseReduction {
     FarField,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum RealtimeReasoningEffort {
     Default,
@@ -59,7 +59,7 @@ pub enum RealtimeReasoningEffort {
     High,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RealtimeSpokespersonSessionOptions {
     pub model: Option<String>,
@@ -79,6 +79,79 @@ pub struct RealtimeSpokespersonSessionOptions {
     pub noise_reduction: Option<RealtimeNoiseReduction>,
     pub reasoning_effort: Option<RealtimeReasoningEffort>,
     pub max_output_tokens: Option<u64>,
+}
+
+impl RealtimeSpokespersonSessionOptions {
+    /// A call's own options for its Spokesperson, as Berd's camelCase JSON within Berd's ranges.
+    /// The voice and speed have settings of their own, so they are refused here.
+    pub fn from_call_json(json: &str) -> Result<Self, String> {
+        let invalid = |error: String| format!("--spokesperson-options is invalid: {error}");
+        let fields: serde_json::Map<String, Value> =
+            serde_json::from_str(json).map_err(|error| invalid(error.to_string()))?;
+        if let Some(field) = fields.keys().find(|field| {
+            !matches!(
+                field.as_str(),
+                "model"
+                    | "transcriptionModel"
+                    | "transcriptionLanguage"
+                    | "transcriptionPrompt"
+                    | "turnDetection"
+                    | "eagerness"
+                    | "interruptResponse"
+                    | "createResponse"
+                    | "vadThreshold"
+                    | "prefixPaddingMs"
+                    | "silenceDurationMs"
+                    | "idleTimeoutMs"
+                    | "noiseReduction"
+                    | "reasoningEffort"
+                    | "maxOutputTokens"
+            )
+        }) {
+            return Err(invalid(format!("{field} is not a Spokesperson option")));
+        }
+        let options: Self = serde_json::from_value(Value::Object(fields))
+            .map_err(|error| invalid(error.to_string()))?;
+        let blank =
+            |value: &Option<String>| value.as_ref().is_some_and(|value| value.trim().is_empty());
+        let outside = |value: Option<u64>, range: std::ops::RangeInclusive<u64>| {
+            value.is_some_and(|value| !range.contains(&value))
+        };
+        for (name, bad) in [
+            ("model must not be blank", blank(&options.model)),
+            (
+                "transcriptionModel must not be blank",
+                blank(&options.transcription_model),
+            ),
+            (
+                "vadThreshold must be between 0 and 1",
+                options
+                    .vad_threshold
+                    .is_some_and(|value| !(0.0..=1.0).contains(&value)),
+            ),
+            (
+                "prefixPaddingMs must be between 0 and 2000",
+                outside(options.prefix_padding_ms, 0..=2_000),
+            ),
+            (
+                "silenceDurationMs must be between 100 and 3000",
+                outside(options.silence_duration_ms, 100..=3_000),
+            ),
+            (
+                "idleTimeoutMs must be between 1000 and 120000",
+                outside(options.idle_timeout_ms, 1_000..=120_000),
+            ),
+            (
+                "maxOutputTokens must be between 1 and 4096",
+                outside(options.max_output_tokens, 1..=4_096),
+            ),
+        ] {
+            if bad {
+                return Err(invalid(name.into()));
+            }
+        }
+        Ok(options)
+    }
 }
 
 pub fn realtime_role_instructions(role: &str) -> String {

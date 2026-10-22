@@ -82,7 +82,9 @@ pub enum VoiceInputEngineConfig {
         model_dir: PathBuf,
     },
     #[cfg(target_os = "macos")]
-    MacSpeech,
+    MacSpeech {
+        hints: Vec<String>,
+    },
     OpenAi {
         endpoint: String,
         api_key: String,
@@ -170,6 +172,8 @@ struct ControlState {
 #[derive(Default)]
 struct ControlTransitionState {
     host_muted: bool,
+    auto_suppressed: bool,
+    auto_monitor_running: bool,
     assistant_activity: AssistantActivityState,
 }
 
@@ -187,8 +191,53 @@ struct AssistantActivity {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum InputDuringTtsPolicy {
+    Auto,
     AllowBargeIn,
     SuppressInput,
+}
+
+impl InputDuringTtsPolicy {
+    pub fn resolve(self, output_device: Option<&str>) -> Self {
+        if self == Self::Auto {
+            self.resolve_for_speakers(output_device_uses_speakers(output_device))
+        } else {
+            self
+        }
+    }
+
+    pub fn resolve_for_speakers(self, speakers: bool) -> Self {
+        match self {
+            Self::Auto if speakers => Self::SuppressInput,
+            Self::Auto => Self::AllowBargeIn,
+            explicit => explicit,
+        }
+    }
+}
+
+/// Shared best-effort route classification for desktop and CLI callers.
+pub fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
+    #[cfg(target_os = "macos")]
+    let (default_name, builtin) = (
+        crate::macos_audio_route::default_output_device_name as fn() -> Option<String>,
+        || crate::macos_audio_route::output_device_is_builtin_speaker(output_device),
+    );
+    #[cfg(not(target_os = "macos"))]
+    let (default_name, builtin) = ((|| None) as fn() -> Option<String>, || false);
+    route_uses_speakers(output_device, default_name, builtin)
+}
+
+/// A named route is judged by its name, then by built-in speaker metadata. No
+/// name means the default output, which is named the same way.
+fn route_uses_speakers(
+    output_device: Option<&str>,
+    default_name: impl FnOnce() -> Option<String>,
+    builtin_speaker: impl FnOnce() -> bool,
+) -> bool {
+    let name = output_device.map(str::to_owned).or_else(default_name);
+    name.is_some_and(|name| {
+        let name = name.to_lowercase();
+        ["speaker", "altavo"].iter().any(|word| name.contains(word))
+    }) || builtin_speaker()
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -314,8 +363,46 @@ impl VoiceInputControls {
                 input_policy,
             },
         );
+        let start_monitor =
+            input_policy == InputDuringTtsPolicy::Auto && !transition.auto_monitor_running;
+        if start_monitor {
+            transition.auto_suppressed =
+                InputDuringTtsPolicy::Auto.resolve(None) == InputDuringTtsPolicy::SuppressInput;
+            transition.auto_monitor_running = true;
+        }
         self.publish_assistant_activity(&transition.assistant_activity);
         self.publish_effective_mute(&transition);
+        drop(transition);
+        if start_monitor {
+            // Route queries stay off capture callbacks. The monitor owns no strong
+            // reference while sleeping and ends after the last Auto activity.
+            let shared = Arc::downgrade(&self.shared);
+            thread::spawn(move || loop {
+                thread::sleep(Duration::from_millis(100));
+                let Some(shared) = shared.upgrade() else {
+                    break;
+                };
+                let controls = VoiceInputControls { shared };
+                let suppress =
+                    InputDuringTtsPolicy::Auto.resolve(None) == InputDuringTtsPolicy::SuppressInput;
+                let mut transition = controls
+                    .shared
+                    .transition
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if !transition
+                    .assistant_activity
+                    .lifetimes
+                    .values()
+                    .any(|activity| activity.input_policy == InputDuringTtsPolicy::Auto)
+                {
+                    transition.auto_monitor_running = false;
+                    break;
+                }
+                transition.auto_suppressed = suppress;
+                controls.publish_effective_mute(&transition);
+            });
+        }
         Ok(AssistantActivityGuard {
             controls: self.clone(),
             generation,
@@ -335,11 +422,17 @@ impl VoiceInputControls {
     }
 
     fn publish_effective_mute(&self, transition: &ControlTransitionState) {
-        let assistant_suppressed = transition
-            .assistant_activity
-            .lifetimes
-            .values()
-            .any(|activity| activity.input_policy == InputDuringTtsPolicy::SuppressInput);
+        let assistant_suppressed =
+            transition
+                .assistant_activity
+                .lifetimes
+                .values()
+                .any(|activity| {
+                    activity
+                        .input_policy
+                        .resolve_for_speakers(transition.auto_suppressed)
+                        == InputDuringTtsPolicy::SuppressInput
+                });
         let muted = transition.host_muted || assistant_suppressed;
         if self.shared.muted.swap(muted, Ordering::AcqRel) != muted {
             self.shared.mute_epoch.fetch_add(1, Ordering::AcqRel);
@@ -437,7 +530,7 @@ impl VoiceInputRuntime {
                 }),
             ),
             #[cfg(target_os = "macos")]
-            VoiceInputEngineConfig::MacSpeech => (
+            VoiceInputEngineConfig::MacSpeech { hints } => (
                 "berd-macos-stt",
                 Box::new(move || {
                     mac_speech_worker(
@@ -448,6 +541,7 @@ impl VoiceInputRuntime {
                         worker_shutdown_epoch,
                         worker_controls,
                         speech_threshold,
+                        hints,
                     )
                 }),
             ),
@@ -1284,14 +1378,16 @@ fn complete_parakeet_recognition(
 }
 
 #[cfg(target_os = "macos")]
-fn new_mac_recognizer() -> Result<
+fn new_mac_recognizer(
+    hints: &[String],
+) -> Result<
     (
         crate::mac_speech::MacSpeechRecognizer,
         tokio_mpsc::UnboundedReceiver<crate::mac_speech::MacSpeechRecognitionEvent>,
     ),
     String,
 > {
-    crate::mac_speech::MacSpeechRecognizer::new()
+    crate::mac_speech::MacSpeechRecognizer::with_hints(hints)
 }
 
 #[cfg(target_os = "macos")]
@@ -1383,10 +1479,11 @@ fn mac_speech_worker(
     shutdown_mute_epoch: Arc<AtomicU64>,
     controls: VoiceInputControls,
     speech_vad_threshold: f32,
+    hints: Vec<String>,
 ) {
     use rubato::{Fft, FixedSync, Resampler};
 
-    let (mut recognizer, mut recognition_events) = match new_mac_recognizer() {
+    let (mut recognizer, mut recognition_events) = match new_mac_recognizer(&hints) {
         Ok(session) => session,
         Err(error) => {
             let _ = events.blocking_send(VoiceInputEvent::Failed(error));
@@ -1440,7 +1537,7 @@ fn mac_speech_worker(
             leftover_16k.clear();
             silence_frames = 0;
             vad = earshot::Detector::new(earshot::DefaultPredictor::new());
-            match new_mac_recognizer() {
+            match new_mac_recognizer(&hints) {
                 Ok((next, next_events)) => {
                     recognizer = next;
                     recognition_events = next_events;
@@ -1473,7 +1570,7 @@ fn mac_speech_worker(
             if shutting_down {
                 break;
             }
-            match new_mac_recognizer() {
+            match new_mac_recognizer(&hints) {
                 Ok((next, next_events)) => {
                     recognizer = next;
                     recognition_events = next_events;
@@ -2069,8 +2166,129 @@ fn openai_worker(
 mod tests {
     use super::*;
 
+    #[test]
+    fn default_output_is_classified_by_its_name() {
+        for name in ["USB Speakers", "Bluetooth SPEAKER", "Altavoces externos"] {
+            assert!(
+                route_uses_speakers(None, || Some(name.into()), || false),
+                "{name}"
+            );
+        }
+        for name in ["AirPods Pro", "USB Headphones"] {
+            assert!(!route_uses_speakers(None, || Some(name.into()), || false));
+        }
+        assert!(!route_uses_speakers(None, || None, || false));
+        assert!(route_uses_speakers(
+            None,
+            || Some("MacBook".into()),
+            || true
+        ));
+        let named = |default: fn() -> Option<String>| {
+            route_uses_speakers(Some("AirPods"), default, || false)
+        };
+        assert!(!named(|| Some("USB Speakers".into())));
+    }
+
     fn silence_frame() -> VoiceInputFrame {
         VoiceInputFrame::try_from_samples(&[0.0; INPUT_FRAME_SAMPLES]).unwrap()
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "changes the default output; requires SwitchAudioSource and BlackHole 2ch"]
+    fn native_auto_mute_follows_default_output_during_speech() {
+        fn output(args: &[&str]) -> String {
+            let result = std::process::Command::new("SwitchAudioSource")
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            String::from_utf8(result.stdout).unwrap().trim().to_owned()
+        }
+        struct RestoreOutput(String);
+        impl Drop for RestoreOutput {
+            fn drop(&mut self) {
+                let _ = std::process::Command::new("SwitchAudioSource")
+                    .args(["-s", &self.0, "-t", "output"])
+                    .output();
+            }
+        }
+        let _restore = RestoreOutput(output(&["-c", "-t", "output"]));
+        let devices = output(&["-a", "-t", "output"]);
+        assert!(devices.contains("MacBook Pro Speakers") && devices.contains("BlackHole 2ch"));
+        let controls = VoiceInputControls::default();
+        let _activity = controls
+            .begin_assistant_activity(0.65, InputDuringTtsPolicy::Auto)
+            .unwrap();
+        for (device, muted) in [
+            ("MacBook Pro Speakers", true),
+            ("BlackHole 2ch", false),
+            ("MacBook Pro Speakers", true),
+        ] {
+            output(&["-s", device, "-t", "output"]);
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while controls.is_muted() != muted && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(controls.is_muted(), muted, "Auto did not follow {device}");
+        }
+    }
+
+    #[test]
+    fn auto_policy_follows_routes_without_overriding_explicit_choices() {
+        for (speakers, expected) in [
+            (true, InputDuringTtsPolicy::SuppressInput),
+            (false, InputDuringTtsPolicy::AllowBargeIn),
+        ] {
+            assert_eq!(
+                InputDuringTtsPolicy::Auto.resolve_for_speakers(speakers),
+                expected
+            );
+            for explicit in [
+                InputDuringTtsPolicy::SuppressInput,
+                InputDuringTtsPolicy::AllowBargeIn,
+            ] {
+                assert_eq!(explicit.resolve_for_speakers(speakers), explicit);
+            }
+        }
+    }
+
+    #[test]
+    fn auto_route_changes_advance_mute_epochs_and_preserve_host_mute() {
+        let controls = VoiceInputControls::default();
+        let activity = controls
+            .begin_assistant_activity(0.65, InputDuringTtsPolicy::Auto)
+            .unwrap();
+        // Hold the transition lock to inject route changes deterministically,
+        // excluding the native route monitor for the duration of the test.
+        let mut transition = controls.shared.transition.lock().unwrap();
+        transition.auto_suppressed = false;
+        controls.publish_effective_mute(&transition);
+        let epoch = controls.mute_epoch();
+        assert!(!controls.is_muted());
+        transition.auto_suppressed = true;
+        controls.publish_effective_mute(&transition);
+        assert!(controls.is_muted());
+        assert_eq!(controls.mute_epoch(), epoch + 1);
+        transition.auto_suppressed = false;
+        controls.publish_effective_mute(&transition);
+        assert!(!controls.is_muted());
+        assert_eq!(controls.mute_epoch(), epoch + 2);
+        transition.host_muted = true;
+        controls.publish_effective_mute(&transition);
+        transition.auto_suppressed = true;
+        controls.publish_effective_mute(&transition);
+        transition.auto_suppressed = false;
+        controls.publish_effective_mute(&transition);
+        assert!(controls.is_muted());
+        assert_eq!(controls.mute_epoch(), epoch + 3);
+        drop(transition);
+        drop(activity);
+        assert!(controls.is_muted());
     }
 
     #[test]

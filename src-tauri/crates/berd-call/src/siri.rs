@@ -74,6 +74,24 @@ unsafe extern "C" {
         voice_name: *const c_char,
         error_out: *mut *mut c_char,
     ) -> bool;
+    fn berd_siri_tts_play_sample(
+        voice_name: *const c_char,
+        language: *const c_char,
+        rate: f32,
+        should_stop: unsafe extern "C" fn(*mut c_void) -> bool,
+        context: *mut c_void,
+        error_out: *mut *mut c_char,
+    ) -> bool;
+    fn berd_siri_tts_speak(
+        text: *const c_char,
+        language: *const c_char,
+        voice_name: *const c_char,
+        rate: f32,
+        should_stop: unsafe extern "C" fn(*mut c_void) -> bool,
+        playback_started: Option<unsafe extern "C" fn(*mut c_void)>,
+        context: *mut c_void,
+        error_out: *mut *mut c_char,
+    ) -> bool;
     fn berd_siri_tts_synthesize_pcm(
         text: *const c_char,
         language: *const c_char,
@@ -202,6 +220,8 @@ struct RawSiriVoice {
     language: String,
     size_bytes: u64,
     installed: bool,
+    #[serde(default)]
+    asset_paths: Vec<String>,
 }
 
 /// Normalizes one Siri catalog language using the shared BCP-47 identity rule.
@@ -251,6 +271,28 @@ pub fn normalize_language(value: &str) -> Result<String, String> {
     Ok(normalized.join("-"))
 }
 
+/// The name in a voice asset's build paths, such as `Zack` from
+/// `.../assets/zack_v2_dual_prompt_with_fallback/p2a`, when every path that
+/// names one agrees.
+#[cfg(any(test, target_os = "macos"))]
+fn asset_voice_name(paths: &[String]) -> Option<String> {
+    let mut names = paths.iter().filter_map(|path| {
+        let segments = path.split('/').collect::<Vec<_>>();
+        // A named build directory sits under `assets/` with more path below it.
+        let directory = segments
+            .windows(3)
+            .find(|window| window[0] == "assets")
+            .map(|window| window[1])?;
+        let word = directory.split('_').next()?;
+        (word.len() > 1 && word.bytes().all(|byte| byte.is_ascii_alphabetic())).then(|| {
+            let word = word.to_ascii_lowercase();
+            word[..1].to_ascii_uppercase() + &word[1..]
+        })
+    });
+    let name = names.next()?;
+    names.all(|other| other == name).then_some(name)
+}
+
 #[cfg(any(test, target_os = "macos"))]
 fn parse_catalog_json(json: &str) -> Result<Vec<SiriVoice>, String> {
     serde_json::from_str::<Vec<RawSiriVoice>>(json)
@@ -264,13 +306,16 @@ fn parse_catalog_json(json: &str) -> Result<Vec<SiriVoice>, String> {
                 .starts_with(&format!("{}-", identity.language.to_ascii_lowercase()));
             Ok(SiriVoice {
                 display_name: match identity.name.as_str() {
-                    // Their asset build paths (zack_v2_..., gigi_test_2) name them.
-                    "en-US-F" => "Zack".into(),
-                    "en-US-G" => "Gigi".into(),
-                    _ if coded && !raw.localized_name.is_empty() => {
-                        format!("Siri {}", raw.localized_name)
-                    }
-                    _ => identity.name.clone(),
+                    _ if !coded => identity.name.clone(),
+                    name => asset_voice_name(&raw.asset_paths).unwrap_or_else(|| match name {
+                        // Known names for when the asset isn't installed or readable.
+                        "en-US-F" => "Zack".into(),
+                        "en-US-G" => "Gigi".into(),
+                        _ if !raw.localized_name.is_empty() => {
+                            format!("Siri {}", raw.localized_name)
+                        }
+                        _ => name.into(),
+                    }),
                 },
                 name: identity.name,
                 language: identity.language,
@@ -432,6 +477,85 @@ fn download_voice_platform(
     Err("Siri TTS is only available on macOS".into())
 }
 
+/// What a voice preview played.
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SiriPreviewSource {
+    /// Apple's bundled sample, which exists even for undownloaded voices.
+    Sample,
+    /// The fixed preview sentence, spoken by the installed voice.
+    Speech,
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" fn preview_should_stop(context: *mut c_void) -> bool {
+    // SAFETY: The context is the `active` flag borrowed for the whole call.
+    !unsafe { &*context.cast::<AtomicBool>() }.load(Ordering::SeqCst)
+}
+
+/// Previews one voice through the default output and blocks until playback
+/// ends or `active` turns false. Apple's system sample plays first; without
+/// one, an installed voice speaks a fixed sentence instead.
+#[cfg(target_os = "macos")]
+pub fn preview_voice(
+    identity: &SiriVoiceIdentity,
+    rate: f32,
+    active: &AtomicBool,
+) -> Result<SiriPreviewSource, String> {
+    if !rate.is_finite() || !(0.5..=2.0).contains(&rate) {
+        return Err("Siri rate must be between 0.5 and 2.0".into());
+    }
+    let text = CString::new("Hello. This is a preview of my voice.").expect("static preview");
+    let language =
+        CString::new(identity.language.as_str()).expect("normalized language has no NUL");
+    let name = CString::new(identity.name.as_str()).expect("validated name has no NUL");
+    let context = std::ptr::from_ref(active).cast_mut().cast();
+    let mut error = std::ptr::null_mut();
+    // SAFETY: The bridge copies all strings synchronously, and `active`
+    // outlives this blocking call.
+    if unsafe {
+        berd_siri_tts_play_sample(
+            name.as_ptr(),
+            language.as_ptr(),
+            rate,
+            preview_should_stop,
+            context,
+            &mut error,
+        )
+    } {
+        return Ok(SiriPreviewSource::Sample);
+    }
+    let sample_error = take_error(error, "No system preview is available");
+    // sirittsd can claim a voice whose assets are missing and then speak another voice, so
+    // speak only a voice the catalog lists as installed, as `voices list` and `download` do.
+    let installed = load_voice_catalog(Some(&identity.language))?
+        .voices
+        .iter()
+        .any(|voice| voice.installed && voice.identity() == *identity);
+    if !installed {
+        return Err(sample_error);
+    }
+    error = std::ptr::null_mut();
+    // SAFETY: As above.
+    if unsafe {
+        berd_siri_tts_speak(
+            text.as_ptr(),
+            language.as_ptr(),
+            name.as_ptr(),
+            rate,
+            preview_should_stop,
+            None,
+            context,
+            &mut error,
+        )
+    } {
+        Ok(SiriPreviewSource::Speech)
+    } else {
+        Err(take_error(error, "Siri voice preview failed"))
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[derive(Clone, Debug)]
 pub struct SiriTts {
@@ -484,21 +608,26 @@ unsafe extern "C" fn receive_pcm(
     let frames = unsafe { std::slice::from_raw_parts(samples, frame_count as usize) };
     // SAFETY: The native call is scoped to the lifetime of this context.
     let context = unsafe { &*(context.cast::<CallbackContext<'_>>()) };
-    if !context.active.load(Ordering::SeqCst) || context.callback_cancelled.load(Ordering::SeqCst) {
-        return false;
-    }
-    let Ok(mut pending) = context.frames.lock() else {
-        context.queue_overflowed.store(true, Ordering::SeqCst);
-        context.callback_cancelled.store(true, Ordering::SeqCst);
-        return false;
+    // Siri renders faster than playback drains, so a reply longer than the
+    // bound waits here for room; shorter ones never wait on playback.
+    let mut pending = loop {
+        if !context.active.load(Ordering::SeqCst)
+            || context.callback_cancelled.load(Ordering::SeqCst)
+        {
+            return false;
+        }
+        let Ok(pending) = context.frames.lock() else {
+            context.queue_overflowed.store(true, Ordering::SeqCst);
+            context.callback_cancelled.store(true, Ordering::SeqCst);
+            return false;
+        };
+        if pending.is_empty() || pending.len() + frames.len() <= MAX_PENDING_PCM_FRAMES {
+            break pending;
+        }
+        drop(pending);
+        std::thread::sleep(SYNTHESIS_POLL_INTERVAL);
     };
-    if pending
-        .len()
-        .checked_add(frames.len())
-        .filter(|total| *total <= MAX_PENDING_PCM_FRAMES)
-        .is_none()
-        || pending.try_reserve(frames.len()).is_err()
-    {
+    if pending.try_reserve(frames.len()).is_err() {
         context.queue_overflowed.store(true, Ordering::SeqCst);
         context.callback_cancelled.store(true, Ordering::SeqCst);
         return false;
@@ -692,16 +821,16 @@ fn take_string(value: *mut c_char) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        asset_voice_name, download_voice_with, parse_catalog_json, parse_languages_json,
+        validate_download_wait_timeout, SiriDownloadAvailabilityWait, SiriVoice, SiriVoiceCatalog,
+        SiriVoiceDownloadError, SiriVoiceIdentity, MAX_SIRI_DOWNLOAD_WAIT_TIMEOUT,
+        MIN_SIRI_DOWNLOAD_WAIT_TIMEOUT,
+    };
     #[cfg(target_os = "macos")]
     use super::{
         berd_siri_tts_test_closed_pcm_gate_ignores_late_callback, receive_pcm,
         receive_pcm_until_complete, CallbackContext, SiriTts, MAX_PENDING_PCM_FRAMES,
-    };
-    use super::{
-        download_voice_with, parse_catalog_json, parse_languages_json,
-        validate_download_wait_timeout, SiriDownloadAvailabilityWait, SiriVoice, SiriVoiceCatalog,
-        SiriVoiceDownloadError, SiriVoiceIdentity, MAX_SIRI_DOWNLOAD_WAIT_TIMEOUT,
-        MIN_SIRI_DOWNLOAD_WAIT_TIMEOUT,
     };
     #[cfg(target_os = "macos")]
     use crate::{TtsBackend, TtsOutcome, TtsSynthesisEvent};
@@ -709,7 +838,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     use std::collections::VecDeque;
     #[cfg(target_os = "macos")]
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     #[cfg(target_os = "macos")]
     use std::sync::{mpsc, Arc, Mutex};
     use std::time::Duration;
@@ -804,6 +933,60 @@ mod tests {
                 ("Aaron", "Aaron")
             ]
         );
+    }
+
+    #[test]
+    fn code_named_voices_take_their_name_from_the_installed_asset() {
+        let voices = parse_catalog_json(
+            r#"[
+                {"name":"en-US-H","localizedName":"Voice 8","language":"en-US","sizeBytes":42,"installed":true,
+                 "assetPaths":["s3://tts-turi/users/someone/orion/assets/remy_v1_dual_prompt/anetec",
+                               "s3://tts-voice-build/natural_voices/en-US-H_5030/assets/device",
+                               "s3://tts-turi/users/someone/orion/assets/remy_v1_dual_prompt/p2a"]},
+                {"name":"en-US-F","localizedName":"Voice 7","language":"en-US","sizeBytes":42,"installed":true,
+                 "assetPaths":["s3://tts-voice-build/natural_voices/en-US-F_5028/assets/device"]},
+                {"name":"en-US-J","localizedName":"Voice 9","language":"en-US","sizeBytes":42,"installed":true,
+                 "assetPaths":["s3://a/assets/remy_v1/p2a","s3://a/assets/zack_v2/p2a"]},
+                {"name":"Aaron","localizedName":"Voice 1","language":"en-US","sizeBytes":42,"installed":true,
+                 "assetPaths":["s3://a/assets/zack_v2/p2a"]}
+            ]"#,
+        )
+        .expect("catalog");
+        let names = voices
+            .iter()
+            .map(|voice| (voice.name.as_str(), voice.display_name.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            [
+                ("en-US-H", "Remy"),
+                ("en-US-F", "Zack"),
+                ("en-US-J", "Siri Voice 9"),
+                ("Aaron", "Aaron")
+            ]
+        );
+    }
+
+    #[test]
+    fn asset_names_come_only_from_a_named_build_directory() {
+        for (paths, name) in [
+            (
+                &["s3://tts-turi/users/huiwencheng/orion/assets/zack_v2_dual_prompt_with_fallback/p2a"][..],
+                Some("Zack"),
+            ),
+            (
+                &["s3://tts_turi/users/huiwencheng/orion/assets/gigi_test_2/assets/device"],
+                Some("Gigi"),
+            ),
+            (&["s3://tts-voice-build/natural_voices/en-US-F_5028/assets/device"], None),
+            (&["s3://a/assets/x_v2/p2a"], None),
+            (&["s3://a/assets/2nd_voice/p2a"], None),
+            (&[""], None),
+            (&[], None),
+        ] {
+            let paths = paths.iter().map(|path| path.to_string()).collect::<Vec<_>>();
+            assert_eq!(asset_voice_name(&paths).as_deref(), name, "{paths:?}");
+        }
     }
 
     #[test]
@@ -1000,41 +1183,100 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "macos")]
-    fn native_pcm_callback_fails_instead_of_exceeding_its_memory_bound() {
+    fn a_reply_longer_than_the_pcm_bound_waits_for_playback_instead_of_failing() {
+        let active = AtomicBool::new(true);
+        let callback_cancelled = AtomicBool::new(false);
+        let queue_overflowed = AtomicBool::new(false);
+        let pending_frames = Mutex::new(VecDeque::new());
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let reply_frames = MAX_PENDING_PCM_FRAMES * 3 / 2;
+        let rendered = AtomicUsize::new(0);
+        let mut played = 0;
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let mut context = CallbackContext {
+                    active: &active,
+                    callback_cancelled: &callback_cancelled,
+                    queue_overflowed: &queue_overflowed,
+                    frames: &pending_frames,
+                    notification: sender,
+                };
+                let chunk = [0.25_f32; 4_096];
+                while rendered.load(Ordering::SeqCst) < reply_frames {
+                    // SAFETY: The chunk and callback context remain live for this call.
+                    if !unsafe {
+                        receive_pcm(
+                            chunk.as_ptr(),
+                            chunk.len() as u32,
+                            (&mut context as *mut CallbackContext<'_>).cast(),
+                        )
+                    } {
+                        return;
+                    }
+                    rendered.fetch_add(chunk.len(), Ordering::SeqCst);
+                }
+            });
+            receive_pcm_until_complete(
+                receiver,
+                &callback_cancelled,
+                &queue_overflowed,
+                &pending_frames,
+                Duration::from_millis(1),
+                Duration::from_secs(5),
+                &mut |event| {
+                    if let TtsSynthesisEvent::Frames(frames) = event {
+                        // Playback starts only once Siri has rendered a full bound ahead.
+                        let deadline = Instant::now() + Duration::from_secs(5);
+                        while played == 0
+                            && rendered.load(Ordering::SeqCst) < MAX_PENDING_PCM_FRAMES
+                            && Instant::now() < deadline
+                        {
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                        played += frames.len();
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+        });
+        assert!(played >= reply_frames);
+        assert!(!queue_overflowed.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn a_full_pcm_queue_releases_its_callback_when_synthesis_is_cancelled() {
         let active = AtomicBool::new(true);
         let callback_cancelled = AtomicBool::new(false);
         let queue_overflowed = AtomicBool::new(false);
         let pending_frames = Mutex::new(VecDeque::from(vec![0.0; MAX_PENDING_PCM_FRAMES]));
-        let (sender, receiver) = mpsc::sync_channel(1);
-        let mut context = CallbackContext {
-            active: &active,
-            callback_cancelled: &callback_cancelled,
-            queue_overflowed: &queue_overflowed,
-            frames: &pending_frames,
-            notification: sender,
-        };
-        let sample = 0.25_f32;
-        // SAFETY: The sample and callback context remain live for this call.
-        assert!(!unsafe {
-            receive_pcm(
-                &sample,
-                1,
-                (&mut context as *mut CallbackContext<'_>).cast(),
-            )
+        let (sender, _receiver) = mpsc::sync_channel(1);
+        std::thread::scope(|scope| {
+            let callback = scope.spawn(|| {
+                let mut context = CallbackContext {
+                    active: &active,
+                    callback_cancelled: &callback_cancelled,
+                    queue_overflowed: &queue_overflowed,
+                    frames: &pending_frames,
+                    notification: sender,
+                };
+                let sample = 0.25_f32;
+                // SAFETY: The sample and callback context remain live for this call.
+                unsafe {
+                    receive_pcm(
+                        &sample,
+                        1,
+                        (&mut context as *mut CallbackContext<'_>).cast(),
+                    )
+                }
+            });
+            std::thread::sleep(Duration::from_millis(50));
+            assert!(!callback.is_finished(), "a full queue waits for playback");
+            active.store(false, Ordering::SeqCst);
+            assert!(!callback.join().unwrap());
         });
-        let error = receive_pcm_until_complete(
-            receiver,
-            &callback_cancelled,
-            &queue_overflowed,
-            &pending_frames,
-            Duration::from_millis(1),
-            Duration::from_secs(1),
-            &mut |_| Ok(()),
-        )
-        .unwrap_err();
-        assert_eq!(error, "Siri synthesis exceeded its bounded PCM queue");
         assert_eq!(pending_frames.lock().unwrap().len(), MAX_PENDING_PCM_FRAMES);
-        assert!(callback_cancelled.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -1116,5 +1358,29 @@ mod tests {
             .unwrap();
         assert_eq!(outcome, TtsOutcome::Cancelled);
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    #[ignore = "requires BERD_SIRI_TEST_VOICE and invokes private sirittsd synthesis"]
+    fn a_reply_longer_than_the_pcm_bound_synthesizes_completely() {
+        let voice = std::env::var("BERD_SIRI_TEST_VOICE").unwrap();
+        let language = std::env::var("BERD_SIRI_TEST_LANGUAGE").unwrap_or_else(|_| "en-US".into());
+        let backend = SiriTts::new(&language, &voice, 1.0).unwrap();
+        let text = "This sentence is one of many that together run well past a minute of speech. "
+            .repeat(30);
+        let mut frames = 0;
+        let outcome = backend
+            .synthesize(&text, &AtomicBool::new(true), &mut |chunk| {
+                // Hold the first chunk, as playback would, while Siri renders ahead.
+                if frames == 0 {
+                    std::thread::sleep(Duration::from_secs(20));
+                }
+                frames += chunk.len();
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(outcome, TtsOutcome::Completed);
+        assert!(frames > MAX_PENDING_PCM_FRAMES);
     }
 }

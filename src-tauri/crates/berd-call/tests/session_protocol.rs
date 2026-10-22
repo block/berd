@@ -2390,6 +2390,52 @@ fn microphone_audio_keeps_flowing_while_the_provider_confirms_an_input_reset() {
 }
 
 #[test]
+fn input_controls_still_clearing_are_answered_at_shutdown() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (clear_seen_tx, clear_seen_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let update = receive_realtime_json(&mut socket).await;
+                acknowledge_realtime_session(&mut socket, &update).await;
+                let clear = receive_realtime_json(&mut socket).await;
+                assert_eq!(clear["type"], "input_audio_buffer.clear");
+                clear_seen_tx.send(()).unwrap();
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                send_realtime_json(&mut socket, json!({"type":"input_audio_buffer.cleared"})).await;
+                while let Some(Ok(_)) = socket.next().await {}
+            });
+    });
+    let mut session = ExpertSpokespersonTestSession::start(endpoint_rx.recv().unwrap());
+    session.send(json!({"type":"reset_input","id":3}));
+    session.send(json!({"type":"set_input_muted","id":4,"active":false}));
+    clear_seen_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let messages = session.shutdown_and_collect();
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| message["type"].as_str().unwrap().starts_with("input_"))
+            .cloned()
+            .collect::<Vec<_>>(),
+        [
+            json!({"type":"input_reset_applied","id":3}),
+            json!({"type":"input_mute_applied","id":4,"active":false}),
+        ],
+        "{messages:?}"
+    );
+    server.join().unwrap();
+}
+
+#[test]
 fn reset_input_during_voice_cutover_rolls_back_then_clears_the_old_runtime() {
     let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
     let (cutover_seen_tx, cutover_seen_rx) = mpsc::sync_channel(1);

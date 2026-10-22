@@ -61,6 +61,8 @@ berd-call speak --voice Nora "Sol here: the tests pass."
 berd-call stop
 ```
 
+Apple speech recognition accepts repeated `--stt-hint PHRASE` options on `start` or `session`. Pass agent names or domain terms to bias its vocabulary without restricting normal transcription, for example `berd-call start --stt-hint Nora --stt-hint Zack`. Up to 100 nonempty phrases of 256 bytes each are accepted. Hints apply to macOS speech recognition and survive recognition restarts within the call; other speech backends ignore them.
+
 `speak --voice` speaks one reply in another voice of the call's reply backend
 without changing the call's voice, so agents sharing a call can sound distinct.
 
@@ -99,7 +101,7 @@ to update the running call through the runtime's revision-checked TTS settings.
 The result includes `outcome` and the acknowledged `snapshot`; `status` reflects
 that snapshot. Changes apply to subsequent speech without restarting the call.
 
-Use `berd-call settings --input-during-tts allow|suppress` to change whether
+Use `berd-call settings --input-during-tts auto|allow|suppress` to change whether
 microphone input can interrupt speech, and `berd-call settings --muted true|false`
 to mute or unmute microphone input. Both apply live and are reflected by `status`.
 
@@ -162,9 +164,9 @@ berd-call session --tts-backend openai --tts-url https://proxy.example/v1/audio/
 berd-call session --stt-backend openai --stt-url wss://proxy.example/v1/realtime?intent=transcription
 ```
 
-In an Expert–Spokesperson call, the Expert reaches you through the Spokesperson: `berd-call message-spokesperson --re CURSOR [--resolves HANDOFF_ID]... TEXT` has it tell you in its own voice. Like the directives of Berd's Expert, the message must acknowledge the latest input (the Spokesperson's own speech doesn't count), or it comes back `spoke:false` with what was missed, and a handoff it names settles once the Spokesperson has said it. `speak` is refused unless the call was started with `--allow-direct-agent-speech`. With it, the Expert can also speak for itself: berd-call plays each `speak` reply through the configured TTS backend, taking turns with the Spokesperson's audio, and your speech interrupts either of them. Afterwards the Spokesperson gets a silent note of what you heard, so it can follow up without repeating it. A reply has to acknowledge everything you've said, as `speak --re` always does. Such a call holds no handoff open: each still reaches the Expert as a `handoff` row, but nothing waits for an answer, reminds the Expert, or holds back renewing or recovering the Spokesperson's session, and there is nothing for `--resolves` to name. `--voice`, `--rate`, `status` and `settings --tts` describe and change the Expert's voice. The Spokesperson keeps its own voice, shown as `session.spokesperson`: choose it with `--spokesperson-voice NAME`, at `start` or live with `settings`, and the menu bar offers both voices. It speaks as close to the agents' `--rate` as it can (0.25–1.5×), so the menu bar's one Speech Rate sets both; `--spokesperson-rate` gives it a speed of its own. Saved settings keep the Spokesperson's voice for the next call whose replies have their own, but not `--allow-direct-agent-speech`, so pass that on each `start`.
+In an Expert–Spokesperson call, the Expert reaches you through the Spokesperson: `berd-call message-spokesperson --re CURSOR [--resolves HANDOFF_ID]... TEXT` has it tell you in its own voice. Like the directives of Berd's Expert, the message must acknowledge the latest input (the Spokesperson's own speech doesn't count), or it comes back `spoke:false` with what was missed, and a handoff it names settles once the Spokesperson has said it. `speak` is refused unless the call was started with `--allow-direct-agent-speech`. With it, the Expert can also speak for itself: berd-call plays each `speak` reply through the configured TTS backend, taking turns with the Spokesperson's audio, and your speech interrupts either of them. Afterwards the Spokesperson gets a silent note of what you heard, so it can follow up without repeating it. A reply has to acknowledge everything you've said, as `speak --re` always does. Such a call holds no handoff open: each still reaches the Expert as a `handoff` row, but nothing waits for an answer, reminds the Expert, or holds back renewing or recovering the Spokesperson's session, and there is nothing for `--resolves` to name. `--voice`, `--rate`, `status` and `settings --tts` describe and change the Expert's voice. The Spokesperson keeps its own voice, shown as `session.spokesperson`: choose it with `--spokesperson-voice NAME`, at `start` or live with `settings`, and the menu bar offers both voices. It speaks as close to the agents' `--rate` as it can (0.25–1.5×), so the menu bar's one Speech Rate sets both; `--spokesperson-rate` gives it a speed of its own. Saved settings keep the Spokesperson's voice for the next call whose replies have their own, but not `--allow-direct-agent-speech`, so pass that on each `start`. `--spokesperson-options JSON` sets the rest of the Spokesperson's realtime session, the options Berd keeps under Advanced: for example `{"turnDetection":"semantic_vad","eagerness":"low","noiseReduction":"near_field"}`. It takes Berd's names and ranges, applies when the Spokesperson's session starts, and isn't saved, so pass it on each `start`.
 
-The three URL flags take full endpoints and override only their matching service for that call. Expert–Spokesperson uses `--realtime-url` for both input and output; `--stt-url` applies only to conventional mode, and `--tts-url` also applies to the Expert's own voice. Without an override, each service uses its OpenAI endpoint (or its existing environment override). `OPENAI_API_KEY` supplies the CLI credential; the desktop app stores keys separately by endpoint URL in Keychain.
+The three URL flags take full endpoints and override only their matching service for that call. Expert–Spokesperson uses `--realtime-url` for both input and output; `--stt-url` applies only to conventional mode, and `--tts-url` also applies to the Expert's own voice. Without an override, each service uses its OpenAI endpoint (or its existing environment override). Each service reads its own key, `OPENAI_REALTIME_API_KEY` (`--realtime-url`), `OPENAI_STT_API_KEY` (`--stt-url`) or `OPENAI_TTS_API_KEY` (`--tts-url`), and falls back to `OPENAI_API_KEY` when it is unset or blank; the desktop app stores keys separately by endpoint URL in Keychain.
 
 The default Siri backend still requires an exact installed voice name and
 language. Missing or unavailable Siri voice configuration and an unavailable
@@ -191,7 +193,7 @@ berd-call synthesize --tts-backend openai --model gpt-4o-mini-tts \
 
 The command rejects an existing output before constructing the backend, writes to a same-directory temporary file, synchronizes the completed WAV, and publishes it without clobbering a target that appears concurrently. Failure leaves no partial target. Input text is nonempty and at most 16 KiB; output is bounded to ten minutes of finite source PCM in `[-1, 1]`. Backend cancellation, empty or invalid PCM, and a non-1x PCM playback specification fail rather than publishing a misleading file.
 
-Pocket rendering supports only rate `1.0`: its other rates are a host playback time-stretch policy and are not encoded into synthesized PCM. Siri applies its rate during native synthesis. OpenAI requires an explicit model, voice, and `--allow-paid-openai`; one invocation makes at most one request and reads the credential only from `OPENAI_API_KEY` after output preflight.
+Pocket rendering supports only rate `1.0`: its other rates are a host playback time-stretch policy and are not encoded into synthesized PCM. Siri applies its rate during native synthesis. OpenAI requires an explicit model, voice, and `--allow-paid-openai`; one invocation makes at most one request and reads the credential only from `OPENAI_TTS_API_KEY`, else `OPENAI_API_KEY`, after output preflight.
 
 Success emits one schema-version-one JSON line with the public backend identity, requested rate, and WAV encoding, sample rate, channels, bit depth, source frames, duration, and byte count. It never serializes the prompt, credential, endpoint, Pocket bundle path, or temporary path. Operation failure emits one sanitized error line and exits 1; usage failure emits no JSON and exits 2. Stdout is reserved for this machine-readable terminal record, not audio data.
 
@@ -203,7 +205,7 @@ persisted or exposed. Download is a blocking terminal success/error operation
 with a validated availability-polling bound and no invented byte progress.
 Native validation and subscription have separate bounded waits before that
 polling deadline. Berd continues to own persisted selection, fallback policy,
-settings/UI events, and management preview playback. There is intentionally no
+settings/UI events, and in-app preview playback. There is intentionally no
 host settings or fallback policy in the standalone management commands.
 
 ## Voice and model management
@@ -217,6 +219,8 @@ berd-call voices list --language en-US
 berd-call voices download --voice Aaron --language en-US
 berd-call voices download --voice Aaron --language en-US \
   --availability-wait-seconds 300
+berd-call voices preview --voice Aaron --language en-US
+berd-call voices preview --voice Aaron --language en-US --rate 1.25
 berd-call models macos status
 berd-call models macos install
 berd-call models pocket status --store-root /absolute/portable-store
@@ -287,10 +291,20 @@ en-US-G are `Zack` and `Gigi`, named by their asset build paths, and the rest
 take the name macOS shows (`en-GB-C` is `Siri Voice 3`). Commands still take
 the exact `name`. A voice is `installed` only when
 sirittsd reports it downloaded and its assets are on disk: sirittsd can claim
-a voice whose assets are missing, then silently speak it in another voice. `voices.download` returns the
+a voice whose assets are missing, then silently speak it in another voice. The
+assets are found through axassetsd's content path or, when that is stale after
+a download, the Siri UAF asset directory. `voices.download` subscribes each
+voice under its own sirittsd client id, so downloading one voice does not
+evict another, and succeeds on the same installed test `voices.list` applies. It returns the
 canonical voice, `installed: true`, and `availabilityWaitSeconds`; a missing
 exact catalog identity fails with `voice_not_found` before any native download
-request. macOS status and install results contain `supported`, `locale`,
+request. `voices.preview` plays the voice through the default output and
+returns after playback ends, with `backend`, the canonical `voice`, `rate`
+(default `1.0`, `0.5` to `2.0`), and `source`: `sample` for Apple's bundled
+system preview, which works even for a voice that isn't downloaded, or `speech`
+when none exists and the installed voice spoke a short fixed sentence. SIGINT or
+SIGTERM stops playback and exits 130 without a result, so a host stops a preview
+by killing the process. macOS status and install results contain `supported`, `locale`,
 `localeSupported`, `modelStatus`, and `ready`. Install progress records contain
 the native finite fraction clamped to `0...1`; nonfinite callbacks are omitted.
 `models.pocket.voices` is a separate immutable catalog because Pocket installs
@@ -390,7 +404,7 @@ environment, but never includes the URL.
 OpenAI benchmarking is disabled unless the command includes
 `--allow-paid-openai`. The CLI preflights the full workload, including the warm
 mode's extra request, and rejects more than 20 requests or 65,536 total prompt
-bytes before constructing the backend. A missing `OPENAI_API_KEY` still fails as
+bytes before constructing the backend. A missing `OPENAI_TTS_API_KEY` and `OPENAI_API_KEY` still fails as
 a structured initialization error without making a request.
 
 ## STT benchmarks
@@ -437,11 +451,13 @@ punctuation to whitespace, and reports substitutions, deletions, and insertions
 alongside the aggregate rate.
 
 OpenAI STT benchmarking requires `--allow-paid-openai` and reads its key only
-from `OPENAI_API_KEY`. Before resolving credentials or connecting, the CLI
+from `OPENAI_STT_API_KEY`, else `OPENAI_API_KEY`. Before resolving credentials or connecting, the CLI
 rejects a warmup-inclusive workload above 20 recognition commits or 120 seconds
 of streamed PCM. Endpoint and model overrides use the same environment variables
 as the session; reports record only which source supplied them and never include
 the key or endpoint value.
+
+Auto is the default input-during-speech preference. It mutes microphone input during playback on detected speakers and permits interruption on other routes. It follows the default output route during a call (within about 100 ms). Explicit allow/suppress overrides Auto. The preference is saved across calls and restarts. Speaker detection is best-effort; use suppress for an unrecognized external speaker.
 
 ### Input activity in stdout streams
 

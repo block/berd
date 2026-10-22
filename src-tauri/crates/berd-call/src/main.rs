@@ -3,9 +3,9 @@ use std::io::{self, BufWriter, Read, Write};
 use std::os::fd::RawFd;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc::{self, Receiver, SyncSender},
-    Arc,
+    Arc, Mutex,
 };
 use std::thread;
 use std::time::{Duration, Instant};
@@ -18,8 +18,8 @@ use berd_call::benchmark::{
 use berd_call::endpoint_url::{is_allowed_endpoint_url, EndpointProtocol};
 use berd_call::expert_spokesperson::{ExpertDirectiveOutcome, LiveSideEvent};
 use berd_call::input::{
-    AssistantActivityGuard, InputDuringTtsSlot, InputDuringTtsSnapshot, VoiceInputConfig,
-    VoiceInputControls, VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame,
+    AssistantActivityGuard, InputDuringTtsPolicy, InputDuringTtsSlot, InputDuringTtsSnapshot,
+    VoiceInputConfig, VoiceInputControls, VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame,
     VoiceInputRuntime, INPUT_FRAME_SAMPLES,
 };
 use berd_call::openai_realtime_protocol::accepted_handoff_tool_output;
@@ -67,6 +67,8 @@ mod cli_help;
 #[cfg(target_os = "macos")]
 mod codex;
 mod host_control;
+#[cfg(unix)]
+mod host_lifetime;
 #[cfg(target_os = "macos")]
 mod host_session;
 #[cfg(target_os = "macos")]
@@ -197,6 +199,7 @@ enum SttBackendConfig {
 struct SessionConfig {
     tts: TtsBackendConfig,
     stt: SttBackendConfig,
+    stt_hints: Vec<String>,
     mode: SessionMode,
     endpoints: SessionEndpointOverrides,
     /// In Expert-Spokesperson mode, speak the Expert's replies with `tts`
@@ -205,6 +208,9 @@ struct SessionConfig {
     /// The Spokesperson's own voice and speed when replies have theirs.
     spokesperson_voice: Option<String>,
     spokesperson_rate: Option<f32>,
+    /// The Spokesperson's session options beyond its voice and speed.
+    spokesperson_options:
+        Option<berd_call::openai_realtime_protocol::RealtimeSpokespersonSessionOptions>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -274,7 +280,7 @@ impl SynthesisConfig {
 
 const MANAGEMENT_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 enum ManagementCommand {
     ListVoices {
         language: Option<String>,
@@ -282,6 +288,10 @@ enum ManagementCommand {
     DownloadVoice {
         identity: berd_call::siri::SiriVoiceIdentity,
         availability_wait: berd_call::siri::SiriDownloadAvailabilityWait,
+    },
+    PreviewVoice {
+        identity: berd_call::siri::SiriVoiceIdentity,
+        rate: f32,
     },
     MacosModelStatus,
     InstallMacosModel,
@@ -306,6 +316,7 @@ impl ManagementCommand {
         match self {
             Self::ListVoices { .. } => "voices.list",
             Self::DownloadVoice { .. } => "voices.download",
+            Self::PreviewVoice { .. } => "voices.preview",
             Self::MacosModelStatus => "models.macos.status",
             Self::InstallMacosModel => "models.macos.install",
             Self::PocketModelStatus { .. } => "models.pocket.status",
@@ -414,6 +425,16 @@ struct VoiceDownloadResult {
     voice: berd_call::siri::SiriVoiceIdentity,
     installed: bool,
     availability_wait_seconds: u64,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VoicePreviewResult {
+    backend: &'static str,
+    voice: berd_call::siri::SiriVoiceIdentity,
+    rate: f32,
+    source: berd_call::siri::SiriPreviewSource,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -526,7 +547,7 @@ fn main() {
         Some("start") => {
             let options = parse_or_exit(parse_saved_start_args(&args), &args);
             #[cfg(target_os = "macos")]
-            if let Err(error) = host_session::route_stop_signals(options.port) {
+            if let Err(error) = host_lifetime::route_stop_signals(options.port) {
                 eprintln!("berd-call start failed: {error}");
                 std::process::exit(1);
             }
@@ -1142,7 +1163,8 @@ fn parse_host_settings_args(
                 policy: match args.get(index + 1).map(String::as_str) {
                     Some("allow") => berd_call::input::InputDuringTtsPolicy::AllowBargeIn,
                     Some("suppress") => berd_call::input::InputDuringTtsPolicy::SuppressInput,
-                    _ => return Err("--input-during-tts requires allow or suppress".into()),
+                    Some("auto") => InputDuringTtsPolicy::Auto,
+                    _ => return Err("--input-during-tts requires auto, allow or suppress".into()),
                 },
             },
             "--rate" => host_control::ControlRequest::Rate {
@@ -1426,6 +1448,45 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, ParseFail
                 availability_wait,
             })
         }
+        (Some("voices"), Some("preview"), _) => {
+            let mut voice = None;
+            let mut language = None;
+            let mut rate = None;
+            let mut index = 3;
+            while index < args.len() {
+                let flag = args[index].as_str();
+                if is_help_flag(flag) {
+                    return Err(ParseFailure::HelpRequested);
+                }
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| format!("{flag} requires a value"))?;
+                match flag {
+                    "--voice" if voice.is_none() => voice = Some(value.clone()),
+                    "--language" if language.is_none() => language = Some(value.clone()),
+                    "--rate" if rate.is_none() => {
+                        let value = value
+                            .parse::<f32>()
+                            .map_err(|_| "--rate must be a number".to_string())?;
+                        if !value.is_finite() || !(0.5..=2.0).contains(&value) {
+                            return Err("--rate must be between 0.5 and 2.0".into());
+                        }
+                        rate = Some(value);
+                    }
+                    "--voice" | "--language" | "--rate" => {
+                        return Err(format!("{flag} may be provided only once").into())
+                    }
+                    _ => return Err(format!("unknown voices preview argument: {flag}").into()),
+                }
+                index += 2;
+            }
+            let voice = voice.ok_or_else(|| "--voice is required".to_string())?;
+            let language = language.ok_or_else(|| "--language is required".to_string())?;
+            Ok(ManagementCommand::PreviewVoice {
+                identity: berd_call::siri::SiriVoiceIdentity::new(voice, &language)?,
+                rate: rate.unwrap_or(1.0),
+            })
+        }
         (Some("models"), Some("macos"), Some("status" | "install"))
             if args.len() == 5 && args.get(4).is_some_and(|value| is_help_flag(value)) =>
         {
@@ -1473,7 +1534,7 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, ParseFail
                 roots: parse_local_model_roots(args)?,
             })
         }
-        (Some("voices"), _, _) => Err("expected voices list or voices download".into()),
+        (Some("voices"), _, _) => Err("expected voices list, download, or preview".into()),
         (Some("models"), _, _) => Err("expected a supported models command".into()),
         _ => Err("expected a management command".into()),
     }
@@ -1932,6 +1993,31 @@ fn voice_download_failure(error: berd_call::siri::SiriVoiceDownloadError) -> Man
     }
 }
 
+/// Previews a voice, stopping playback and exiting on SIGINT or SIGTERM so a
+/// host can end a preview by signaling the process.
+#[cfg(target_os = "macos")]
+fn preview_voice_until_stopped(
+    identity: &berd_call::siri::SiriVoiceIdentity,
+    rate: f32,
+) -> Result<berd_call::siri::SiriPreviewSource, String> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static ACTIVE: AtomicBool = AtomicBool::new(true);
+    extern "C" fn stop(_: libc::c_int) {
+        ACTIVE.store(false, Ordering::SeqCst);
+    }
+    let handler = stop as extern "C" fn(libc::c_int) as libc::sighandler_t;
+    // SAFETY: The handler only stores to an atomic.
+    unsafe {
+        libc::signal(libc::SIGINT, handler);
+        libc::signal(libc::SIGTERM, handler);
+    }
+    let result = berd_call::siri::preview_voice(identity, rate, &ACTIVE);
+    if !ACTIVE.load(Ordering::SeqCst) {
+        std::process::exit(130);
+    }
+    result
+}
+
 fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFailure> {
     let operation = command.operation();
     match command {
@@ -1966,6 +2052,36 @@ fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFa
                 let identity = berd_call::siri::download_voice(&identity, availability_wait)
                     .map_err(voice_download_failure)?;
                 let result = voice_download_report(&identity, availability_wait);
+                write_management_result(operation, result).map_err(|error| {
+                    management_failure("output_failed", "Could not write command result", error)
+                })
+            }
+        }
+        ManagementCommand::PreviewVoice { identity, rate } => {
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = (identity, rate);
+                return Err(management_failure(
+                    "unsupported",
+                    "Siri voice preview is available only on macOS",
+                    "Siri voice preview is available only on macOS",
+                ));
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let source = preview_voice_until_stopped(&identity, rate).map_err(|error| {
+                    management_failure(
+                        "operation_failed",
+                        "Could not preview the Siri voice",
+                        error,
+                    )
+                })?;
+                let result = VoicePreviewResult {
+                    backend: "siri",
+                    voice: identity,
+                    rate,
+                    source,
+                };
                 write_management_result(operation, result).map_err(|error| {
                     management_failure("output_failed", "Could not write command result", error)
                 })
@@ -2072,7 +2188,17 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
         controls: control_tx.clone(),
         pending: HashSet::new(),
     };
-    thread::spawn(move || read_framed_requests(io::stdin().lock(), control_tx, pcm_tx));
+    let input_progress = Arc::new(SessionInputProgress::default());
+    let reader_progress = Arc::clone(&input_progress);
+    thread::spawn(move || {
+        read_framed_requests(
+            io::stdin().lock(),
+            control_tx,
+            pcm_tx,
+            &reader_progress,
+            &mut io::stderr(),
+        )
+    });
     let audio_transport = Arc::new(unsafe { AudioPipeTransport::from_raw_fd(pcm_output_fd)? });
     let (playback_tx, playback_rx) = mpsc::channel();
     let (audio_control_tx, audio_control_rx) = mpsc::channel();
@@ -2093,9 +2219,11 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
     let mut processed_pcm = 0_u64;
     let mut held: Option<HeldPrepare> = None;
     let mut active: Option<ActivePlayback> = None;
+    input_progress.enter("status_assets");
     let mut status_sound_runtime = StatusSoundRuntime::default();
 
     loop {
+        input_progress.enter("voice_events");
         if let Some(events) = input_events.as_mut() {
             while let Ok(event) = events.try_recv() {
                 handle_voice_input_event(
@@ -2107,6 +2235,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 )?;
             }
         }
+        input_progress.enter("playback");
         while let Ok(request) = audio_control_rx.try_recv() {
             write_audio_control_request(request, active.as_ref(), &mut writer)?;
         }
@@ -2134,6 +2263,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 return Err(message);
             }
         }
+        input_progress.enter("maintenance");
         poll_tts_configuration_update(
             Instant::now(),
             &tts_configuration_rx,
@@ -2164,11 +2294,13 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
             )?;
         }
         let conversation_active = standard_session_status_cues_suppressed(&core, active.is_some());
+        input_progress.enter("status_sounds");
         let status_sound_result = status_sound_runtime.poll(conversation_active);
         if let Err(message) = status_sound_result {
             eprintln!("status sound playback disabled: {message}");
         }
 
+        input_progress.enter("receive");
         let Some(input) = receive_session_input(
             &control_rx,
             &pcm_rx,
@@ -2177,6 +2309,14 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
         ) else {
             continue;
         };
+        input_progress
+            .processed
+            .store(processed_pcm, Ordering::Relaxed);
+        input_progress.enter(match &input {
+            Input::Pcm(_) => "pcm",
+            Input::Request(SessionRequest::Hello { .. }) => "hello_tts",
+            _ => "control",
+        });
         let Some(input) = voice_builds.filter(input, tts_slot.as_ref(), &mut writer)? else {
             continue;
         };
@@ -2293,18 +2433,22 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                         return Ok(());
                     }
                 };
-                let (runtime, mut events) =
-                    match create_input_runtime(&config.stt, config.endpoints.stt.as_deref()) {
-                        Ok(runtime) => runtime,
-                        Err(message) => {
-                            write_protocol_fatal(
-                                &mut writer,
-                                &public_stt_startup_error(&config.stt),
-                                &format!("STT startup failed: {message}"),
-                            )?;
-                            return Ok(());
-                        }
-                    };
+                input_progress.enter("hello_stt");
+                let (runtime, mut events) = match create_input_runtime(
+                    &config.stt,
+                    config.endpoints.stt.as_deref(),
+                    &config.stt_hints,
+                ) {
+                    Ok(runtime) => runtime,
+                    Err(message) => {
+                        write_protocol_fatal(
+                            &mut writer,
+                            &public_stt_startup_error(&config.stt),
+                            &format!("STT startup failed: {message}"),
+                        )?;
+                        return Ok(());
+                    }
+                };
                 let readiness = wait_for_input_ready(&mut events, INPUT_STARTUP_TIMEOUT);
                 if let Err(message) = readiness {
                     runtime.cancel();
@@ -2318,6 +2462,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     finish_result?;
                     return Ok(());
                 }
+                input_progress.enter("hello_ready");
                 input_controls = Some(runtime.controls());
                 input_runtime = Some(runtime);
                 input_events = Some(events);
@@ -3225,9 +3370,8 @@ impl InputResets {
         while let Some(clearing) = self.clearing.front() {
             match clearing.try_recv() {
                 Err(mpsc::TryRecvError::Empty) => return Ok(()),
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    return Err("Spokesperson runtime is closed".into())
-                }
+                // The runtime ended; its terminal event decides what the clear meant.
+                Err(mpsc::TryRecvError::Disconnected) => return Ok(()),
                 Ok(result) => result?,
             }
             self.clearing.pop_front();
@@ -3235,6 +3379,22 @@ impl InputResets {
         self.replies
             .drain(..)
             .try_for_each(|reply| write_message(writer, &reply))
+    }
+
+    /// A lost session takes its input with it, so its outstanding clears are done.
+    fn session_ended(&mut self, writer: &mut impl Write) -> Result<(), String> {
+        self.clearing.clear();
+        self.poll(writer)
+    }
+
+    /// Waits for every outstanding clear, which the runtime settles within its acknowledgement timeout, then answers.
+    fn finish(&mut self, writer: &mut impl Write) -> Result<(), String> {
+        for clearing in self.clearing.drain(..) {
+            clearing
+                .recv()
+                .map_err(|_| "Spokesperson runtime is closed".to_string())??;
+        }
+        self.poll(writer)
     }
 }
 
@@ -3369,6 +3529,16 @@ fn apply_spokesperson_startup_settings(
     let (TtsBackendConfig::OpenAi { rate }
     | TtsBackendConfig::Siri { rate, .. }
     | TtsBackendConfig::Pocket { rate, .. }) = &session.tts;
+    if let Some(options) = &session.spokesperson_options {
+        let defaults = std::mem::replace(&mut spokesperson.session, options.clone());
+        let chosen = &mut spokesperson.session;
+        chosen.model = chosen.model.take().or(defaults.model);
+        chosen.transcription_model = chosen
+            .transcription_model
+            .take()
+            .or(defaults.transcription_model);
+        (chosen.voice, chosen.speed) = (defaults.voice, defaults.speed);
+    }
     if let Some(voice) = &session.spokesperson_voice {
         spokesperson.session.voice = Some(voice.clone());
     }
@@ -3390,7 +3560,17 @@ fn run_expert_spokesperson_session(
         controls: control_tx.clone(),
         pending: HashSet::new(),
     };
-    thread::spawn(move || read_framed_requests(io::stdin().lock(), control_tx, pcm_tx));
+    let input_progress = Arc::new(SessionInputProgress::default());
+    let reader_progress = Arc::clone(&input_progress);
+    thread::spawn(move || {
+        read_framed_requests(
+            io::stdin().lock(),
+            control_tx,
+            pcm_tx,
+            &reader_progress,
+            &mut io::stderr(),
+        )
+    });
     let audio_transport = Arc::new(unsafe { AudioPipeTransport::from_raw_fd(pcm_output_fd)? });
     let (audio_control_tx, audio_control_rx) = mpsc::channel();
     let (playback_tx, playback_rx) = mpsc::channel::<LivePlaybackResult>();
@@ -3427,12 +3607,20 @@ fn run_expert_spokesperson_session(
     let mut session_tts: Option<berd_call::TtsConfigurationSnapshot> = None;
     let mut input_during_tts_slot: Option<InputDuringTtsSlot> = None;
     let mut input_muted = false;
+    let mut route_checked = Instant::now() - Duration::from_secs(1);
+    let mut auto_input_policy = InputDuringTtsPolicy::AllowBargeIn;
     let mut input_resets = InputResets::default();
     let mut queued_tts_settings = VoiceUpdateQueue::<PendingSpokespersonSettingsUpdate>::default();
     let mut pending_voice_update: Option<VoiceUpdateTransaction> = None;
+    input_progress.enter("status_assets");
     let mut status_sound_runtime = StatusSoundRuntime::default();
 
     loop {
+        input_progress.enter("maintenance");
+        if route_checked.elapsed() >= Duration::from_millis(100) {
+            auto_input_policy = InputDuringTtsPolicy::Auto.resolve(None);
+            route_checked = Instant::now();
+        }
         if initialized {
             input_resets.poll(&mut writer)?;
             let work = spokesperson_host_work(
@@ -3581,6 +3769,7 @@ fn run_expert_spokesperson_session(
                 }
             };
         }
+        input_progress.enter("voice_events");
         if let Some(events) = runtime_events.as_ref() {
             if let Ok(event) = events.try_recv() {
                 match event {
@@ -4042,6 +4231,7 @@ fn run_expert_spokesperson_session(
                             SpokespersonEvent::SessionLost(message) => (message, true),
                             _ => unreachable!("matched a session terminal event"),
                         };
+                        input_resets.session_ended(&mut writer)?;
                         if let Some(request) = queued_tts_settings.take() {
                             reject_spokesperson_tts_settings(
                                 request.id,
@@ -4183,6 +4373,7 @@ fn run_expert_spokesperson_session(
             }
         }
         flush_active_live_playback(&active, &mut responses)?;
+        input_progress.enter("playback");
         while let Ok(request) = audio_control_rx.try_recv() {
             let speech_id = match request {
                 AudioOutputControlRequest::Suspend { speech_id }
@@ -4296,6 +4487,7 @@ fn run_expert_spokesperson_session(
                 }
             }
         }
+        input_progress.enter("maintenance");
         poll_tts_configuration_update(
             Instant::now(),
             &tts_configuration_rx,
@@ -4426,11 +4618,13 @@ fn run_expert_spokesperson_session(
         }
         let conversation_active =
             expert_session_status_cues_suppressed(&turn_gate, active.is_some());
+        input_progress.enter("status_sounds");
         let status_sound_result = status_sound_runtime.poll(conversation_active);
         if let Err(message) = status_sound_result {
             eprintln!("status sound playback disabled: {message}");
         }
 
+        input_progress.enter("receive");
         let Some(input) = receive_session_input(
             &control_rx,
             &pcm_rx,
@@ -4439,6 +4633,14 @@ fn run_expert_spokesperson_session(
         ) else {
             continue;
         };
+        input_progress
+            .processed
+            .store(processed_pcm, Ordering::Relaxed);
+        input_progress.enter(match &input {
+            Input::Pcm(_) => "pcm",
+            Input::Request(SessionRequest::Hello { .. }) => "hello_tts",
+            _ => "control",
+        });
         let Some(input) = voice_builds.filter(input, reply_tts.as_ref(), &mut writer)? else {
             continue;
         };
@@ -4450,8 +4652,12 @@ fn run_expert_spokesperson_session(
             Input::VoiceBuilt(_) | Input::VoiceUnavailable { .. } => {
                 unreachable!("voice builds are filtered")
             }
-            Input::Eof => break,
+            Input::Eof => {
+                input_resets.finish(&mut writer)?;
+                break;
+            }
             Input::Request(SessionRequest::Shutdown) => {
+                input_resets.finish(&mut writer)?;
                 if let Some(request) = queued_tts_settings.take() {
                     reject_spokesperson_tts_settings(
                         request.id,
@@ -4494,7 +4700,13 @@ fn run_expert_spokesperson_session(
                     input_during_tts_slot
                         .as_ref()
                         .expect("hello initialized input policy")
-                        .snapshot()?,
+                        .snapshot()
+                        .map(|mut snapshot| {
+                            snapshot.policy = snapshot.policy.resolve_for_speakers(
+                                auto_input_policy == InputDuringTtsPolicy::SuppressInput,
+                            );
+                            snapshot
+                        })?,
                 ) {
                     if let Some(update) = pending_voice_update
                         .as_mut()
@@ -4573,6 +4785,7 @@ fn run_expert_spokesperson_session(
                     input_during_tts: input_policy.snapshot()?,
                     spokesperson: reply_tts.is_some().then(|| tts.clone()),
                 };
+                input_progress.enter("hello_stt");
                 let (created, events) =
                     OpenAiSpokespersonRuntime::spawn_observed(spokesperson_config.clone())?;
                 let readiness_deadline = Instant::now() + Duration::from_secs(30);
@@ -4593,6 +4806,7 @@ fn run_expert_spokesperson_session(
                         Err(_) => return Err("Spokesperson startup timed out".into()),
                     }
                 }
+                input_progress.enter("hello_ready");
                 runtime = Some(created);
                 runtime_events = Some(events);
                 runtime_config = Some(spokesperson_config);
@@ -5318,9 +5532,13 @@ fn spawn_live_playback(
     thread::spawn(move || {
         let result = (|| {
             worker_output.start()?;
+            let mut loudness = berd_call::SpokespersonLoudness::default();
             while let Ok(input) = receiver.recv() {
                 match input {
-                    LivePlaybackInput::Samples(samples) => worker_output.write(&samples)?,
+                    LivePlaybackInput::Samples(mut samples) => {
+                        loudness.process(&mut samples);
+                        worker_output.write(&samples)?;
+                    }
                     LivePlaybackInput::Finish => {
                         worker_output.finish_writes()?;
                         let deadline = Instant::now() + Duration::from_secs(3);
@@ -6060,11 +6278,13 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
     let mut rate = None;
     let mut stt_backend = "macos";
     let mut stt_model_dir = None;
+    let mut stt_hints = Vec::new();
     let mut mode = SessionMode::Conventional;
     let mut endpoints = SessionEndpointOverrides::default();
     let mut expert_tts = false;
     let mut spokesperson_voice = None;
     let mut spokesperson_rate = None;
+    let mut spokesperson_options = None;
     let mut index = 2;
     while index < args.len() {
         let flag = args[index].as_str();
@@ -6093,6 +6313,17 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
             }
             "--stt-backend" => stt_backend = value,
             "--stt-model-dir" => stt_model_dir = Some(PathBuf::from(value)),
+            "--stt-hint" => {
+                let hint = value.trim();
+                if hint.is_empty() || hint.len() > 256 || stt_hints.len() >= 100 {
+                    return Err(
+                        "--stt-hint accepts up to 100 nonempty phrases of at most 256 bytes".into(),
+                    );
+                }
+                if !stt_hints.iter().any(|existing| existing == hint) {
+                    stt_hints.push(hint.to_string());
+                }
+            }
             "--realtime-url" => {
                 endpoints.realtime = Some(parse_endpoint_url(value, "--realtime-url", true)?)
             }
@@ -6111,6 +6342,11 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
                     value
                         .parse::<f32>()
                         .map_err(|_| "--spokesperson-rate must be a number".to_string())?,
+                )
+            }
+            "--spokesperson-options" => {
+                spokesperson_options = Some(
+                    berd_call::openai_realtime_protocol::RealtimeSpokespersonSessionOptions::from_call_json(value)?,
                 )
             }
             "--pcm-output-fd" => {}
@@ -6155,11 +6391,13 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
     Ok(SessionConfig {
         tts,
         stt,
+        stt_hints,
         mode,
         endpoints,
         expert_tts,
         spokesperson_voice,
         spokesperson_rate,
+        spokesperson_options,
     })
 }
 
@@ -6779,7 +7017,7 @@ fn create_stt_benchmark_report(
         &pack,
         config.runs,
         config.mode,
-        || create_input_runtime(&config.stt, None),
+        || create_input_runtime(&config.stt, None, &[]),
     )))
 }
 
@@ -6842,7 +7080,11 @@ fn stt_benchmark_target(config: &SttBackendConfig) -> Result<SttBenchmarkTarget,
                 vad_threshold: 0.5,
                 endpoint_source: Some(endpoint_source.into()),
                 model_source: Some(model_source.into()),
-                credential_source: Some("OPENAI_API_KEY environment variable".into()),
+                credential_source: Some(format!(
+                    "{} environment variable",
+                    berd_call::openai::openai_key_var("OPENAI_STT_API_KEY")
+                        .unwrap_or("OPENAI_STT_API_KEY")
+                )),
             })
         }
     }
@@ -6887,10 +7129,8 @@ fn create_openai_tts_configuration(
     voice: String,
     endpoint: Option<&str>,
 ) -> Result<TtsConfiguration, String> {
-    let api_key = std::env::var("OPENAI_API_KEY")
-        .ok()
-        .filter(|key| !key.trim().is_empty())
-        .ok_or_else(|| "OPENAI_API_KEY is required".to_string())?;
+    let api_key = berd_call::openai::openai_key("OPENAI_TTS_API_KEY")
+        .ok_or_else(|| "OPENAI_TTS_API_KEY or OPENAI_API_KEY is required".to_string())?;
     let base =
         std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".into());
     Ok(TtsConfiguration::openai(
@@ -7117,6 +7357,7 @@ fn run_synthesis_command(config: SynthesisConfig) -> Result<(), SynthesisFailure
 fn create_input_runtime(
     config: &SttBackendConfig,
     endpoint_override: Option<&str>,
+    _hints: &[String],
 ) -> Result<
     (
         VoiceInputRuntime,
@@ -7137,7 +7378,9 @@ fn create_input_runtime(
                     )
                 })?;
                 validate_macos_stt_status(&status)?;
-                VoiceInputEngineConfig::MacSpeech
+                VoiceInputEngineConfig::MacSpeech {
+                    hints: _hints.to_vec(),
+                }
             }
             #[cfg(not(target_os = "macos"))]
             {
@@ -7148,10 +7391,9 @@ fn create_input_runtime(
             }
         }
         SttBackendConfig::OpenAi => {
-            let api_key = std::env::var("OPENAI_API_KEY")
-                .ok()
-                .filter(|key| !key.trim().is_empty())
-                .ok_or_else(|| "OPENAI_API_KEY is required for OpenAI STT".to_string())?;
+            let api_key = berd_call::openai::openai_key("OPENAI_STT_API_KEY").ok_or_else(|| {
+                "OPENAI_STT_API_KEY or OPENAI_API_KEY is required for OpenAI STT".to_string()
+            })?;
             let endpoint = endpoint_override
                 .map(str::to_string)
                 .or_else(|| {
@@ -7293,7 +7535,7 @@ fn public_tts_rejection_message(kind: TtsConfigurationRejectionKind) -> &'static
 fn public_tts_startup_error(config: &TtsBackendConfig) -> String {
     match config {
         TtsBackendConfig::OpenAi { .. } => {
-            "OpenAI TTS could not initialize; verify OPENAI_API_KEY and the selected model and voice"
+            "OpenAI TTS could not initialize; verify OPENAI_TTS_API_KEY or OPENAI_API_KEY and the selected model and voice"
                 .into()
         }
         TtsBackendConfig::Siri { .. } =>
@@ -7315,7 +7557,7 @@ fn public_stt_startup_error(config: &SttBackendConfig) -> String {
                 .into()
         }
         SttBackendConfig::OpenAi => {
-            "OpenAI speech recognition could not initialize; verify OPENAI_API_KEY and the selected transcription model"
+            "OpenAI speech recognition could not initialize; verify OPENAI_STT_API_KEY or OPENAI_API_KEY and the selected transcription model"
                 .into()
         }
     }
@@ -8040,6 +8282,41 @@ fn write_message(writer: &mut impl Write, message: &SessionMessage) -> Result<()
         .map_err(|error| error.to_string())
 }
 
+struct SessionInputProgress {
+    phase: Mutex<(&'static str, Instant)>,
+    processed: AtomicU64,
+}
+
+impl Default for SessionInputProgress {
+    fn default() -> Self {
+        Self {
+            phase: Mutex::new(("init", Instant::now())),
+            processed: AtomicU64::new(0),
+        }
+    }
+}
+
+impl SessionInputProgress {
+    fn enter(&self, phase: &'static str) {
+        *self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = (phase, Instant::now());
+    }
+
+    fn overflow(&self, accepted: u64) -> String {
+        // Never wait on the consumer. The phase lock is held only while replacing this tuple.
+        let (phase, age) = self
+            .phase
+            .try_lock()
+            .map(|state| (state.0, state.1.elapsed().as_millis()))
+            .unwrap_or(("transition", 0));
+        // Processed counts dequeued frames, not completed recognition work; this snapshot may race.
+        let processed = self.processed.load(Ordering::Relaxed);
+        format!("berd-call: PCM overflow accepted={accepted} processed={processed} phase={phase} phase_age_ms={age}")
+    }
+}
+
 fn receive_session_input(
     control_rx: &Receiver<OrderedControl>,
     pcm_rx: &Receiver<Box<VoiceInputFrame>>,
@@ -8089,6 +8366,8 @@ fn read_framed_requests(
     mut reader: impl Read,
     control_sender: mpsc::Sender<OrderedControl>,
     pcm_sender: SyncSender<Box<VoiceInputFrame>>,
+    progress: &SessionInputProgress,
+    diagnostics: &mut impl Write,
 ) {
     let mut sent_pcm = 0_u64;
     loop {
@@ -8106,10 +8385,12 @@ fn read_framed_requests(
             Input::Pcm(frame) => match pcm_sender.try_send(frame) {
                 Ok(()) => sent_pcm = sent_pcm.saturating_add(1),
                 Err(mpsc::TrySendError::Full(_)) => {
+                    let diagnostic = progress.overflow(sent_pcm);
                     let _ = control_sender.send(OrderedControl {
                         after_pcm: sent_pcm,
                         input: Input::Invalid("session PCM input queue is full".into()),
                     });
+                    let _ = writeln!(diagnostics, "{diagnostic}");
                     return;
                 }
                 Err(mpsc::TrySendError::Disconnected(_)) => return,
@@ -8460,7 +8741,6 @@ fn synthesize_to_output_with_finish(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use berd_call::input::InputDuringTtsPolicy;
     use berd_call::{PcmAudioOutput, TtsOutcome, TtsPcmSpec};
     use serde_json::{json, Value};
     use std::io::{Cursor, Read, Write};
@@ -9115,6 +9395,32 @@ mod tests {
     }
 
     #[test]
+    fn input_controls_waiting_on_a_lost_session_answer_once_it_ends() {
+        let (completed, result) = mpsc::sync_channel(1);
+        let mut resets = InputResets::default();
+        let mut output = Vec::new();
+        resets
+            .apply(
+                SessionMessage::InputResetApplied { id: 1 },
+                true,
+                || Ok(result),
+                &mut output,
+            )
+            .unwrap();
+        // The session is lost with the clear outstanding.
+        drop(completed);
+        resets.poll(&mut output).unwrap();
+        assert!(!resets.idle());
+        assert!(output.is_empty());
+        resets.session_ended(&mut output).unwrap();
+        assert!(resets.idle());
+        assert_eq!(
+            messages(&output),
+            [json!({"type":"input_reset_applied","id":1})]
+        );
+    }
+
+    #[test]
     fn input_controls_answer_in_order_once_the_provider_has_cleared_their_input() {
         let clears = std::cell::RefCell::new(Vec::new());
         let reset_input = || {
@@ -9203,6 +9509,23 @@ mod tests {
             .send(Err("provider refused".into()))
             .unwrap();
         assert_eq!(resets.poll(&mut output).unwrap_err(), "provider refused");
+    }
+
+    #[test]
+    fn cli_accepts_auto_input_policy() {
+        let (_, request) = parse_host_settings_args(&args(&[
+            "berd-call",
+            "settings",
+            "--input-during-tts",
+            "auto",
+        ]))
+        .unwrap();
+        assert!(matches!(
+            request,
+            host_control::ControlRequest::InputDuringTts {
+                policy: InputDuringTtsPolicy::Auto
+            }
+        ));
     }
 
     #[test]
@@ -9954,6 +10277,77 @@ mod tests {
     }
 
     #[test]
+    fn live_spokesperson_playback_levels_chunks_before_the_audio_pipe() {
+        let (child, mut host) = UnixStream::pair().unwrap();
+        host.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let transport =
+            Arc::new(unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap());
+        let (control, _controls) = mpsc::channel();
+        let (completed, results) = mpsc::channel();
+        let playback =
+            spawn_live_playback("response".into(), 7, None, transport, control, completed).unwrap();
+        assert_eq!(
+            read_audio_record(&mut host).0,
+            session_audio::AUDIO_BEGIN_KIND
+        );
+        playback
+            .output
+            .handle_ack(AudioHostAck::BeginAccepted)
+            .unwrap();
+        for (sequence, input) in [(1, 0.1), (2, 0.9), (3, 0.1)] {
+            playback
+                .sender
+                .send(LivePlaybackInput::Samples(
+                    vec![input; session_audio::MAX_AUDIO_CHUNK_FRAMES],
+                ))
+                .unwrap();
+            let (kind, payload) = read_audio_record(&mut host);
+            assert_eq!(kind, session_audio::AUDIO_CHUNK_KIND);
+            let samples: Vec<f32> = payload[16..]
+                .chunks_exact(4)
+                .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+                .collect();
+            assert!(samples.iter().all(|sample| sample.abs() <= 0.95));
+            match sequence {
+                1 => assert!((samples[0] - 0.16).abs() < 0.00001),
+                2 => assert!((samples[0] - 0.95).abs() < 0.00001),
+                3 => assert!(
+                    samples[0] < 0.11,
+                    "limiter state must cross chunk boundaries"
+                ),
+                _ => unreachable!(),
+            }
+            playback
+                .output
+                .handle_ack(AudioHostAck::ChunkAccepted { sequence })
+                .unwrap();
+            playback
+                .output
+                .handle_ack(AudioHostAck::Played {
+                    played_frames: sequence * session_audio::MAX_AUDIO_CHUNK_FRAMES as u64,
+                })
+                .unwrap();
+        }
+        playback.sender.send(LivePlaybackInput::Finish).unwrap();
+        let (kind, payload) = read_audio_record(&mut host);
+        assert_eq!(kind, session_audio::AUDIO_END_KIND);
+        playback
+            .output
+            .handle_ack(AudioHostAck::Drained {
+                sequence: u64::from_le_bytes(payload[8..16].try_into().unwrap()),
+                played_frames: 3 * session_audio::MAX_AUDIO_CHUNK_FRAMES as u64,
+            })
+            .unwrap();
+        assert_eq!(
+            results
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap()
+                .unwrap(),
+            ("response".into(), 7)
+        );
+    }
+
+    #[test]
     fn false_barge_quiesces_and_resumes_one_remote_speech_without_a_terminal() {
         let mut core = SessionCore::default();
         let mut current = active_playback(&mut core);
@@ -10567,6 +10961,33 @@ mod tests {
             })
         );
 
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            serde_json::to_value(ManagementResultEnvelope {
+                schema_version: MANAGEMENT_SCHEMA_VERSION,
+                operation: "voices.preview",
+                event: "result",
+                result: VoicePreviewResult {
+                    backend: "siri",
+                    voice: identity,
+                    rate: 1.5,
+                    source: berd_call::siri::SiriPreviewSource::Sample,
+                },
+            })
+            .unwrap(),
+            json!({
+                "schemaVersion": 1,
+                "operation": "voices.preview",
+                "event": "result",
+                "result": {
+                    "backend": "siri",
+                    "voice": {"name": "Aaron", "language": "en-US"},
+                    "rate": 1.5,
+                    "source": "sample"
+                }
+            })
+        );
+
         let status = MacosModelStatus {
             supported: true,
             locale: Some("en-US".into()),
@@ -10746,11 +11167,13 @@ mod tests {
                     rate: 1.0,
                 },
                 stt: SttBackendConfig::Macos,
+                stt_hints: vec![],
                 mode: SessionMode::Conventional,
                 endpoints: SessionEndpointOverrides::default(),
                 expert_tts: false,
                 spokesperson_voice: None,
                 spokesperson_rate: None,
+                spokesperson_options: None,
             }
         );
 
@@ -10759,11 +11182,13 @@ mod tests {
             SessionConfig {
                 tts: TtsBackendConfig::OpenAi { rate: 1.0 },
                 stt: SttBackendConfig::Macos,
+                stt_hints: vec![],
                 mode: SessionMode::Conventional,
                 endpoints: SessionEndpointOverrides::default(),
                 expert_tts: false,
                 spokesperson_voice: None,
                 spokesperson_rate: None,
+                spokesperson_options: None,
             }
         );
     }
@@ -10838,11 +11263,13 @@ mod tests {
                     rate: 1.0,
                 },
                 stt: SttBackendConfig::Macos,
+                stt_hints: vec![],
                 mode: SessionMode::Conventional,
                 endpoints: SessionEndpointOverrides::default(),
                 expert_tts: false,
                 spokesperson_voice: None,
                 spokesperson_rate: None,
+                spokesperson_options: None,
             }
         );
         assert!(parse_args(&args(&[
@@ -10896,11 +11323,13 @@ mod tests {
                 rate: 1.5,
             },
             stt: SttBackendConfig::Macos,
+            stt_hints: vec![],
             mode: SessionMode::ExpertSpokesperson,
             endpoints: SessionEndpointOverrides::default(),
             expert_tts: false,
             spokesperson_voice: None,
             spokesperson_rate: None,
+            spokesperson_options: None,
         };
         let mut realtime = OpenAiSpokespersonConfig {
             endpoint: "ws://localhost".into(),
@@ -10919,6 +11348,68 @@ mod tests {
 
         assert_eq!(realtime.speed(), 1.5);
         assert_eq!(realtime.voice(), "marin");
+    }
+
+    #[test]
+    fn spokesperson_options_reach_its_session_without_being_saved() {
+        let options = r#"{"model":"gpt-realtime-2","turnDetection":"semantic_vad","eagerness":"low","noiseReduction":"near_field","maxOutputTokens":512,"transcriptionPrompt":"Berd, Buzz"}"#;
+        let parse = |options: &str| {
+            parse_args(&args(&[
+                "berd-call",
+                "session",
+                "--mode",
+                "expert-spokesperson",
+                "--tts-backend",
+                "openai",
+                "--spokesperson-options",
+                options,
+            ]))
+        };
+        let mut realtime = OpenAiSpokespersonConfig {
+            endpoint: "ws://localhost".into(),
+            api_key: "test-key".into(),
+            session: berd_call::openai_realtime_protocol::RealtimeSpokespersonSessionOptions {
+                model: Some("env-model".into()),
+                transcription_model: Some("env-transcription".into()),
+                voice: Some("marin".into()),
+                speed: Some(1.0),
+                ..Default::default()
+            },
+            semantic_transcript: Vec::new(),
+        };
+        apply_spokesperson_startup_settings(&parse(options).unwrap(), &mut realtime);
+        let update =
+            berd_call::openai_realtime_protocol::spokesperson_session_update(&realtime.session);
+        let input = &update["session"]["audio"]["input"];
+        assert_eq!(realtime.model(), "gpt-realtime-2");
+        assert_eq!(input["turn_detection"]["type"], "semantic_vad");
+        assert_eq!(input["turn_detection"]["eagerness"], "low");
+        assert_eq!(input["noise_reduction"]["type"], "near_field");
+        assert_eq!(input["transcription"]["model"], "env-transcription");
+        assert_eq!(input["transcription"]["prompt"], "Berd, Buzz");
+        assert_eq!(update["session"]["max_output_tokens"], 512);
+        assert_eq!(update["session"]["audio"]["output"]["voice"], "marin");
+        for (options, error) in [
+            (r#"{"voice":"cedar"}"#, "voice"),
+            (r#"{"speed":1.2}"#, "speed"),
+            (r#"{"vadThreshold":2}"#, "vadThreshold"),
+            (r#"{"silenceDurationMs":50}"#, "silenceDurationMs"),
+            (r#"{"maxOutputTokens":0}"#, "maxOutputTokens"),
+            (r#"{"model":" "}"#, "model"),
+            (r#"{"turnDetection":"loud"}"#, "--spokesperson-options"),
+            (r#"{"temperature":1}"#, "temperature"),
+            ("[]", "--spokesperson-options"),
+        ] {
+            assert!(parse(options).unwrap_err().contains(error), "{options}");
+        }
+        let arguments = args(&["--spokesperson-options", options, "--voice", "Aaron"]);
+        assert_eq!(
+            saved_settings::persistable_arguments(&arguments),
+            args(&["--voice", "Aaron"])
+        );
+        // Turning the Spokesperson off and on keeps its options for later.
+        assert!(saved_settings::with_spokesperson(&arguments, false, false)
+            .contains(&"--spokesperson-options".to_string()));
     }
 
     #[test]
@@ -11118,11 +11609,13 @@ mod tests {
                     rate: 1.0,
                 },
                 stt: SttBackendConfig::Macos,
+                stt_hints: vec![],
                 mode: SessionMode::Conventional,
                 endpoints: SessionEndpointOverrides::default(),
                 expert_tts: false,
                 spokesperson_voice: None,
                 spokesperson_rate: None,
+                spokesperson_options: None,
             }
         );
         assert!(parse_args(&args(&[
@@ -11182,11 +11675,13 @@ mod tests {
                 stt: SttBackendConfig::Parakeet {
                     model_dir: PathBuf::from("/models/parakeet")
                 },
+                stt_hints: vec![],
                 mode: SessionMode::Conventional,
                 endpoints: SessionEndpointOverrides::default(),
                 expert_tts: false,
                 spokesperson_voice: None,
                 spokesperson_rate: None,
+                spokesperson_options: None,
             }
         );
         assert!(parse_args(&args(&[
@@ -11629,11 +12124,13 @@ mod tests {
                     rate: 1.0
                 },
                 stt: SttBackendConfig::OpenAi,
+                stt_hints: vec![],
                 mode: SessionMode::Conventional,
                 endpoints: SessionEndpointOverrides::default(),
                 expert_tts: false,
                 spokesperson_voice: None,
                 spokesperson_rate: None,
+                spokesperson_options: None,
             }
         );
     }
@@ -11690,7 +12187,13 @@ mod tests {
         let (control_sender, control_receiver) = mpsc::channel();
         let (pcm_sender, pcm_receiver) = mpsc::sync_channel(3);
 
-        read_framed_requests(Cursor::new(bytes), control_sender, pcm_sender);
+        read_framed_requests(
+            Cursor::new(bytes),
+            control_sender,
+            pcm_sender,
+            &SessionInputProgress::default(),
+            &mut Vec::new(),
+        );
 
         assert!(matches!(
             control_receiver.recv().unwrap().input,
@@ -11736,7 +12239,13 @@ mod tests {
             header.extend_from_slice(&(length as u32).to_le_bytes());
             let (control_sender, control_receiver) = mpsc::channel();
             let (pcm_sender, _pcm_receiver) = mpsc::sync_channel(1);
-            read_framed_requests(Cursor::new(header), control_sender, pcm_sender);
+            read_framed_requests(
+                Cursor::new(header),
+                control_sender,
+                pcm_sender,
+                &SessionInputProgress::default(),
+                &mut Vec::new(),
+            );
             let Input::Invalid(message) = control_receiver.recv().unwrap().input else {
                 panic!("invalid frame must be terminal")
             };
@@ -11753,7 +12262,13 @@ mod tests {
         let (control_sender, control_receiver) = mpsc::channel();
         let (pcm_sender, pcm_receiver) = mpsc::sync_channel(1);
 
-        read_framed_requests(Cursor::new(bytes), control_sender, pcm_sender);
+        read_framed_requests(
+            Cursor::new(bytes),
+            control_sender,
+            pcm_sender,
+            &SessionInputProgress::default(),
+            &mut Vec::new(),
+        );
 
         assert!(pcm_receiver.recv().is_ok());
         let control = control_receiver.recv().unwrap();
@@ -11763,6 +12278,153 @@ mod tests {
         };
         assert_eq!(message, "session PCM input queue is full");
         assert!(control_receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn pcm_overflow_reports_fatal_before_blocked_diagnostics() {
+        struct GatedWriter(Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>);
+        impl Write for GatedWriter {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                if let Some((entered, release)) = self.0.take() {
+                    entered.send(()).unwrap();
+                    release.recv_timeout(Duration::from_secs(2)).unwrap();
+                }
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let (control_tx, control_rx) = mpsc::channel();
+        let (pcm_tx, _pcm_rx) = mpsc::sync_channel(1);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let bytes = framed(PCM_FRAME_KIND, &[0_u8; PCM_FRAME_BYTES]).repeat(2);
+        let worker = thread::spawn(move || {
+            read_framed_requests(
+                Cursor::new(bytes),
+                control_tx,
+                pcm_tx,
+                &SessionInputProgress::default(),
+                &mut GatedWriter(Some((entered_tx, release_rx))),
+            );
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let terminal = control_rx.try_recv();
+        release_tx.send(()).unwrap();
+        worker.join().unwrap();
+        let terminal = terminal.expect("blocked diagnostics must not delay fatal control");
+        assert_eq!(terminal.after_pcm, 1);
+        assert!(matches!(terminal.input, Input::Invalid(_)));
+    }
+
+    #[test]
+    fn pcm_overflow_diagnostic_does_not_wait_for_a_phase_transition() {
+        let progress = SessionInputProgress::default();
+        let _transition = progress.phase.lock().unwrap();
+        assert_eq!(
+            progress.overflow(32),
+            "berd-call: PCM overflow accepted=32 processed=0 phase=transition phase_age_ms=0"
+        );
+    }
+
+    #[test]
+    fn pcm_overflow_reports_stalled_phase_without_reordering_input() {
+        struct GatedReader {
+            first: Cursor<Vec<u8>>,
+            rest: Cursor<Vec<u8>>,
+            reached: mpsc::Sender<()>,
+            resume: mpsc::Receiver<()>,
+            resumed: bool,
+        }
+        impl Read for GatedReader {
+            fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+                if self.first.position() < self.first.get_ref().len() as u64 {
+                    return self.first.read(bytes);
+                }
+                if !self.resumed {
+                    self.reached.send(()).unwrap();
+                    self.resume.recv_timeout(Duration::from_secs(2)).unwrap();
+                    self.resumed = true;
+                }
+                self.rest.read(bytes)
+            }
+        }
+        let frame = framed(PCM_FRAME_KIND, &[0_u8; PCM_FRAME_BYTES]);
+        let mut rest = frame.repeat(INPUT_QUEUE_CAPACITY + 1);
+        rest.extend_from_slice(&framed(JSON_FRAME_KIND, br#"{"type":"shutdown"}"#));
+        let (reached_tx, reached_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let reader = GatedReader {
+            first: Cursor::new(frame),
+            rest: Cursor::new(rest),
+            reached: reached_tx,
+            resume: resume_rx,
+            resumed: false,
+        };
+        let progress = Arc::new(SessionInputProgress::default());
+        let reader_progress = Arc::clone(&progress);
+        let (control_tx, control_rx) = mpsc::channel();
+        let (pcm_tx, pcm_rx) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
+        let worker = thread::spawn(move || {
+            let mut diagnostics = Vec::new();
+            read_framed_requests(
+                reader,
+                control_tx,
+                pcm_tx,
+                &reader_progress,
+                &mut diagnostics,
+            );
+            diagnostics
+        });
+        reached_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let mut pending = None;
+        let mut processed = 0;
+        assert!(matches!(
+            receive_session_input(&control_rx, &pcm_rx, &mut pending, &mut processed),
+            Some(Input::Pcm(_))
+        ));
+        progress.processed.store(processed, Ordering::Relaxed);
+        *progress.phase.lock().unwrap() =
+            ("status_sounds", Instant::now() - Duration::from_secs(1));
+        resume_tx.send(()).unwrap();
+        let control = control_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(control.after_pcm, 1 + INPUT_QUEUE_CAPACITY as u64);
+        assert!(
+            matches!(control.input, Input::Invalid(ref message) if message == "session PCM input queue is full")
+        );
+        assert!(control_rx.recv_timeout(Duration::from_secs(2)).is_err());
+        let diagnostic = String::from_utf8(worker.join().unwrap()).unwrap();
+        assert!(
+            diagnostic.starts_with(
+                "berd-call: PCM overflow accepted=33 processed=1 phase=status_sounds phase_age_ms="
+            ),
+            "{diagnostic:?}"
+        );
+        assert!(
+            diagnostic
+                .trim()
+                .rsplit('=')
+                .next()
+                .unwrap()
+                .parse::<u64>()
+                .unwrap()
+                >= 1000
+        );
+        assert_eq!(diagnostic.lines().count(), 1);
+        assert!(diagnostic.len() < 200);
+        // The fatal control remains behind every accepted frame.
+        pending = Some(control);
+        for _ in 0..INPUT_QUEUE_CAPACITY {
+            assert!(matches!(
+                receive_session_input(&control_rx, &pcm_rx, &mut pending, &mut processed),
+                Some(Input::Pcm(_))
+            ));
+        }
+        assert!(matches!(
+            receive_session_input(&control_rx, &pcm_rx, &mut pending, &mut processed),
+            Some(Input::Invalid(_))
+        ));
     }
 
     #[test]
@@ -13120,5 +13782,38 @@ mod tests {
             parse_speak_control_args(&args(&["berd-call", "speak", "--legacy", "hello",])).is_err()
         );
         assert!(parse_control_port(&args(&["berd-call", "stop", "extra"])).is_err());
+    }
+}
+
+#[cfg(test)]
+mod speech_hint_tests {
+    use super::*;
+
+    #[test]
+    fn speech_hints_are_bounded_and_preserve_names() {
+        let args = |hints: &[&str]| {
+            [
+                "berd-call",
+                "session",
+                "--voice",
+                "Aaron",
+                "--language",
+                "en-US",
+            ]
+            .into_iter()
+            .chain(hints.iter().flat_map(|hint| ["--stt-hint", *hint]))
+            .map(String::from)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            parse_args(&args(&["Nora", " Aaron ", "Nora"]))
+                .unwrap()
+                .stt_hints,
+            ["Nora", "Aaron"]
+        );
+        assert!(parse_args(&args(&[""])).is_err());
+        assert!(parse_args(&args(&[&"a".repeat(257)])).is_err());
+        let many = (0..101).map(|i| format!("agent{i}")).collect::<Vec<_>>();
+        assert!(parse_args(&args(&many.iter().map(String::as_str).collect::<Vec<_>>())).is_err());
     }
 }
