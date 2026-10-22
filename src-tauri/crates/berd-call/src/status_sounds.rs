@@ -146,11 +146,7 @@ impl StatusSoundRuntime {
         if conversation_active {
             self.stop();
         } else if self.conversation_active {
-            let delay = match self.machine.current {
-                Some((ConversationStatus::Working, _)) => Duration::ZERO,
-                _ => STATUS_SOUND_INTERVAL,
-            };
-            self.next_tick = Some(Instant::now() + delay);
+            self.next_tick = Some(Instant::now());
         }
         self.conversation_active = conversation_active;
     }
@@ -746,16 +742,15 @@ mod tests {
     }
 
     #[test]
-    fn waiting_cue_keeps_its_pause_after_speech() {
+    fn waiting_cue_is_due_immediately_after_speech() {
         let mut runtime = StatusSoundRuntime::default();
         runtime.update(
             ConversationStatus::Waiting,
             settings(StatusSoundMode::WorkingAndWaiting),
         );
         runtime.update_conversation_activity(true);
-        let before = Instant::now();
         runtime.update_conversation_activity(false);
-        assert!(runtime.next_tick.unwrap() >= before + STATUS_SOUND_INTERVAL);
+        assert!(runtime.next_tick.unwrap() <= Instant::now());
     }
 
     #[test]
