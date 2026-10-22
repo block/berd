@@ -64,7 +64,7 @@ yaml_serde = "0.10.4"
 sha2 = "0.10"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "migrate", "macros"] }
 sysinfo = { version = "0.33", default-features = false, features = ["system"] }
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = ["protocol-asset", "macos-private-api"] }
 toml = "1.1.4"
 tauri-plugin-berdctl = { path = "plugins/berdctl" }
 tauri-plugin-app-test-driver = { path = "plugins/app-test-driver" }
@@ -105,9 +105,22 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSRunningApplication", "NSImage", "NSMenu", "NSMenuItem", "NSAlert", "NSButton", "NSControl", "NSCell", "NSResponder", "NSView"] }
 objc2-avf-audio = { version = "0.3.2", features = ["AVAudioApplication", "block2"] }
 objc2-core-audio = "0.3.2"
-objc2-foundation = { version = "0.3.2", features = ["NSDictionary", "NSError", "NSFileManager", "NSObject", "NSProcessInfo", "NSString", "NSURL"] }
+objc2-foundation = { version = "0.3.2", features = ["NSDictionary", "NSError", "NSFileManager", "NSObject", "NSProcessInfo", "NSString", "NSURL", "NSValue"] }
+# Perch mode (desktop_agent): CGWindowList enumeration, CF containers +
+# CGRect/CGPoint interchange, and ScreenCaptureKit window capture. All
+# crates.io, same objc2 0.3 family as the existing app-kit/foundation
+# pins. AXUIElement has no objc2 wrapper — perch.rs links the raw
+# ApplicationServices C API directly, so there is deliberately NO
+# objc2-application-services dependency.
+objc2-core-foundation = "0.3.2"
+objc2-core-graphics = { version = "0.3.2", features = ["CGWindow"] }
+objc2-screen-capture-kit = "0.3.2"
 objc2-user-notifications = "0.3.2"
 rodio = { version = "0.22", default-features = false, features = ["playback"] }
+# Pinned to the rev validated by the desktop-agent dependency spike.
+# Treat updates as review-worthy — community plugin, swizzling approach.
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", rev = "18ffb9a201fbf6fedfaa382fd4b92315ea30ab1a" }
+tauri-plugin-global-shortcut = "2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "vendored"] }

@@ -1,0 +1,107 @@
+{
+  "description": "Lossless 1.5x timing of existing HEVC-alpha MP4s. All encoded samples, alpha, edit/sample tables and endpoints unchanged; only mvhd/mdhd timescales 12288 -> 18432. Native rates: effective source speed / 1.5. No audio.",
+  "originalTimescale": 12288,
+  "timescale": 18432,
+  "sourceFrames": 122,
+  "sourceFps": 24,
+  "mediaFps": 36,
+  "durationTicks": 62472,
+  "assets": [
+    {
+      "file": "berdy_DangleToDangle_00001_.mp4",
+      "bytes": 842853,
+      "originalSha256": "4d9b4b7c1adb36420a45b45380ebbf8e487cd4f8df1775651aa74962e38304e6",
+      "sha256": "370f9b3a634c1cfa42bc36d3e0d68d6ee8dfd9ad910a21ef8224062d46ee3770",
+      "mdatSha256": "dad1b29f9e098b2dc556560f5e3cd68ab24e4a7368a08ffc8e01a30c94280010",
+      "timescaleOffsets": [56, 308]
+    },
+    {
+      "file": "berdy_DangleToIdle_00001_.mp4",
+      "bytes": 902187,
+      "originalSha256": "e8b0e7b34d238130ee069de81a9a9da886f22ffdfedc6e4ba584ab29e6a42fc7",
+      "sha256": "8f0ed09690ab00c9bf91314cadc09a2f22fa57af1382cde40f0a5530a28ed358",
+      "mdatSha256": "d25c45c3e0158ffb471c7170f26f29fc7d566f841d12cf7df6a901c1c07432e0",
+      "timescaleOffsets": [56, 308]
+    },
+    {
+      "file": "berdy_DangleToSit_00001_.mp4",
+      "bytes": 1050978,
+      "originalSha256": "6dd93e1e53ca8f5c8d0df6265f4c84825f8f81faf81d37a0868ed7849dafae1e",
+      "sha256": "eddb6a098f21c75dcd5cbdc08e7699f164453b6d34c6132abfc3b8312551771d",
+      "mdatSha256": "a2736f6a372b9f4542f96d71f5d4a06f394d3c66d93b3a5257faf7df0cd3e64d",
+      "timescaleOffsets": [56, 308]
+    },
+    {
+      "file": "berdy_IdleToDangle_00001_.mp4",
+      "bytes": 1064141,
+      "originalSha256": "1d8e63eeab2d2fa3c8bfa216ceb4154a761b7f850cbe7f9e76adc65b47c3eea3",
+      "sha256": "ca4ff1ad04391ad4cee4ca5b32738da86905b4d6e5f94a72b817b8a15de2698e",
+      "mdatSha256": "419085b141f5b9b2de18e5fc404fc93ef06bb59d0e96ad52750374cb986a9169",
+      "timescaleOffsets": [56, 308]
+    },
+    {
+      "file": "berdy_Idle_01_00001_.mp4",
+      "bytes": 905500,
+      "originalSha256": "6c7ac32132c1238799e1f0aba1d54ae2597310fb13727a920333d023fbb3128d",
+      "sha256": "feb86e8c635301a83561e9c73cf0a1aa4a14f8460a7b5297c9503133e1ca8237",
+      "mdatSha256": "0db7b0c5c39a087e3789057a60fad40ba12962aea469ef60f63d8cece7eea724",
+      "timescaleOffsets": [56, 308]
+    },
+    {
+      "file": "berdy_Idle_02_00001_.mp4",
+      "bytes": 815724,
+      "originalSha256": "916d4084d29415b499be26a34fc5b9f01caf83aba4970106365529903a5aaeb5",
+      "sha256": "877de4b6e447d10606bf6d197edf31bca5954236f0674baa9ac1b44189e03f6c",
+      "mdatSha256": "6bc86a040517b0bf8da004727f9ac91fd194ab17174ca1ceb17167924ab56634",
+      "timescaleOffsets": [56, 308]
+    },
+    {
+      "file": "berdy_Idle_03_00001_.mp4",
+      "bytes": 793758,
+      "originalSha256": "d64c8020654c3bc9546f421aff50526477bad4f6222402c43187b8640030fbef",
+      "sha256": "a08e08ab1da193103118493e3c70354eda3b7b54b2df54c4a06104748d25ba2f",
+      "mdatSha256": "96d2d5ff43d6de8c3344f2c96ffb2ee5e7b2fcd5c03cad784d66fd8d09687691",
+      "timescaleOffsets": [56, 308]
+    },
+    {
+      "file": "berdy_Idle_04_00001_.mp4",
+      "bytes": 710787,
+      "originalSha256": "d51fb9a85f065ff52735fff11a1e564e0fd2696626fb9ebb5b15a1447d4e8c60",
+      "sha256": "7d369d86e7ddddf791a4d23905f24131fca8a69700549e4246a0ba623921adfc",
+      "mdatSha256": "8401018f83ad13eb7bfd641a065763f8a01a2dcc2f4151dc115530a5ffacbfd2",
+      "timescaleOffsets": [56, 308]
+    },
+    {
+      "file": "berdy_SitToDangle_00001_.mp4",
+      "bytes": 1020745,
+      "originalSha256": "5e5db8f51097dee17c0f3591516f96e933dcb080ec89fef64a9ddacba7dd444a",
+      "sha256": "b940eb090971cdc11d0975be7b0022a49d39ca41e765bf000d90a0684cb7048b",
+      "mdatSha256": "d097e4ca66141357a519266ef76223dbd02e5ed4fffc60b418016e9c18b53e93",
+      "timescaleOffsets": [56, 308]
+    },
+    {
+      "file": "berdy_Sit_Idle_01_00001_.mp4",
+      "bytes": 787190,
+      "originalSha256": "308101f2854671e091d31646acda4c429153461673d22a6e4989953103080fbe",
+      "sha256": "34afaaff93dbeae5f27db6bdbffe5bf18f0c3c0edbc16aa7686b341b3be9b172",
+      "mdatSha256": "78019926feef1882127fc98fc4c6ca7bbf8a7fb8c18e667f59bd9d9c2c9cd2de",
+      "timescaleOffsets": [56, 308]
+    },
+    {
+      "file": "berdy_Sit_Idle_02_00001_.mp4",
+      "bytes": 925222,
+      "originalSha256": "980002a70f779e4e57b8340f78a7c3aa9e470134813726f4ba181f9a28a99d26",
+      "sha256": "f90e2c722cb01c3dbb9b9e265f4466d73d8d7d5d18a9f92e390ba74041217f8a",
+      "mdatSha256": "09ebf4098dca3dbf4a6d825d1c80df24bc12403740037f05e07d43acd97bc1b3",
+      "timescaleOffsets": [56, 308]
+    },
+    {
+      "file": "berdy_Sit_Idle_03_00001_.mp4",
+      "bytes": 881085,
+      "originalSha256": "187baf7ba514f1f89a7ccf30733a86981b6efc3a4607c3e27e92c0b2d5e93930",
+      "sha256": "4a52b20f0895bc19c4e1652ba45169b00a605deea977407df9e0274460edcc9f",
+      "mdatSha256": "42db502f5bfd5902451266023377aac9d0159f46ad80f83e5991086a865cf51f",
+      "timescaleOffsets": [56, 308]
+    }
+  ]
+}

@@ -6,6 +6,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script>
       (() => {
+        // Auxiliary panel webviews (?window=...) skip the startup canvas:
+        // the desktop-agent panel is a transparent always-on-top window,
+        // and painting the opaque themed background here would flash a
+        // solid square before React mounts. Session windows use
+        // ?sessionKey= and keep the canvas.
+        if (new URLSearchParams(window.location.search).has("window")) {
+          return;
+        }
+
         const getDefaultAccent = (theme) =>
           theme === "dark" ? "#ffffff" : "#1a1a1a";
 
