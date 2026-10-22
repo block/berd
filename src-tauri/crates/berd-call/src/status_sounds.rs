@@ -142,13 +142,21 @@ impl StatusSoundRuntime {
         self.player.stop();
     }
 
-    pub fn poll(&mut self, conversation_active: bool) -> Result<bool, String> {
+    fn update_conversation_activity(&mut self, conversation_active: bool) {
         if conversation_active {
             self.stop();
         } else if self.conversation_active {
-            self.next_tick = Some(Instant::now() + STATUS_SOUND_INTERVAL);
+            let delay = match self.machine.current {
+                Some((ConversationStatus::Working, _)) => Duration::ZERO,
+                _ => STATUS_SOUND_INTERVAL,
+            };
+            self.next_tick = Some(Instant::now() + delay);
         }
         self.conversation_active = conversation_active;
+    }
+
+    pub fn poll(&mut self, conversation_active: bool) -> Result<bool, String> {
+        self.update_conversation_activity(conversation_active);
         if conversation_active {
             self.player.reap();
             return Ok(false);
@@ -679,24 +687,6 @@ mod tests {
     }
 
     #[test]
-    fn resuming_after_conversation_audio_restarts_the_full_cadence() {
-        let mut runtime = StatusSoundRuntime::default();
-        runtime.update(
-            ConversationStatus::Working,
-            settings(StatusSoundMode::Working),
-        );
-        assert!(!runtime.poll(true).unwrap());
-        runtime.next_tick = Some(Instant::now() + Duration::from_secs(60));
-        let _ = runtime.poll(false);
-        let remaining = runtime
-            .next_tick
-            .unwrap()
-            .saturating_duration_since(Instant::now());
-        assert!(remaining > STATUS_SOUND_INTERVAL - Duration::from_millis(100));
-        assert!(remaining <= STATUS_SOUND_INTERVAL);
-    }
-
-    #[test]
     fn session_volume_defaults_to_point_eight_and_accepts_an_override() {
         assert_eq!(StatusSoundSettings::default().volume, 0.8);
         let explicit = StatusSoundSettings {
@@ -741,6 +731,31 @@ mod tests {
             settings(StatusSoundMode::WorkingAndWaiting),
         );
         assert!(runtime.next_tick.unwrap() <= Instant::now());
+    }
+
+    #[test]
+    fn working_cue_is_due_immediately_after_speech() {
+        let mut runtime = StatusSoundRuntime::default();
+        runtime.update(
+            ConversationStatus::Working,
+            settings(StatusSoundMode::Working),
+        );
+        runtime.update_conversation_activity(true);
+        runtime.update_conversation_activity(false);
+        assert!(runtime.next_tick.unwrap() <= Instant::now());
+    }
+
+    #[test]
+    fn waiting_cue_keeps_its_pause_after_speech() {
+        let mut runtime = StatusSoundRuntime::default();
+        runtime.update(
+            ConversationStatus::Waiting,
+            settings(StatusSoundMode::WorkingAndWaiting),
+        );
+        runtime.update_conversation_activity(true);
+        let before = Instant::now();
+        runtime.update_conversation_activity(false);
+        assert!(runtime.next_tick.unwrap() >= before + STATUS_SOUND_INTERVAL);
     }
 
     #[test]
