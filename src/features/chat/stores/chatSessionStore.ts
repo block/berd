@@ -194,6 +194,9 @@ interface ChatSessionStoreState {
   hasHydratedSessions: boolean;
   sessionPageCursor: string | null;
   hasMoreSessions: boolean;
+  /** True once session/list returned its last page. A failed load or a
+   *  repeated cursor also leaves no cursor, but does not set this. */
+  hasReachedSessionListEnd: boolean;
   isRightRailOpen: boolean;
   activeWorkspaceBySession: Record<string, ActiveWorkspace>;
   archiveMutationBySessionId: ArchiveMutationBySessionId;
@@ -549,6 +552,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   hasHydratedSessions: false,
   sessionPageCursor: null,
   hasMoreSessions: false,
+  hasReachedSessionListEnd: false,
   isRightRailOpen: loadRightRailOpenPreference(),
   activeWorkspaceBySession: {},
   archiveMutationBySessionId: {},

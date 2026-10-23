@@ -20,6 +20,7 @@ interface SessionPageState {
   archiveMutationBySessionId: ArchiveMutationBySessionId;
   sessionPageCursor: string | null;
   hasMoreSessions: boolean;
+  hasReachedSessionListEnd: boolean;
 }
 
 export interface AcpSessionMappingContext {
@@ -237,5 +238,6 @@ export function mergeAcpSessionPage(
     archiveMutationBySessionId: merged.archiveMutationBySessionId,
     sessionPageCursor: hasMoreSessions ? nextCursor : null,
     hasMoreSessions,
+    hasReachedSessionListEnd: nextCursor == null,
   };
 }
