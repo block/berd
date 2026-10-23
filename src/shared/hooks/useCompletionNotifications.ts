@@ -10,6 +10,10 @@ import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { isDefaultChatTitle } from "@/features/chat/lib/sessionTitle";
 import { showCompletionNotificationToast } from "@/shared/notifications/CompletionNotificationToast";
 import {
+  createCompletionNotificationEvent,
+  emitCompletionNotificationEvent,
+} from "@/shared/notifications/completionEvents";
+import {
   getNotificationSoundResource,
   playNotificationSound,
 } from "@/shared/notifications/notificationSounds";
@@ -243,6 +247,21 @@ export function useCompletionNotifications(
                 ) {
                   return;
                 }
+                // The completion is notification-eligible (enabled, not
+                // suppressed, not an actively viewed focused session).
+                // Publish the typed event here so consumers (e.g. a future
+                // notification center) see it regardless of which channel
+                // pref (desktop/in-app) ultimately renders it — note a
+                // disabled channel pref below can still skip rendering.
+                emitCompletionNotificationEvent(
+                  createCompletionNotificationEvent({
+                    sessionId,
+                    projectId: session?.projectId ?? null,
+                    outcome,
+                    body,
+                    occurredAtMs: Date.now(),
+                  }),
+                );
                 if (!windowFocused) {
                   if (!currentPrefs.desktop) return;
                   import("@tauri-apps/api/core").then(({ invoke }) => {

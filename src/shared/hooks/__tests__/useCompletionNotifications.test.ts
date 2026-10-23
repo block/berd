@@ -699,4 +699,54 @@ describe("useCompletionNotifications", () => {
       ),
     );
   });
+
+  it("emits a typed completion event with session/project/navigation refs on delivery", async () => {
+    const { subscribeToCompletionNotificationEvents } = await import(
+      "@/shared/notifications/completionEvents"
+    );
+    const seen = vi.fn();
+    const unsubscribe = subscribeToCompletionNotificationEvents(seen);
+
+    let focusChanged: ((event: { payload: boolean }) => void) | null = null;
+    mocks.getCurrentWindow.mockReturnValue({
+      onFocusChanged: vi.fn((handler) => {
+        focusChanged = handler;
+        return Promise.resolve(vi.fn());
+      }),
+      unminimize: vi.fn().mockResolvedValue(undefined),
+      show: vi.fn().mockResolvedValue(undefined),
+      setFocus: vi.fn().mockResolvedValue(undefined),
+    });
+
+    renderHook(() => useCompletionNotifications(vi.fn()));
+    await waitFor(() => expect(focusChanged).toBeTruthy());
+
+    useChatSessionStore.getState().addSession({
+      id: "session-5",
+      title: "Event source",
+      createdAt: "2026-06-05T00:00:00.000Z",
+      updatedAt: "2026-06-05T00:00:00.000Z",
+      messageCount: 1,
+      projectId: "project-7",
+    });
+    useChatStore.getState().setMessages("session-5", [makeMsg("completed")]);
+
+    act(() => {
+      focusChanged?.({ payload: false });
+      useChatStore.getState().setChatState("session-5", "streaming");
+      useChatStore.getState().setChatState("session-5", "idle");
+    });
+
+    await waitFor(() => expect(seen).toHaveBeenCalledTimes(1));
+    expect(seen).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-5",
+        projectId: "project-7",
+        outcome: "completed",
+        body: "Event source finished",
+        navigation: { kind: "session", sessionId: "session-5" },
+      }),
+    );
+    unsubscribe();
+  });
 });
