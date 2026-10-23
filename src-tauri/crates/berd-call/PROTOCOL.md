@@ -303,7 +303,10 @@ The child emits:
 
 On macOS, `recognition_pending.active` reports the agent speech admission hold, not
 the count of unresolved native recognitions. After local speech ends the hold
-expires after five seconds without a final. Expiry emits
+expires after five seconds without a final, or, while Apple's latest result is
+interim words that no final has followed, after up to ten more seconds. Noise with no
+interim words keeps the five seconds. Empty finals settle their audio and resolve
+their turns without emitting a `live_event`. Expiry emits
 `recognition_pending.active:false` without cancelling recognition, clearing audio,
 or changing the recognizer generation, so a late final is still forwarded as a
 `live_event`. New speech reasserts the hold. Native finals carry no utterance

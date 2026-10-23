@@ -25,6 +25,8 @@ pub struct MacSpeechEngineStatus {
 pub enum MacSpeechRecognitionEvent {
     /// A final result and where its audio ends, in 48 kHz samples of pushed input.
     Final(String, Option<u64>),
+    /// Words still being transcribed, heard through this 48 kHz sample.
+    Heard(u64),
     Finished,
     Failed(String),
 }
@@ -162,16 +164,18 @@ fn map_recognition_event(
     text: Option<String>,
     end_seconds: f64,
 ) -> Option<MacSpeechRecognitionEvent> {
+    let end = (end_seconds.is_finite() && end_seconds >= 0.0)
+        .then(|| (end_seconds * 48_000.0).round() as u64);
     match code {
         1 => Some(MacSpeechRecognitionEvent::Final(
             text.unwrap_or_default(),
-            (end_seconds.is_finite() && end_seconds >= 0.0)
-                .then(|| (end_seconds * 48_000.0).round() as u64),
+            end,
         )),
         2 => Some(MacSpeechRecognitionEvent::Finished),
         3 => Some(MacSpeechRecognitionEvent::Failed(text.unwrap_or_else(
             || "macOS speech recognition failed.".to_string(),
         ))),
+        4 => end.map(MacSpeechRecognitionEvent::Heard),
         _ => None,
     }
 }
@@ -320,6 +324,11 @@ mod tests {
                 "macOS speech recognition failed.".to_string()
             ))
         );
+        assert_eq!(
+            map_recognition_event(4, None, 1.5),
+            Some(MacSpeechRecognitionEvent::Heard(72_000))
+        );
+        assert_eq!(map_recognition_event(4, None, f64::NAN), None);
         assert_eq!(map_recognition_event(99, None, f64::NAN), None);
     }
 

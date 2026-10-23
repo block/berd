@@ -7,8 +7,10 @@ import Foundation
 private let finalEvent: Int32 = 1
 private let finishedEvent: Int32 = 2
 private let failedEvent: Int32 = 3
+private let heardEvent: Int32 = 4
 
-// The Double is where a final's audio ends, in seconds of pushed input, or NaN.
+// The Double is where a final's or interim result's audio ends, in seconds of
+// pushed input, or NaN.
 public typealias BerdMacSpeechEventCallback = @convention(c) (
     Int32, UnsafePointer<CChar>?, Double, UnsafeMutableRawPointer?
 ) -> Void
@@ -131,7 +133,7 @@ private func speechTranscriber(for locale: Locale) -> SpeechTranscriber {
     SpeechTranscriber(
         locale: locale,
         transcriptionOptions: [],
-        reportingOptions: [],
+        reportingOptions: [.volatileResults],
         attributeOptions: [.audioTimeRange]
     )
 }
@@ -307,10 +309,13 @@ private final class SpeechSession: @unchecked Sendable {
                         guard let self else { return }
                         let text = String(result.text.characters)
                             .trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !text.isEmpty else { continue }
-                        guard result.isFinal else { continue }
-                        let end = result.range.end
-                        self.emit(finalEvent, text: text, end: end.isNumeric ? end.seconds : .nan)
+                        let end = result.range.end.isNumeric ? result.range.end.seconds : .nan
+                        if result.isFinal {
+                            // Empty finals still settle their audio, so the host stops waiting on it.
+                            self.emit(finalEvent, text: text, end: end)
+                        } else if !text.isEmpty {
+                            self.emit(heardEvent, end: end)
+                        }
                     }
                     self?.taskCompleted()
                 } catch is CancellationError { self?.taskCompleted() }
