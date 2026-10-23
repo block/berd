@@ -11,6 +11,18 @@ fn main() {
             swift_rs::SwiftLinker::new("14.0")
                 .with_package("BerdMacSpeechBridge", "swift/BerdMacSpeechBridge")
                 .link();
+
+            // swift-rs expects SwiftPM's `<arch>-apple-macosx/<config>` layout, but the
+            // swiftbuild system in newer Xcode writes `out/Products/<Config>` instead.
+            let config = if std::env::var("DEBUG").as_deref() == Ok("true") {
+                "Debug"
+            } else {
+                "Release"
+            };
+            println!(
+                "cargo:rustc-link-search=native={}/swift-rs/BerdMacSpeechBridge/out/Products/{config}",
+                std::env::var("OUT_DIR").unwrap()
+            );
             for framework in ["Foundation", "AVFoundation", "AudioToolbox", "CoreAudio"] {
                 println!("cargo:rustc-link-lib=framework={framework}");
             }

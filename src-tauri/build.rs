@@ -14,6 +14,18 @@ fn main() {
                 .with_package("BerdAirPodsBridge", "swift/BerdAirPodsBridge")
                 .link();
 
+            // swift-rs expects SwiftPM's `<arch>-apple-macosx/<config>` layout, but the
+            // swiftbuild system in newer Xcode writes `out/Products/<Config>` instead.
+            let config = if std::env::var("DEBUG").as_deref() == Ok("true") {
+                "Debug"
+            } else {
+                "Release"
+            };
+            println!(
+                "cargo:rustc-link-search=native={}/swift-rs/BerdAirPodsBridge/out/Products/{config}",
+                std::env::var("OUT_DIR").unwrap()
+            );
+
             // Swift packages linked into a Rust executable use @rpath for the
             // system Swift runtime, which is available from this stable path.
             println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
