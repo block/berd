@@ -1781,6 +1781,8 @@ pub async fn start_native_voice_conversation(
                     // The runtime owns recognition-pending sequencing. Berd's
                     // renderer does not project that state yet.
                 }
+                // Berd's renderer does not show interim words yet.
+                berd_call::input::VoiceInputEvent::InterimTranscript(_) => {}
                 berd_call::input::VoiceInputEvent::FinalTranscript {
                     text,
                     storage_receipt,
