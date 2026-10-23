@@ -555,6 +555,12 @@ fn observe_event(
         Some(VoiceInputEvent::Ready) => {
             tracker.error = Some("voice input emitted duplicate readiness".into())
         }
+        Some(VoiceInputEvent::SpeakingReset) => {
+            tracker.speaking = false;
+            if tracker.speaking_started.is_some() {
+                tracker.speaking_ended = Some(now);
+            }
+        }
         Some(VoiceInputEvent::SpeakingChanged(active)) => {
             tracker.speaking = active;
             if active {

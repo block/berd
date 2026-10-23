@@ -25,8 +25,12 @@ pub struct MacSpeechEngineStatus {
 pub enum MacSpeechRecognitionEvent {
     /// A final result and where its audio ends, in 48 kHz samples of pushed input.
     Final(String, Option<u64>),
+    /// Sent just before a final: its first word starts at this 48 kHz sample.
+    FinalStart(u64),
     /// Interim words still being transcribed, heard through this 48 kHz sample.
     Heard(u64, String),
+    /// Apple finalized everything before this 48 kHz sample.
+    Settled(u64),
     Finished,
     Failed(String),
 }
@@ -176,6 +180,8 @@ fn map_recognition_event(
             || "macOS speech recognition failed.".to_string(),
         ))),
         4 => end.map(|end| MacSpeechRecognitionEvent::Heard(end, text.unwrap_or_default())),
+        5 => end.map(MacSpeechRecognitionEvent::Settled),
+        6 => end.map(MacSpeechRecognitionEvent::FinalStart),
         _ => None,
     }
 }
@@ -329,6 +335,15 @@ mod tests {
             Some(MacSpeechRecognitionEvent::Heard(72_000, "hel".to_string()))
         );
         assert_eq!(map_recognition_event(4, None, f64::NAN), None);
+        assert_eq!(
+            map_recognition_event(5, None, 0.5),
+            Some(MacSpeechRecognitionEvent::Settled(24_000))
+        );
+        assert_eq!(
+            map_recognition_event(6, None, 0.5),
+            Some(MacSpeechRecognitionEvent::FinalStart(24_000))
+        );
+        assert_eq!(map_recognition_event(6, None, f64::NAN), None);
         assert_eq!(map_recognition_event(99, None, f64::NAN), None);
     }
 
@@ -376,13 +391,23 @@ mod tests {
         }
         recognizer.finish().unwrap();
         let mut ends = Vec::new();
+        let mut starts = Vec::new();
         while let Ok(event) = events.try_recv() {
-            if let MacSpeechRecognitionEvent::Final(_, end) = event {
-                ends.push(end.unwrap());
+            match event {
+                MacSpeechRecognitionEvent::FinalStart(start) => starts.push(start),
+                MacSpeechRecognitionEvent::Final(_, end) => ends.push(end.unwrap()),
+                _ => {}
             }
         }
         let (start, stop) = (lead.len() as u64, (lead.len() + speech.len()) as u64);
         let last = *ends.last().expect("a final");
+        // A final's first word starts with the speech, not at the silence before it.
+        assert!(
+            starts
+                .first()
+                .is_some_and(|&first| first + 12_000 >= start && first <= start + 24_000),
+            "{starts:?} not near {start}"
+        );
         // Apple ends a final about 0.3 s after the last sound.
         assert!(
             last > start && last <= stop + 24_000,

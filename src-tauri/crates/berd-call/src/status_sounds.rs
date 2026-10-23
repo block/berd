@@ -34,6 +34,8 @@ pub struct StatusSoundSettings {
     pub mode: StatusSoundMode,
     #[serde(default = "default_status_sound_volume")]
     pub volume: f32,
+    #[serde(default)]
+    pub vad_debug_sounds: bool,
 }
 
 impl Default for StatusSoundSettings {
@@ -41,6 +43,7 @@ impl Default for StatusSoundSettings {
         Self {
             mode: StatusSoundMode::default(),
             volume: DEFAULT_STATUS_SOUND_VOLUME,
+            vad_debug_sounds: false,
         }
     }
 }
@@ -74,7 +77,9 @@ pub struct StatusSoundStateMachine {
 impl StatusSoundStateMachine {
     pub fn update(&mut self, status: ConversationStatus, settings: StatusSoundSettings) -> bool {
         let next = (status, settings);
-        let changed = self.current != Some(next);
+        let changed = self.current.is_none_or(|(previous, old)| {
+            previous != status || old.mode != settings.mode || old.volume != settings.volume
+        });
         self.current = Some(next);
         changed
     }
@@ -101,6 +106,8 @@ pub struct StatusSoundRuntime {
     next_tick: Option<Instant>,
     pending_status_cue: bool,
     player: StatusSoundPlayer,
+    debug_player: StatusSoundPlayer,
+    speaking: Option<bool>,
     input_policy: crate::input::InputDuringTtsPolicy,
     output_device: Option<String>,
     input_controls: Option<crate::input::VoiceInputControls>,
@@ -113,6 +120,8 @@ impl Default for StatusSoundRuntime {
             next_tick: None,
             pending_status_cue: false,
             player: StatusSoundPlayer::new(),
+            debug_player: StatusSoundPlayer::new(),
+            speaking: None,
             input_policy: crate::input::InputDuringTtsPolicy::Auto,
             output_device: None,
             input_controls: None,
@@ -125,14 +134,41 @@ impl StatusSoundRuntime {
         self.input_controls = controls;
     }
 
+    pub fn reset_speaking(&mut self) {
+        self.speaking = None;
+    }
+
+    pub fn observe_speaking(&mut self, speaking: bool) -> Result<(), String> {
+        let previous = self.speaking.replace(speaking);
+        if debug_transition(
+            previous,
+            speaking,
+            self.machine
+                .current
+                .is_some_and(|(_, settings)| settings.vad_debug_sounds),
+        ) {
+            self.debug_player.play_debug(
+                speaking,
+                self.output_device.as_deref(),
+                self.input_controls.as_ref(),
+                self.input_policy,
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn set_output_device(&mut self, output_device: Option<String>) {
         if self.output_device != output_device {
             self.player.stop();
+            self.debug_player.stop();
             self.output_device = output_device;
         }
     }
 
     pub fn update(&mut self, status: ConversationStatus, settings: StatusSoundSettings) {
+        if !settings.vad_debug_sounds {
+            self.debug_player.stop();
+        }
         self.pending_status_cue |= self
             .machine
             .current
@@ -145,6 +181,7 @@ impl StatusSoundRuntime {
     }
 
     pub fn stop(&mut self) {
+        self.debug_player.stop();
         self.player.stop();
     }
 
@@ -158,6 +195,7 @@ impl StatusSoundRuntime {
     pub fn poll(&mut self, conversation_active: bool) -> Result<bool, String> {
         self.update_conversation_activity(conversation_active);
         self.player.reap();
+        self.debug_player.reap();
         let now = Instant::now();
         if self.next_tick.is_some_and(|deadline| now >= deadline) {
             let deadline = self.next_tick.unwrap();
@@ -177,6 +215,10 @@ impl StatusSoundRuntime {
     }
 }
 
+fn debug_transition(previous: Option<bool>, speaking: bool, enabled: bool) -> bool {
+    enabled && previous.is_some_and(|previous| previous != speaking)
+}
+
 enum StatusSoundCommand {
     Update(ConversationStatus, StatusSoundSettings),
     ConversationActive {
@@ -186,6 +228,8 @@ enum StatusSoundCommand {
     OutputDevice(Option<String>),
     InputPolicy(crate::input::InputDuringTtsPolicy),
     InputControls(crate::input::VoiceInputControls),
+    Speaking(bool),
+    ResetSpeaking,
     Shutdown,
 }
 
@@ -262,13 +306,25 @@ impl ManagedStatusSoundRuntime {
                             runtime.set_input_controls(Some(controls));
                             None
                         }
+                        Ok(StatusSoundCommand::ResetSpeaking) => {
+                            runtime.reset_speaking();
+                            None
+                        }
+                        Ok(StatusSoundCommand::Speaking(speaking)) => {
+                            if let Err(message) = runtime.observe_speaking(speaking) {
+                                eprintln!("VAD debug sound failed: {message}");
+                            }
+                            None
+                        }
                         Ok(StatusSoundCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
                             runtime.stop();
                             break;
                         }
                         Err(RecvTimeoutError::Timeout) => None,
                     };
-                    let poll_result = runtime.poll(conversation_active).map(|_| ());
+                    let poll_result = runtime
+                        .poll(conversation_active || runtime.speaking == Some(true))
+                        .map(|_| ());
                     if let Some(applied) = applied {
                         let _ = applied.send(poll_result.clone());
                     }
@@ -299,6 +355,14 @@ impl ManagedStatusSoundRuntime {
         controls: crate::input::VoiceInputControls,
     ) -> Result<(), String> {
         self.send(StatusSoundCommand::InputControls(controls))
+    }
+
+    pub fn reset_speaking(&self) -> Result<(), String> {
+        self.send(StatusSoundCommand::ResetSpeaking)
+    }
+
+    pub fn observe_speaking(&self, speaking: bool) -> Result<(), String> {
+        self.send(StatusSoundCommand::Speaking(speaking))
     }
 
     pub fn update(
@@ -476,6 +540,16 @@ impl StatusSoundPlayer {
         Err("status sound playback is only available on macOS".into())
     }
 
+    fn play_debug(
+        &mut self,
+        _speaking: bool,
+        _device: Option<&str>,
+        _controls: Option<&crate::input::VoiceInputControls>,
+        _policy: crate::input::InputDuringTtsPolicy,
+    ) -> Result<(), String> {
+        Err("VAD debug sound playback is only available on macOS".into())
+    }
+
     fn reap(&mut self) {}
 
     fn is_active(&self) -> bool {
@@ -537,6 +611,37 @@ impl StatusSoundPlayer {
             &mut self.active,
             asset,
             cue.volume,
+            output_device,
+            input_controls,
+            input_policy,
+        )
+    }
+
+    fn play_debug(
+        &mut self,
+        speaking: bool,
+        output_device: Option<&str>,
+        input_controls: Option<&crate::input::VoiceInputControls>,
+        input_policy: crate::input::InputDuringTtsPolicy,
+    ) -> Result<(), String> {
+        self.reap();
+        self.stop();
+        let sample_rate = 48_000;
+        let frequency = if speaking { 1200.0 } else { 650.0 };
+        let samples = (0..960)
+            .map(|index| {
+                let phase = index as f32 / sample_rate as f32;
+                (phase * frequency * std::f32::consts::TAU).sin()
+                    * (std::f32::consts::PI * index as f32 / 960.0).sin()
+            })
+            .collect();
+        Self::play_asset(
+            &mut self.active,
+            &StatusSoundAsset {
+                sample_rate,
+                samples,
+            },
+            0.08,
             output_device,
             input_controls,
             input_policy,
@@ -646,6 +751,30 @@ fn load_system_sound(name: &str) -> Result<StatusSoundAsset, String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn debug_cues_require_enabled_real_transitions() {
+        assert!(!debug_transition(None, true, true));
+        assert!(!debug_transition(None, false, true));
+        assert!(!debug_transition(Some(false), false, true));
+        assert!(!debug_transition(Some(true), true, true));
+        assert!(!debug_transition(Some(false), true, false));
+        assert!(debug_transition(Some(false), true, true));
+        assert!(debug_transition(Some(true), false, true));
+        let settings: StatusSoundSettings = serde_json::from_str(r#"{"mode":"off"}"#).unwrap();
+        assert!(!settings.vad_debug_sounds);
+    }
+
+    #[test]
+    fn debug_toggle_preserves_status_deadline() {
+        let mut runtime = StatusSoundRuntime::default();
+        let mut settings = settings(StatusSoundMode::Working);
+        runtime.update(ConversationStatus::Working, settings);
+        let deadline = runtime.next_tick;
+        settings.vad_debug_sounds = true;
+        runtime.update(ConversationStatus::Working, settings);
+        assert_eq!(runtime.next_tick, deadline);
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn native_cue_enqueue_obeys_policy_and_releases_guard_on_failure() {
@@ -699,6 +828,56 @@ mod tests {
                 assert!(!controls.is_input_suppressed());
             }
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "opens CoreAudio output and plays short VAD debug clicks"]
+    fn macos_debug_clicks_follow_input_policy() {
+        use crate::input::{InputDuringTtsPolicy, VoiceInputControls};
+        for policy in [
+            InputDuringTtsPolicy::AllowBargeIn,
+            InputDuringTtsPolicy::SuppressInput,
+        ] {
+            let controls = VoiceInputControls::default();
+            let mut player = StatusSoundPlayer::new();
+            for speaking in [true, false] {
+                player
+                    .play_debug(speaking, None, Some(&controls), policy)
+                    .unwrap();
+                assert_eq!(
+                    controls.is_input_suppressed(),
+                    policy == InputDuringTtsPolicy::SuppressInput
+                );
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while player.is_active() {
+                    assert!(Instant::now() < deadline);
+                    player.reap();
+                    thread::sleep(Duration::from_millis(10));
+                }
+                assert!(!controls.is_input_suppressed());
+            }
+        }
+    }
+
+    #[test]
+    fn restored_speech_after_reset_is_silent() {
+        let mut runtime = StatusSoundRuntime::default();
+        runtime.update(
+            ConversationStatus::Waiting,
+            StatusSoundSettings {
+                mode: StatusSoundMode::Off,
+                vad_debug_sounds: true,
+                ..Default::default()
+            },
+        );
+        runtime.speaking = Some(true);
+        runtime.reset_speaking();
+        runtime.observe_speaking(false).unwrap();
+        assert!(!runtime.debug_player.is_active());
+        runtime.reset_speaking();
+        runtime.observe_speaking(true).unwrap();
+        assert!(!runtime.debug_player.is_active());
     }
 
     fn settings(mode: StatusSoundMode) -> StatusSoundSettings {

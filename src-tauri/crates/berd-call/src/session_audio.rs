@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 
 use berd_call::{PcmAudioOutput, TtsPcmSpec};
 
+use crate::capture::Capture;
+
 pub const AUDIO_FRAME_MAGIC: [u8; 2] = *b"BA";
 pub const AUDIO_FRAME_MARKER: u8 = 3;
 pub const AUDIO_BEGIN_KIND: u8 = 1;
@@ -89,6 +91,7 @@ struct State {
 pub struct AudioPipeTransport {
     file: Mutex<File>,
     poisoned: Mutex<Option<String>>,
+    capture: Option<Capture>,
 }
 
 impl AudioPipeTransport {
@@ -117,7 +120,13 @@ impl AudioPipeTransport {
         Ok(Self {
             file: Mutex::new(file),
             poisoned: Mutex::new(None),
+            capture: None,
         })
+    }
+
+    /// Also records every record written into `capture`.
+    pub fn with_capture(self, capture: Option<Capture>) -> Self {
+        Self { capture, ..self }
     }
 
     fn write_record(&self, kind: u8, payload: &[u8]) -> Result<(), String> {
@@ -175,6 +184,9 @@ impl AudioPipeTransport {
                     io::Error::last_os_error()
                 ));
             }
+        }
+        if let Some(capture) = &self.capture {
+            capture.agent(kind, payload);
         }
         Ok(())
     }

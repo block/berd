@@ -1761,6 +1761,17 @@ pub async fn start_native_voice_conversation(
                 berd_call::input::VoiceInputEvent::Ready => {
                     log::warn!("Voice input emitted duplicate readiness");
                 }
+                berd_call::input::VoiceInputEvent::SpeakingReset => {
+                    admission.set_user_speaking(false);
+                    event_state.set_status_sound_input_activity(&session_id, revision, false);
+                    let event = NativeVoiceEvent::Activity {
+                        session_id: session_id.clone(),
+                        activity: "user-idle",
+                        revision,
+                    };
+                    let _ = event_window.emit(EVENT_NAME, event.clone());
+                    super::voice_buddy::emit(&event_app, event);
+                }
                 berd_call::input::VoiceInputEvent::SpeakingChanged(speaking) => {
                     admission.set_user_speaking(speaking);
                     event_state.set_status_sound_input_activity(&session_id, revision, speaking);

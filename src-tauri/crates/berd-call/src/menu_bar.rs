@@ -48,6 +48,7 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
         return crate::host_session::run(options);
     };
     let port = options.port;
+    crate::host_session::MAIN_RUN_LOOP.store(true, std::sync::atomic::Ordering::SeqCst);
     thread::Builder::new()
         .name("berd-call-session".into())
         .spawn(move || std::process::exit(exit_code(|| crate::host_session::run(options))))

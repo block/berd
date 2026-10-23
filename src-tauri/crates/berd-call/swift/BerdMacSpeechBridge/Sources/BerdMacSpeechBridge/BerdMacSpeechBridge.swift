@@ -8,9 +8,12 @@ private let finalEvent: Int32 = 1
 private let finishedEvent: Int32 = 2
 private let failedEvent: Int32 = 3
 private let heardEvent: Int32 = 4
+private let settledEvent: Int32 = 5
+private let finalStartEvent: Int32 = 6
 
-// The Double is where a final's or interim result's audio ends, in seconds of
-// pushed input, or NaN.
+// The Double is a position in seconds of pushed input, or NaN: where a final's or
+// interim result's audio ends, where Apple's unfinalized audio now starts, or where
+// a final's first word starts.
 public typealias BerdMacSpeechEventCallback = @convention(c) (
     Int32, UnsafePointer<CChar>?, Double, UnsafeMutableRawPointer?
 ) -> Void
@@ -272,6 +275,10 @@ private final class SpeechSession: @unchecked Sendable {
             transcriber: transcriber, targetFormat: format,
             input: input, continuation: continuation
         )
+        await analyzer.setVolatileRangeChangedHandler { [weak session] range, changedStart, _ in
+            guard changedStart, range.start.isNumeric else { return }
+            session?.emit(settledEvent, end: range.start.seconds)
+        }
         session.start()
         return session
     }
@@ -311,6 +318,13 @@ private final class SpeechSession: @unchecked Sendable {
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         let end = result.range.end.isNumeric ? result.range.end.seconds : .nan
                         if result.isFinal {
+                            // Where the first word starts, so the host can tell a final that
+                            // began after some event from one that straddles it.
+                            if let first = result.text.runs.lazy
+                                .compactMap({ $0.audioTimeRange?.start })
+                                .first(where: { $0.isNumeric }) {
+                                self.emit(finalStartEvent, end: first.seconds)
+                            }
                             // Empty finals still settle their audio, so the host stops waiting on it.
                             self.emit(finalEvent, text: text, end: end)
                         } else if !text.isEmpty {

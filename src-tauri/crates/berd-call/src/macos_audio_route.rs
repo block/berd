@@ -1,5 +1,7 @@
+use std::ffi::c_void;
 use std::mem;
 use std::ptr::{null, NonNull};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use coreaudio::audio_unit::macos_helpers::{
@@ -7,9 +9,11 @@ use coreaudio::audio_unit::macos_helpers::{
 };
 use objc2_core_audio::{
     kAudioDevicePropertyScopeOutput, kAudioDevicePropertyStreams, kAudioDeviceTransportTypeBuiltIn,
-    kAudioHardwareNoError, kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
-    kAudioStreamPropertyTerminalType, kAudioStreamTerminalTypeSpeaker, AudioObjectGetPropertyData,
-    AudioObjectGetPropertyDataSize, AudioObjectID, AudioObjectPropertyAddress,
+    kAudioHardwareNoError, kAudioHardwarePropertyDefaultOutputDevice,
+    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
+    kAudioStreamPropertyTerminalType, kAudioStreamTerminalTypeSpeaker,
+    AudioObjectAddPropertyListener, AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize,
+    AudioObjectID, AudioObjectPropertyAddress, AudioObjectRemovePropertyListener,
 };
 
 const LOCAL_PLAYBACK_LATENCY: Duration = Duration::from_millis(100);
@@ -30,6 +34,10 @@ pub fn playback_latency_safety_duration(output_device: Option<&str>) -> Duration
 
 pub fn default_output_device_name() -> Option<String> {
     get_device_name(get_default_device_id(false)?).ok()
+}
+
+pub fn default_input_device_name() -> Option<String> {
+    get_device_name(get_default_device_id(true)?).ok()
 }
 
 pub fn output_device_is_builtin_speaker(output_device: Option<&str>) -> bool {
@@ -164,4 +172,117 @@ mod tests {
             0
         ));
     }
+}
+
+/// Stable default-device identities used to isolate local speech calibration.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct AudioSetup {
+    pub input_uid: String,
+    pub output_uid: String,
+    pub input_name: String,
+    pub output_name: String,
+}
+
+fn uid(device: AudioObjectID) -> Option<String> {
+    use objc2_core_audio::kAudioDevicePropertyDeviceUID;
+    use objc2_core_foundation::{CFRetained, CFString};
+    let address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyDeviceUID,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut value: *const CFString = null();
+    let mut size = mem::size_of_val(&value) as u32;
+    // SAFETY: CoreAudio writes one retained CFString pointer into a correctly
+    // sized live buffer. CFRetained owns and releases the returned reference.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device,
+            NonNull::from(&address),
+            0,
+            null(),
+            NonNull::from(&mut size),
+            NonNull::from(&mut value).cast(),
+        )
+    };
+    if status != kAudioHardwareNoError {
+        return None;
+    }
+    let pointer = NonNull::new(value.cast_mut())?;
+    Some(unsafe { CFRetained::from_raw(pointer) }.to_string())
+}
+
+pub fn default_output_uid() -> Option<String> {
+    uid(get_default_device_id(false)?)
+}
+
+const DEFAULT_OUTPUT: AudioObjectPropertyAddress = AudioObjectPropertyAddress {
+    mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+    mScope: kAudioObjectPropertyScopeGlobal,
+    mElement: kAudioObjectPropertyElementMain,
+};
+
+/// Counts the default-output change notifications CoreAudio delivers.
+pub struct DefaultOutputChanges(&'static AtomicU64);
+
+unsafe extern "C-unwind" fn count_change(
+    _: AudioObjectID,
+    _: u32,
+    _: NonNull<AudioObjectPropertyAddress>,
+    count: *mut c_void,
+) -> i32 {
+    // SAFETY: The client data is the leaked counter registered below.
+    unsafe { &*count.cast::<AtomicU64>() }.fetch_add(1, Ordering::SeqCst);
+    kAudioHardwareNoError
+}
+
+impl DefaultOutputChanges {
+    pub fn install() -> Result<Self, String> {
+        // Leaked so a notification racing removal never reads freed memory.
+        let count: &'static AtomicU64 = Box::leak(Box::new(AtomicU64::new(0)));
+        // SAFETY: The address is read during the call, and the counter outlives the listener.
+        let status = unsafe {
+            AudioObjectAddPropertyListener(
+                kAudioObjectSystemObject as AudioObjectID,
+                NonNull::from(&DEFAULT_OUTPUT),
+                Some(count_change),
+                (count as *const AtomicU64).cast_mut().cast(),
+            )
+        };
+        if status != kAudioHardwareNoError {
+            return Err(format!(
+                "could not observe the default output (status {status})"
+            ));
+        }
+        Ok(Self(count))
+    }
+
+    pub fn count(&self) -> u64 {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for DefaultOutputChanges {
+    fn drop(&mut self) {
+        // SAFETY: Removes exactly the listener and client data registered in `install`.
+        unsafe {
+            AudioObjectRemovePropertyListener(
+                kAudioObjectSystemObject as AudioObjectID,
+                NonNull::from(&DEFAULT_OUTPUT),
+                Some(count_change),
+                (self.0 as *const AtomicU64).cast_mut().cast(),
+            );
+        }
+    }
+}
+
+pub fn default_audio_setup() -> Option<AudioSetup> {
+    let input = get_default_device_id(true)?;
+    let output = get_default_device_id(false)?;
+    Some(AudioSetup {
+        input_uid: uid(input)?,
+        output_uid: uid(output)?,
+        input_name: get_device_name(input).ok()?,
+        output_name: get_device_name(output).ok()?,
+    })
 }

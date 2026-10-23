@@ -3099,7 +3099,7 @@ fn siri_session_reaches_ready_without_openai_credentials() {
     stdin.flush().unwrap();
     let ready = receive();
     assert_eq!(ready["type"], "ready");
-    assert_eq!(ready["protocol"], 5);
+    assert_eq!(ready["protocol"], 8);
     assert_eq!(ready["session"]["tts"]["backend"], "siri");
     assert_eq!(ready["session"]["tts"]["voice"], voice);
     assert_eq!(ready["session"]["tts"]["language"], language);
@@ -4385,4 +4385,93 @@ fn handoffs_hold_nothing_open_when_the_expert_may_speak() {
     );
     session.shutdown();
     server.join().unwrap();
+}
+
+#[test]
+fn conventional_capture_is_readable_by_event_replay() {
+    let capture_root = tempfile::tempdir().unwrap();
+    let (speech_url, _requests) = spawn_speech_server();
+    let (mut command, pcm_guard, host) = session_command();
+    let mut child = command
+        .args([
+            "--capture",
+            capture_root.path().to_str().unwrap(),
+            "--tts-backend",
+            "openai",
+            "--tts-url",
+            &speech_url,
+            "--stt-backend",
+            "openai",
+            "--stt-url",
+            &spawn_transcription_server(),
+        ])
+        .env("OPENAI_API_KEY", "test-key")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(pcm_guard);
+    let stdin = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+    let output = spawn_session_message_reader(child.stdout.take().unwrap());
+    let audio_host = spawn_audio_host(host, Arc::clone(&stdin));
+    let send = |message: Value| {
+        let mut writer = stdin.lock().unwrap();
+        write_session_json(&mut *writer, &message);
+        writer.flush().unwrap();
+    };
+    send(json!({"type":"hello","id":1,"input_during_tts":"allow_barge_in"}));
+    assert_eq!(
+        output.recv_timeout(Duration::from_secs(5)).unwrap()["type"],
+        "ready"
+    );
+    {
+        let mut writer = stdin.lock().unwrap();
+        write_session_pcm(&mut *writer, 0.0);
+        writer.flush().unwrap();
+    }
+    send(
+        json!({"type":"prepare_speak","id":2,"acknowledgement":null,"text":"Capture this reply."}),
+    );
+    loop {
+        let event = output.recv_timeout(Duration::from_secs(5)).unwrap();
+        match event["type"].as_str() {
+            Some("admitted") => {
+                send(json!({"type":"output_ready","id":2,"speech_id":event["speech_id"]}))
+            }
+            Some("speech_completed") => break,
+            Some("speech_interrupted" | "fatal") => panic!("{event}"),
+            _ => {}
+        }
+    }
+    send(json!({"type":"shutdown"}));
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    audio_host.join().unwrap().unwrap();
+    let dir = std::fs::read_dir(capture_root.path())
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let manifest: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["schema"], "berd-call-capture/1");
+    assert!(std::fs::metadata(dir.join("mic.wav")).unwrap().len() > 44);
+    assert!(std::fs::read_dir(&dir).unwrap().any(|entry| entry
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .ends_with(".sent.wav")));
+    let replay = Command::new(env!("CARGO_BIN_EXE_berd-call"))
+        .args(["vad-replay", "events", dir.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        replay.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replay.stderr)
+    );
+    let report: Value = serde_json::from_slice(&replay.stdout).unwrap();
+    assert!(report.is_object());
 }

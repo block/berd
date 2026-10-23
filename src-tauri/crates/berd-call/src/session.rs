@@ -130,6 +130,7 @@ impl SessionCore {
         active && self.playback != PlaybackState::Idle
     }
 
+    /// Sets the admission hold, independently of unresolved native recognition.
     pub fn set_recognition_pending(&mut self, active: bool) -> bool {
         self.recognition_pending = active;
         active && self.playback != PlaybackState::Idle

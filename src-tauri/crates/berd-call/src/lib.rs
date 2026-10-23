@@ -6,8 +6,10 @@ pub const MAC_SPEECH_RECOGNITION_FINISH_TIMEOUT_SECONDS: u64 = 5;
 mod asset_verification;
 mod audio_output;
 pub mod benchmark;
+pub mod capture_metrics;
 pub mod causal_inbox;
 mod configured_tts;
+pub mod detection;
 pub mod endpoint_url;
 pub mod expert_spokesperson;
 pub mod input;
@@ -41,6 +43,7 @@ mod synthesis;
 mod tts;
 #[cfg(target_os = "macos")]
 pub mod update_guard;
+pub mod vad_replay;
 
 pub use audio_output::{wait_until_drained, PcmAudioOutput};
 pub use configured_tts::{
@@ -73,3 +76,8 @@ pub use tts::{
     OpenAiTts, PocketTtsBackend, StreamingTextChunk, StreamingTextChunks, StreamingTtsText,
     TtsBackend, TtsOutcome, TtsPcmSpec, TtsSynthesisEvent,
 };
+
+pub mod capture_replay;
+pub mod failure_fixtures;
+pub mod learning_corpus;
+pub mod learning_evaluation;

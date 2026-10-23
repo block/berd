@@ -15,9 +15,8 @@ pub(crate) struct SavedSettings {
     // Left out until chosen, so a file without one still opens in older berd-call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_sounds: Option<StatusSoundMode>,
-    // Read preferences written by the optional debug-sound build without saving its setting.
-    #[serde(default, rename = "vad_debug_sounds", skip_serializing)]
-    pub _legacy_debug_sounds: Option<serde::de::IgnoredAny>,
+    #[serde(default)]
+    pub vad_debug_sounds: bool,
 }
 
 pub(crate) fn path() -> Result<PathBuf, String> {
@@ -142,14 +141,16 @@ pub(crate) fn persistable_arguments(arguments: &[String]) -> Vec<String> {
     arguments
         .chunks_exact(2)
         .filter(|pair| {
-            !matches!(
-                pair[0].as_str(),
-                "--realtime-url"
-                    | "--stt-url"
-                    | "--tts-url"
-                    | "--spokesperson-options"
-                    | "--stt-hint"
-            )
+            !berd_call::detection::is_detection_flag(&pair[0])
+                && !matches!(
+                    pair[0].as_str(),
+                    "--realtime-url"
+                        | "--stt-url"
+                        | "--tts-url"
+                        | "--spokesperson-options"
+                        | "--stt-hint"
+                        | "--capture"
+                )
         })
         .flatten()
         .cloned()
@@ -209,7 +210,7 @@ pub(crate) fn with_spokesperson(arguments: &[String], on: bool, direct: bool) ->
         .filter(|pair| match pair[0].as_str() {
             "--mode" => false,
             "--realtime-url" => on,
-            "--stt-url" => !on,
+            "--stt-url" | "--capture" => !on,
             "--tts-url" => !on || direct,
             // The Spokesperson's speed follows the agents'.
             "--spokesperson-rate" => false,
@@ -239,7 +240,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn optional_preferences_are_ignored_without_losing_other_settings() {
+    fn debug_preferences_survive_without_losing_other_settings() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
         let settings = SavedSettings {
@@ -251,7 +252,7 @@ mod tests {
             }),
             input_policy: Some(InputDuringTtsPolicy::SuppressInput),
             status_sounds: Some(StatusSoundMode::WorkingAndWaiting),
-            ..Default::default()
+            vad_debug_sounds: true,
         };
         let expected = serde_json::to_value(&settings).unwrap();
         let mut legacy = expected.clone();
@@ -262,7 +263,7 @@ mod tests {
         save(&path, &restored).unwrap();
         let written: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        assert!(written.get("vad_debug_sounds").is_none());
+        assert_eq!(written["vad_debug_sounds"], true);
         assert_eq!(written, expected);
         assert_eq!(
             serde_json::to_value(load(&path).unwrap()).unwrap(),
@@ -437,6 +438,15 @@ mod speech_hint_tests {
             "Zack",
         ]
         .map(String::from);
+        assert_eq!(super::persistable_arguments(&args), ["--voice", "Aaron"]);
+    }
+}
+
+#[cfg(test)]
+mod capture_tests {
+    #[test]
+    fn capture_is_not_saved_for_other_calls() {
+        let args = ["--voice", "Aaron", "--capture", "/tmp/captures"].map(String::from);
         assert_eq!(super::persistable_arguments(&args), ["--voice", "Aaron"]);
     }
 }

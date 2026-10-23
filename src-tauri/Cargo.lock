@@ -601,6 +601,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-avf-audio",
  "objc2-core-audio",
+ "objc2-core-foundation",
  "objc2-foundation",
  "ort",
  "ort-sys",

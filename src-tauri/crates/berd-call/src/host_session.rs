@@ -20,8 +20,8 @@ use berd_call::openai_realtime_protocol::{
     RealtimeExpertDeliveryEvent, RealtimeExpertDeliveryRole,
 };
 use berd_call::protocol::{
-    NotAdmittedReason, OutputReadyOutcome, SessionMessage, SessionRequest, UtteranceOrigin,
-    VoiceSessionSnapshot,
+    NotAdmittedReason, OutputReadyOutcome, RouteObservation, SessionMessage, SessionRequest,
+    UtteranceOrigin, VoiceSessionSnapshot,
 };
 use berd_call::PocketAudioPlayer;
 
@@ -61,6 +61,10 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
             .and_then(|(_, saved)| saved.status_sounds)
             .unwrap_or_default(),
         status: None,
+        vad_debug_sounds: options
+            .saved
+            .as_ref()
+            .is_some_and(|(_, saved)| saved.vad_debug_sounds),
     }));
     let mut session = SessionStart {
         saved: options.saved.clone(),
@@ -432,6 +436,7 @@ fn start_session(
         .store(muted.load(Ordering::SeqCst), Ordering::SeqCst);
     actor.capture_muted = muted;
     actor.capture_mute_epoch = mute_epoch;
+    actor.restore_detection_profile(&arguments)?;
     actor.system_input_mute = system_input_mute;
     if actor.system_input_mute.is_none() {
         match crate::system_input_mute::SystemInputMute::install(
@@ -481,7 +486,7 @@ fn start_session(
             || arguments
                 .iter()
                 .any(|argument| argument == crate::DIRECT_AGENT_SPEECH),
-        session_arguments: arguments,
+        session_arguments: berd_call::detection::without_detection_arguments(&arguments),
     });
     Ok(StartedSession {
         child,
@@ -537,6 +542,7 @@ fn tts_arguments(settings: &berd_call::TtsSettings, arguments: &[String]) -> Vec
 /// The call's status sounds, kept across session restarts.
 #[derive(Clone, Copy, Default)]
 struct StatusSounds {
+    vad_debug_sounds: bool,
     mode: berd_call::StatusSoundMode,
     // Unknown until a host reports it, so a call nothing reports on stays silent.
     status: Option<berd_call::ConversationStatus>,
@@ -561,6 +567,10 @@ enum ControlCommand {
     },
     Muted {
         muted: bool,
+        response: SyncSender<Result<Value, String>>,
+    },
+    VadDebugSounds {
+        enabled: bool,
         response: SyncSender<Result<Value, String>>,
     },
     StatusSounds {
@@ -829,6 +839,11 @@ impl HostControl for SessionControl {
         self.status()
     }
 
+    fn set_vad_debug_sounds(&self, enabled: bool) -> Result<Value, String> {
+        self.request(|response| ControlCommand::VadDebugSounds { enabled, response })?;
+        self.status()
+    }
+
     fn set_status_sounds(
         &self,
         mode: Option<berd_call::StatusSoundMode>,
@@ -903,8 +918,10 @@ impl HostControl for SessionControl {
             "nonBlocking": self.non_blocking.load(Ordering::SeqCst),
             "muted": self.muted.load(Ordering::SeqCst),
             "statusSounds": sounds.mode,
+            "vadDebugSounds": sounds.vad_debug_sounds,
             "conversationStatus": sounds.status,
             "sessionArguments": &self.session_arguments[1..],
+            "audioSetup": berd_call::macos_audio_route::default_audio_setup(),
         }))
     }
 
@@ -965,6 +982,8 @@ struct PendingSpeak {
     text: String,
     non_blocking: bool,
     response: Option<SyncSender<Result<Value, String>>>,
+    /// When the voice session was asked to speak, for timing diagnostics.
+    prepared: Instant,
 }
 
 enum AudioCommand {
@@ -979,9 +998,19 @@ enum SavedPreference {
     Spokesperson,
     InputPolicy,
     StatusSounds(berd_call::StatusSoundMode),
+    VadDebugSounds(bool),
+}
+
+struct ActiveDetectionProfile {
+    persisted: Option<berd_call::detection::DetectionSettings>,
+    setup: berd_call::macos_audio_route::AudioSetup,
+    path: std::path::PathBuf,
+    next_check: Instant,
+    pending: Option<u64>,
 }
 
 struct SessionActor {
+    detection_profile: Option<ActiveDetectionProfile>,
     saved: Option<(std::path::PathBuf, crate::saved_settings::SavedSettings)>,
     input_speaking: bool,
     recognition_pending: bool,
@@ -1011,7 +1040,14 @@ struct SessionActor {
     muted: Arc<AtomicBool>,
     status_sounds: Arc<Mutex<StatusSounds>>,
     // Requested sounds and any mode change, committed when the session applies them.
-    pending_status_sounds: BTreeMap<u64, (StatusSounds, Option<berd_call::StatusSoundMode>)>,
+    pending_status_sounds: BTreeMap<
+        u64,
+        (
+            StatusSounds,
+            Option<berd_call::StatusSoundMode>,
+            Option<bool>,
+        ),
+    >,
     suppress_startup_persist: bool,
     // Immediate requested mute gates capture before the child acknowledges it.
     // Native callbacks and manual controls write it; `muted` above holds only
@@ -1023,6 +1059,54 @@ struct SessionActor {
 }
 
 impl SessionActor {
+    fn change_sounds(
+        &mut self,
+        mode: Option<berd_call::StatusSoundMode>,
+        status: Option<berd_call::ConversationStatus>,
+        debug: Option<bool>,
+        response: SyncSender<Result<Value, String>>,
+    ) -> Result<(), String> {
+        // Build on the newest request, since the session applies them in order.
+        let latest = match self.pending_status_sounds.last_key_value() {
+            Some((_, (sounds, _, _))) if !self.stopping => *sounds,
+            _ => *self
+                .status_sounds
+                .lock()
+                .map_err(|_| "status sounds lock failed")?,
+        };
+        let sounds = StatusSounds {
+            mode: mode.unwrap_or(latest.mode),
+            vad_debug_sounds: debug.unwrap_or(latest.vad_debug_sounds),
+            status: status.or(latest.status),
+        };
+        // A stopping child may already have exited; a restarted session
+        // is sent the committed status when it starts.
+        let sent = if self.stopping {
+            None
+        } else {
+            self.send_status_sounds(if debug.is_some() && sounds.status.is_none() {
+                StatusSounds {
+                    mode: berd_call::StatusSoundMode::Off,
+                    status: Some(berd_call::ConversationStatus::Waiting),
+                    ..sounds
+                }
+            } else {
+                sounds
+            })?
+        };
+        match sent {
+            Some(id) => {
+                self.pending_status_sounds.insert(id, (sounds, mode, debug));
+                self.pending_settings.insert(id, response);
+            }
+            None => {
+                self.commit_status_sounds(sounds, mode, debug);
+                let _ = response.send(Ok(json!({})));
+            }
+        }
+        Ok(())
+    }
+
     fn restore_input_mute(&mut self) -> Result<(), String> {
         // Restore current capture intent rather than stale acknowledged state.
         let (muted, mute_epoch) = crate::system_input_mute::mute_state_snapshot(
@@ -1046,9 +1130,12 @@ impl SessionActor {
 
     /// Tells the session its status sounds, once a host has said whether the agent is working.
     fn send_status_sounds(&mut self, sounds: StatusSounds) -> Result<Option<u64>, String> {
-        let Some(status) = sounds.status else {
+        if sounds.status.is_none() && !sounds.vad_debug_sounds {
             return Ok(None);
-        };
+        }
+        let status = sounds
+            .status
+            .unwrap_or(berd_call::ConversationStatus::Waiting);
         let id = self.next_id();
         send_request(
             &self.writer,
@@ -1056,7 +1143,12 @@ impl SessionActor {
                 id,
                 status,
                 settings: berd_call::StatusSoundSettings {
-                    mode: sounds.mode,
+                    mode: if sounds.status.is_some() {
+                        sounds.mode
+                    } else {
+                        berd_call::StatusSoundMode::Off
+                    },
+                    vad_debug_sounds: sounds.vad_debug_sounds,
                     ..Default::default()
                 },
             },
@@ -1068,9 +1160,13 @@ impl SessionActor {
         &mut self,
         sounds: StatusSounds,
         mode: Option<berd_call::StatusSoundMode>,
+        debug: Option<bool>,
     ) {
         if let Ok(mut committed) = self.status_sounds.lock() {
             *committed = sounds;
+        }
+        if let Some(enabled) = debug {
+            self.persist_settings(SavedPreference::VadDebugSounds(enabled));
         }
         if let Some(mode) = mode {
             self.persist_settings(SavedPreference::StatusSounds(mode));
@@ -1098,6 +1194,7 @@ impl SessionActor {
             audio_commands,
             next_id: 2,
             pending_speak: None,
+            detection_profile: None,
             pending_settings: std::collections::HashMap::new(),
             spokesperson_settings: HashSet::new(),
             waiting_speaks: VecDeque::new(),
@@ -1180,8 +1277,91 @@ impl SessionActor {
         }
     }
 
+    fn restore_detection_profile(&mut self, arguments: &[String]) -> Result<(), String> {
+        let detection = self
+            .session
+            .lock()
+            .map_err(|_| "session settings lock failed")?
+            .detection;
+        let Some(snapshot) = detection else {
+            return Ok(());
+        };
+        let Some(setup) = berd_call::macos_audio_route::default_audio_setup() else {
+            return Ok(());
+        };
+        let path = crate::detection_profiles::path()?;
+        let persisted = crate::detection_profiles::load(&path, &setup)?;
+        let settings =
+            crate::detection_profiles::settings_for_start(persisted, snapshot.settings, arguments)?;
+        let id = self.next_id();
+        send_request(
+            &self.writer,
+            &SessionRequest::SetDetectionSettings { id, settings },
+        )?;
+        self.detection_profile = Some(ActiveDetectionProfile {
+            persisted,
+            setup,
+            path,
+            next_check: Instant::now() + Duration::from_secs(1),
+            pending: Some(id),
+        });
+        Ok(())
+    }
+
+    fn poll_detection_profile(&mut self) -> Result<(), String> {
+        let Some(profile) = self.detection_profile.as_mut() else {
+            return Ok(());
+        };
+        if profile.pending.is_some() || Instant::now() < profile.next_check {
+            return Ok(());
+        }
+        profile.next_check = Instant::now() + Duration::from_secs(1);
+        let Some(setup) = berd_call::macos_audio_route::default_audio_setup() else {
+            return Ok(());
+        };
+        self.switch_detection_profile(setup)
+    }
+
+    fn switch_detection_profile(
+        &mut self,
+        setup: berd_call::macos_audio_route::AudioSetup,
+    ) -> Result<(), String> {
+        let Some(profile) = self.detection_profile.as_mut() else {
+            return Ok(());
+        };
+        if profile.pending.is_some() {
+            return Ok(());
+        }
+        if setup.input_uid == profile.setup.input_uid
+            && setup.output_uid == profile.setup.output_uid
+        {
+            return Ok(());
+        }
+        let settings = match crate::detection_profiles::load(&profile.path, &setup) {
+            Ok(settings) => settings,
+            Err(error) => {
+                eprintln!("berd-call: could not restore speech profile: {error}");
+                return Ok(());
+            }
+        };
+        profile.persisted = settings;
+        let settings = settings.unwrap_or_default();
+        profile.setup = setup;
+        let id = self.next_id();
+        send_request(
+            &self.writer,
+            &SessionRequest::SetDetectionSettings { id, settings },
+        )?;
+        self.detection_profile
+            .as_mut()
+            .expect("profile exists")
+            .pending = Some(id);
+        Ok(())
+    }
+
     fn poll(&mut self) -> Result<(), String> {
         if !self.stopping {
+            self.poll_detection_profile()?;
             if let Some(muted) = self
                 .system_input_mute
                 .as_mut()
@@ -1320,41 +1500,14 @@ impl SessionActor {
                 )?;
                 self.pending_settings.insert(id, response);
             }
+            ControlCommand::VadDebugSounds { enabled, response } => {
+                self.change_sounds(None, None, Some(enabled), response)?
+            }
             ControlCommand::StatusSounds {
                 mode,
                 status,
                 response,
-            } => {
-                // Build on the newest request, since the session applies them in order.
-                let latest = match self.pending_status_sounds.last_key_value() {
-                    Some((_, (sounds, _))) if !self.stopping => *sounds,
-                    _ => *self
-                        .status_sounds
-                        .lock()
-                        .map_err(|_| "status sounds lock failed")?,
-                };
-                let sounds = StatusSounds {
-                    mode: mode.unwrap_or(latest.mode),
-                    status: status.or(latest.status),
-                };
-                // A stopping child may already have exited; a restarted session
-                // is sent the committed status when it starts.
-                let sent = if self.stopping {
-                    None
-                } else {
-                    self.send_status_sounds(sounds)?
-                };
-                match sent {
-                    Some(id) => {
-                        self.pending_status_sounds.insert(id, (sounds, mode));
-                        self.pending_settings.insert(id, response);
-                    }
-                    None => {
-                        self.commit_status_sounds(sounds, mode);
-                        let _ = response.send(Ok(json!({})));
-                    }
-                }
-            }
+            } => self.change_sounds(mode, status, None, response)?,
             ControlCommand::TtsSettings {
                 settings,
                 expected_revision,
@@ -1437,6 +1590,7 @@ impl SessionActor {
                     text,
                     non_blocking,
                     response: Some(response),
+                    prepared: Instant::now(),
                 });
             }
             ControlCommand::Restart {
@@ -1486,6 +1640,45 @@ impl SessionActor {
 
     fn handle_event(&mut self, event: SessionMessage) -> Result<(), String> {
         match event {
+            SessionMessage::DetectionSettingsResult {
+                id,
+                snapshot,
+                message,
+            } => {
+                if let Some(profile) = self.detection_profile.as_mut() {
+                    if profile.pending.is_some() && profile.pending != id {
+                        return Ok(());
+                    }
+                    if profile.pending == id {
+                        profile.pending = None;
+                    }
+                    if let Some(snapshot) = snapshot {
+                        // A device switch observed before its ordered acknowledgement
+                        // cannot save the old setup's learning under the new pair.
+                        if berd_call::macos_audio_route::default_audio_setup().is_some_and(
+                            |setup| {
+                                setup.input_uid == profile.setup.input_uid
+                                    && setup.output_uid == profile.setup.output_uid
+                            },
+                        ) {
+                            match crate::detection_profiles::save_if_unchanged(&profile.path, &profile.setup, profile.persisted, snapshot.settings) {
+                                Ok(true) => profile.persisted = Some(snapshot.settings),
+                                Ok(false) => {},
+                                Err(error) => eprintln!("berd-call: speech detection applied but could not be saved: {error}"),
+                            }
+                        }
+                    }
+                }
+                if let Some(snapshot) = snapshot {
+                    self.session
+                        .lock()
+                        .map_err(|_| "session settings lock failed")?
+                        .detection = Some(snapshot);
+                }
+                if let Some(message) = message {
+                    eprintln!("berd-call: speech detection update rejected: {message}");
+                }
+            }
             SessionMessage::InputSpeaking { active } => {
                 if self.input_speaking != active {
                     self.input_speaking = active;
@@ -1585,8 +1778,8 @@ impl SessionActor {
                 }
             }
             SessionMessage::ConversationStatusApplied { id, .. } => {
-                if let Some((sounds, mode)) = self.pending_status_sounds.remove(&id) {
-                    self.commit_status_sounds(sounds, mode);
+                if let Some((sounds, mode, debug)) = self.pending_status_sounds.remove(&id) {
+                    self.commit_status_sounds(sounds, mode, debug);
                 }
                 if let Some(response) = self.pending_settings.remove(&id) {
                     let _ = response.send(Ok(json!({})));
@@ -1641,6 +1834,12 @@ impl SessionActor {
             SessionMessage::Admitted { id, speech_id, .. }
                 if self.pending_prepare_id() == Some(id) =>
             {
+                if let Some(pending) = &self.pending_speak {
+                    eprintln!(
+                        "berd-call: speech admitted after {} ms",
+                        pending.prepared.elapsed().as_millis()
+                    );
+                }
                 send_request(&self.writer, &SessionRequest::OutputReady { id, speech_id })?;
             }
             SessionMessage::OutputReadyResult { id, outcome, .. }
@@ -1654,6 +1853,14 @@ impl SessionActor {
                             let _ = response.send(Ok(json!({"status":"accepted", "requestId":id})));
                         }
                     }
+                }
+            }
+            SessionMessage::SpeechStarted { id, .. } if self.pending_prepare_id() == Some(id) => {
+                if let Some(pending) = &self.pending_speak {
+                    eprintln!(
+                        "berd-call: speech first audio accepted after {} ms",
+                        pending.prepared.elapsed().as_millis()
+                    );
                 }
             }
             SessionMessage::SpeechCompleted { id, .. } if self.pending_prepare_id() == Some(id) => {
@@ -1823,6 +2030,15 @@ impl SessionActor {
         let Ok(session) = self.session.lock() else {
             return;
         };
+        if let SavedPreference::VadDebugSounds(enabled) = changed {
+            saved.vad_debug_sounds = enabled;
+            if let Err(error) =
+                crate::saved_settings::update(path, |latest| latest.vad_debug_sounds = enabled)
+            {
+                eprintln!("berd-call: VAD debug sounds applied but could not be saved: {error}");
+            }
+            return;
+        }
         if let SavedPreference::StatusSounds(mode) = changed {
             saved.status_sounds = Some(mode);
             if let Err(error) =
@@ -1866,7 +2082,9 @@ impl SessionActor {
                 latest.tts = saved.tts.clone();
             }
             SavedPreference::InputPolicy => latest.input_policy = saved.input_policy,
-            SavedPreference::Spokesperson | SavedPreference::StatusSounds(_) => {
+            SavedPreference::Spokesperson
+            | SavedPreference::StatusSounds(_)
+            | SavedPreference::VadDebugSounds(_) => {
                 unreachable!("saved above")
             }
         }) {
@@ -2195,6 +2413,72 @@ struct DefaultInputCapture {
     next_check: Instant,
     muted: Arc<AtomicBool>,
     mute_epoch: Arc<AtomicU64>,
+    route: RouteTelemetry,
+}
+
+const ROUTE_HEARTBEAT: Duration = Duration::from_secs(5);
+
+/// Whether the main thread runs the run loop on which CoreAudio delivers property listeners.
+pub(crate) static MAIN_RUN_LOOP: AtomicBool = AtomicBool::new(false);
+
+/// Audio route observations for capture provenance, on one monotonic clock.
+struct RouteTelemetry {
+    started: Instant,
+    changes: Option<berd_call::macos_audio_route::DefaultOutputChanges>,
+    sent: Option<(Option<String>, u64)>,
+    next_heartbeat: Instant,
+}
+
+impl RouteTelemetry {
+    fn new() -> Self {
+        // Without a main run loop the change count would never advance, so it would prove nothing.
+        let changes = if MAIN_RUN_LOOP.load(Ordering::SeqCst) {
+            berd_call::macos_audio_route::DefaultOutputChanges::install()
+        } else {
+            Err("CoreAudio notifications need the menu bar's run loop".into())
+        }
+        .map_err(|error| eprintln!("berd-call: audio route provenance unavailable: {error}"))
+        .ok();
+        let started = Instant::now();
+        Self {
+            started,
+            changes,
+            sent: None,
+            next_heartbeat: started,
+        }
+    }
+
+    /// Sends the default output when it or its change count differs from the last
+    /// observation sent, and at least every heartbeat so a lost record is bracketed.
+    fn observe_output(&mut self, writer: &Arc<Mutex<ChildStdin>>) -> Result<(), String> {
+        let Some(changes) = &self.changes else {
+            return Ok(());
+        };
+        let now = Instant::now();
+        // Counted first: a change between the two reads shows in the next observation.
+        let count = changes.count();
+        let observation = (berd_call::macos_audio_route::default_output_uid(), count);
+        if self.sent.as_ref() == Some(&observation) && now < self.next_heartbeat {
+            return Ok(());
+        }
+        send_request(
+            writer,
+            &SessionRequest::AudioRoute {
+                observed_us: route_us(self.started, now),
+                observation: RouteObservation::Output {
+                    output_uid: observation.0.clone(),
+                    changes: observation.1,
+                },
+            },
+        )?;
+        self.sent = Some(observation);
+        self.next_heartbeat = now + ROUTE_HEARTBEAT;
+        Ok(())
+    }
+}
+
+fn route_us(started: Instant, now: Instant) -> u64 {
+    u64::try_from(now.saturating_duration_since(started).as_micros()).unwrap_or(u64::MAX)
 }
 
 fn default_input() -> Result<(String, cpal::Device), String> {
@@ -2223,6 +2507,9 @@ impl DefaultInputCapture {
         muted: Arc<AtomicBool>,
         mute_epoch: Arc<AtomicU64>,
     ) -> Result<Self, String> {
+        // Observing output before the first microphone frame brackets the capture's start.
+        let mut route = RouteTelemetry::new();
+        route.observe_output(&writer)?;
         let (key, device) = default_input()?;
         let capture = InputCapture::start(
             device,
@@ -2230,6 +2517,7 @@ impl DefaultInputCapture {
             failures.clone(),
             muted.clone(),
             mute_epoch.clone(),
+            route.started,
         )?;
         Ok(Self {
             recovery: crate::microphone_recovery::MicrophoneRecovery::new(key, capture),
@@ -2238,6 +2526,7 @@ impl DefaultInputCapture {
             next_check: Instant::now() + Duration::from_millis(500),
             muted,
             mute_epoch,
+            route,
         })
     }
 
@@ -2271,6 +2560,7 @@ impl DefaultInputCapture {
             .map_err(Clone::clone);
         let writer = &self.writer;
         let failures = &self.failures;
+        let route_started = self.route.started;
         let change = self
             .recovery
             .reconcile(now, key, failed, InputCapture::stop, || {
@@ -2284,12 +2574,13 @@ impl DefaultInputCapture {
                     failures.clone(),
                     self.muted.clone(),
                     self.mute_epoch.clone(),
+                    route_started,
                 )
             })?;
         if change.invalidated || change.opened {
             actor.reset_input_activity()?;
         }
-        Ok(())
+        self.route.observe_output(&self.writer)
     }
 }
 
@@ -2380,7 +2671,12 @@ impl InputCapture {
         failures: SyncSender<String>,
         muted: Arc<AtomicBool>,
         mute_epoch: Arc<AtomicU64>,
+        route_started: Instant,
     ) -> Result<Self, String> {
+        let input_uid = device
+            .id()
+            .map_err(|error| format!("could not identify microphone: {error}"))?
+            .1;
         let supported = device
             .default_input_config()
             .map_err(|error| format!("could not inspect the default microphone: {error}"))?;
@@ -2394,20 +2690,21 @@ impl InputCapture {
         let writer_failures = failures.clone();
         let forwarding_muted = muted.clone();
         let forwarding_mute_epoch = mute_epoch.clone();
+        let route_writer = writer.clone();
+        let (opened_tx, opened_rx) = mpsc::sync_channel(1);
         let forwarder = thread::Builder::new()
             .name("berd-call-microphone-writer".into())
             .spawn(move || {
-                while let Ok(frame) = frames_rx.recv() {
-                    if let Err(message) = send_captured_pcm(
+                forward_after_open(opened_rx, frames_rx, |frame| {
+                    let sent = send_captured_pcm(
                         &writer,
                         &frame,
                         &forwarding_muted,
                         &forwarding_mute_epoch,
-                    ) {
-                        report_failure(&writer_failures, message);
-                        break;
-                    }
-                }
+                    );
+                    sent.map_err(|message| report_failure(&writer_failures, message))
+                        .is_ok()
+                })
             })
             .map_err(|error| format!("could not start microphone forwarding: {error}"))?;
         let stream = match sample_format {
@@ -2466,12 +2763,38 @@ impl InputCapture {
         stream
             .play()
             .map_err(|error| format!("could not start the default microphone: {error}"))?;
+        // Only a playing stream establishes identity, and its frames wait for this record.
+        send_request(
+            &route_writer,
+            &SessionRequest::AudioRoute {
+                observed_us: route_us(route_started, Instant::now()),
+                observation: RouteObservation::InputOpened { input_uid },
+            },
+        )?;
+        let _ = opened_tx.send(());
         Ok(Self {
             stream: Some(stream),
             forwarder: Some(forwarder),
             errors,
             activity,
         })
+    }
+}
+
+/// Forwards frames only after `opened` fires, until `forward` declines one; frames
+/// queue meanwhile. Dropping `opened` unsent forwards nothing.
+fn forward_after_open<T>(
+    opened: Receiver<()>,
+    frames: Receiver<T>,
+    mut forward: impl FnMut(T) -> bool,
+) {
+    if opened.recv().is_err() {
+        return;
+    }
+    while let Ok(frame) = frames.recv() {
+        if !forward(frame) {
+            break;
+        }
     }
 }
 
@@ -3076,6 +3399,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn microphone_frames_wait_for_the_opened_route_record() {
+        let (opened, opened_rx) = mpsc::sync_channel(1);
+        let (frames, frames_rx) = mpsc::sync_channel(4);
+        let forwarded = Arc::new(Mutex::new(Vec::new()));
+        let sink = forwarded.clone();
+        let forwarder = thread::spawn(move || {
+            forward_after_open(opened_rx, frames_rx, |frame| {
+                sink.lock().unwrap().push(frame);
+                frame != 3
+            })
+        });
+        frames.send(1).unwrap();
+        frames.send(2).unwrap();
+        thread::sleep(Duration::from_millis(50));
+        assert!(forwarded.lock().unwrap().is_empty());
+        opened.send(()).unwrap();
+        frames.send(3).unwrap();
+        // The forwarder may already have stopped and dropped its receiver.
+        let _ = frames.send(4);
+        forwarder.join().unwrap();
+        assert_eq!(*forwarded.lock().unwrap(), [1, 2, 3]);
+
+        // A stream that never opened forwards nothing it queued.
+        let (opened, opened_rx) = mpsc::sync_channel::<()>(1);
+        let (frames, frames_rx) = mpsc::sync_channel(1);
+        frames.send(1).unwrap();
+        drop(opened);
+        let mut forwarded = Vec::new();
+        forward_after_open(opened_rx, frames_rx, |frame| {
+            forwarded.push(frame);
+            true
+        });
+        assert!(forwarded.is_empty());
+    }
+
+    #[test]
     fn expert_batches_leave_out_user_rows_already_streamed() {
         let event = |cursor, role| RealtimeExpertDeliveryEvent {
             cursor,
@@ -3415,6 +3774,54 @@ mod tests {
     }
 
     #[test]
+    fn debug_sound_changes_wait_for_ack_and_preserve_unknown_host_status() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        actor.saved = Some((path.clone(), Default::default()));
+        for enabled in [true, false] {
+            let (response, result) = mpsc::sync_channel(1);
+            actor
+                .handle_command(ControlCommand::VadDebugSounds { enabled, response })
+                .unwrap();
+            assert!(result.try_recv().is_err());
+            assert_eq!(
+                actor.status_sounds.lock().unwrap().vad_debug_sounds,
+                !enabled
+            );
+            let id = *actor.pending_settings.keys().next().unwrap();
+            actor
+                .handle_event(SessionMessage::ConversationStatusApplied {
+                    id,
+                    status: berd_call::ConversationStatus::Waiting,
+                    settings: berd_call::StatusSoundSettings {
+                        mode: berd_call::StatusSoundMode::Off,
+                        vad_debug_sounds: enabled,
+                        ..Default::default()
+                    },
+                })
+                .unwrap();
+            result.try_recv().unwrap().unwrap();
+            assert_eq!(
+                crate::saved_settings::load(&path).unwrap().vad_debug_sounds,
+                enabled
+            );
+            assert!(actor.status_sounds.lock().unwrap().status.is_none());
+        }
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
     fn status_sounds_wait_for_a_reported_status_and_save_their_mode() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
@@ -3487,6 +3894,7 @@ mod tests {
         let mut actor = test_actor(writer, events, commands, audio);
         actor.saved = Some((path.clone(), Default::default()));
         *actor.status_sounds.lock().unwrap() = StatusSounds {
+            vad_debug_sounds: false,
             mode: berd_call::StatusSoundMode::Working,
             status: Some(berd_call::ConversationStatus::Working),
         };
@@ -3976,6 +4384,7 @@ mod tests {
             text: "first".into(),
             non_blocking: false,
             response: Some(first_tx),
+            prepared: Instant::now(),
         });
         let (next_tx, next_rx) = mpsc::sync_channel(1);
         actor
@@ -4036,6 +4445,7 @@ mod tests {
             text: "playing".into(),
             non_blocking: false,
             response: Some(playing_tx),
+            prepared: Instant::now(),
         });
         let (queued_tx, queued) = mpsc::sync_channel(1);
         actor
@@ -4113,6 +4523,7 @@ mod tests {
             text: "playing".into(),
             non_blocking: false,
             response: Some(playing_tx),
+            prepared: Instant::now(),
         });
         let (restart, _restarted) = restart_command();
         actor.handle_command(restart).unwrap();
@@ -4401,6 +4812,7 @@ mod tests {
             text: "playing".into(),
             non_blocking: false,
             response: Some(playing_tx),
+            prepared: Instant::now(),
         });
         let (restart, restarted) = restart_command();
         actor.handle_command(restart).unwrap();
@@ -4417,6 +4829,7 @@ mod tests {
 
     fn test_snapshot() -> VoiceSessionSnapshot {
         VoiceSessionSnapshot {
+            detection: None,
             spokesperson: None,
             tts: berd_call::TtsConfigurationSnapshot {
                 revision: 1,
@@ -4449,87 +4862,6 @@ mod tests {
             Arc::new(Transcript::Stdout { live: false }),
             false,
         )
-    }
-
-    #[test]
-    fn user_interim_stream_shows_words_and_clears_on_mute_and_reset() {
-        const CHILD: &str = "BERD_CALL_TEST_INTERIM_CHILD";
-        if std::env::var_os(CHILD).is_none() {
-            let output = Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "host_session::tests::user_interim_stream_shows_words_and_clears_on_mute_and_reset", "--nocapture"])
-                .env(CHILD, "1")
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let stdout = String::from_utf8(output.stdout).unwrap();
-            let rows: Vec<Value> = stdout
-                .lines()
-                .filter_map(|line| {
-                    line.strip_prefix("0\tuser_interim\t")
-                        .map(|text| serde_json::from_str(text).unwrap())
-                })
-                .collect();
-            let expected: Vec<_> = [
-                (3, "you sh"),
-                (3, "you should\tgo"),
-                (3, ""),
-                (4, "next"),
-                (0, ""),
-                (5, "back"),
-                (0, ""),
-            ]
-            .into_iter()
-            .map(|(cursor, text)| json!({"cursor": cursor, "text": text}))
-            .collect();
-            assert_eq!(rows, expected, "{stdout}");
-            return;
-        }
-        for (transcript, expert) in [
-            (Transcript::Stdout { live: false }, false),
-            (Transcript::Silent, false),
-            (Transcript::Stdout { live: true }, true),
-        ] {
-            let mut child = Command::new("/bin/cat")
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .spawn()
-                .unwrap();
-            let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
-            let (_event_tx, events) = mpsc::sync_channel(1);
-            let (_command_tx, commands) = mpsc::sync_channel(1);
-            let (audio, _audio_rx) = mpsc::sync_channel(1);
-            let mut actor = test_actor(writer, events, commands, audio);
-            actor.transcript = Arc::new(transcript);
-            actor.expert_spokesperson = expert;
-            actor.muted.store(false, Ordering::SeqCst);
-            let interim = |token, text: &str| SessionMessage::UserInterim {
-                token,
-                text: text.into(),
-            };
-            let mute = |active| SessionMessage::InputMuteApplied { id: 0, active };
-            for event in [
-                interim(3, "you sh"),
-                interim(3, "you should\tgo"),
-                interim(3, ""),
-                interim(4, ""),
-                interim(4, "next"),
-                mute(true),
-                interim(4, "muted words"),
-                mute(false),
-                interim(5, "back"),
-            ] {
-                actor.handle_event(event).unwrap();
-            }
-            actor.reset_input_activity().unwrap();
-            actor.reset_input_activity().unwrap();
-            assert!(actor.transcribed.is_empty());
-            child.kill().unwrap();
-            child.wait().unwrap();
-        }
     }
 
     #[test]
@@ -4669,6 +5001,172 @@ mod tests {
             child.kill().unwrap();
             child.wait().unwrap();
         }
+    }
+
+    #[test]
+    fn user_interim_stream_shows_words_and_clears_on_mute_and_reset() {
+        const CHILD: &str = "BERD_CALL_TEST_INTERIM_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "host_session::tests::user_interim_stream_shows_words_and_clears_on_mute_and_reset", "--nocapture"])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let rows: Vec<Value> = stdout
+                .lines()
+                .filter_map(|line| {
+                    line.strip_prefix("0\tuser_interim\t")
+                        .map(|text| serde_json::from_str(text).unwrap())
+                })
+                .collect();
+            let expected: Vec<_> = [
+                (3, "you sh"),
+                (3, "you should\tgo"),
+                (3, ""),
+                (4, "next"),
+                (0, ""),
+                (5, "back"),
+                (0, ""),
+            ]
+            .into_iter()
+            .map(|(cursor, text)| json!({"cursor": cursor, "text": text}))
+            .collect();
+            assert_eq!(rows, expected, "{stdout}");
+            return;
+        }
+        for (transcript, expert) in [
+            (Transcript::Stdout { live: false }, false),
+            (Transcript::Silent, false),
+            (Transcript::Stdout { live: true }, true),
+        ] {
+            let mut child = Command::new("/bin/cat")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap();
+            let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+            let (_event_tx, events) = mpsc::sync_channel(1);
+            let (_command_tx, commands) = mpsc::sync_channel(1);
+            let (audio, _audio_rx) = mpsc::sync_channel(1);
+            let mut actor = test_actor(writer, events, commands, audio);
+            actor.transcript = Arc::new(transcript);
+            actor.expert_spokesperson = expert;
+            actor.muted.store(false, Ordering::SeqCst);
+            let interim = |token, text: &str| SessionMessage::UserInterim {
+                token,
+                text: text.into(),
+            };
+            let mute = |active| SessionMessage::InputMuteApplied { id: 0, active };
+            for event in [
+                interim(3, "you sh"),
+                interim(3, "you should\tgo"),
+                interim(3, ""),
+                interim(4, ""),
+                interim(4, "next"),
+                mute(true),
+                interim(4, "muted words"),
+                mute(false),
+                interim(5, "back"),
+            ] {
+                actor.handle_event(event).unwrap();
+            }
+            actor.reset_input_activity().unwrap();
+            actor.reset_input_activity().unwrap();
+            assert!(actor.transcribed.is_empty());
+            child.kill().unwrap();
+            child.wait().unwrap();
+        }
+    }
+
+    #[test]
+    fn device_switch_restores_the_saved_pair_and_ignores_old_learning_before_ack() {
+        let setup = |name: &str| berd_call::macos_audio_route::AudioSetup {
+            input_uid: format!("{name}-mic"),
+            output_uid: format!("{name}-output"),
+            input_name: name.into(),
+            output_name: name.into(),
+        };
+        let first = setup("first");
+        let second = setup("second");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.json");
+        let mut first_settings = berd_call::detection::DetectionSettings::default();
+        first_settings.listening.value = 0.71;
+        let mut second_settings = first_settings;
+        second_settings.interruption.value = 0.84;
+        crate::detection_profiles::save(&path, &first, first_settings).unwrap();
+        crate::detection_profiles::save(&path, &second, second_settings).unwrap();
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_event_tx, events) = mpsc::sync_channel(1);
+        let (_command_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        actor.detection_profile = Some(ActiveDetectionProfile {
+            setup: first.clone(),
+            path,
+            persisted: Some(first_settings),
+            next_check: Instant::now(),
+            pending: None,
+        });
+        actor.switch_detection_profile(second.clone()).unwrap();
+        let id = actor.detection_profile.as_ref().unwrap().pending;
+        actor
+            .handle_event(SessionMessage::DetectionSettingsResult {
+                id: None,
+                snapshot: Some(
+                    berd_call::detection::DetectionTuner::new(first_settings).snapshot(),
+                ),
+                message: None,
+            })
+            .unwrap();
+        assert!(actor.session.lock().unwrap().detection.is_none());
+        actor
+            .handle_event(SessionMessage::DetectionSettingsResult {
+                id,
+                snapshot: Some(
+                    berd_call::detection::DetectionTuner::new(second_settings).snapshot(),
+                ),
+                message: None,
+            })
+            .unwrap();
+        assert_eq!(
+            actor.session.lock().unwrap().detection.unwrap().settings,
+            second_settings
+        );
+        actor.switch_detection_profile(first).unwrap();
+        assert_eq!(
+            actor.detection_profile.as_ref().unwrap().persisted,
+            Some(first_settings)
+        );
+        drop(actor);
+        let output = child.wait_with_output().unwrap().stdout;
+        let mut position = 0;
+        let mut settings = Vec::new();
+        while position < output.len() {
+            let length =
+                u32::from_le_bytes(output[position + 4..position + 8].try_into().unwrap()) as usize;
+            let request: SessionRequest =
+                serde_json::from_slice(&output[position + 8..position + 8 + length]).unwrap();
+            if let SessionRequest::SetDetectionSettings {
+                settings: applied, ..
+            } = request
+            {
+                settings.push(applied);
+            }
+            position += 8 + length;
+        }
+        assert_eq!(settings, [second_settings, first_settings]);
     }
 
     #[test]
@@ -5271,7 +5769,7 @@ mod tests {
             }),
             input_policy: Some(InputDuringTtsPolicy::SuppressInput),
             status_sounds: None,
-            ..Default::default()
+            vad_debug_sounds: false,
         }
     }
 

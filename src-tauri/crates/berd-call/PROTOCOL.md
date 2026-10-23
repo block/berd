@@ -42,6 +42,10 @@ initialization finish before `ready`. STT must report readiness within 60
 seconds; otherwise the child emits a sanitized fatal event and performs bounded
 runtime cleanup before exiting.
 
+`--capture DIR` records a conventional session into a new directory under
+`DIR`, as the README's capture section describes. It changes nothing on the
+wire; Expert-Spokesperson sessions reject it.
+
 Siri startup preflight validates the exact case-sensitive installed name,
 normalized BCP-47 language, and a responsive sirittsd availability query. It
 does not guarantee that a later synthesis request cannot fail; those failures
@@ -58,12 +62,12 @@ initial policy; a host-specific `auto` mode must be resolved before the request.
 {"type":"hello","id":1,"input_during_tts":"allow_barge_in","status_sound_output_device":"MacBook Pro Speakers"}
 ```
 
-The response uses `protocol:5` as the exact session message-set version. The
+The response uses `protocol:8` as the exact session message-set version. The
 parent must reject a version it does not support; the JSON version is independent
 of the fixed binary framing marker described below:
 
 ```json
-{"type":"ready","id":1,"protocol":5,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
+{"type":"ready","id":1,"protocol":8,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
 ```
 
 The `session.tts` object is the authoritative, sanitized TTS configuration.
@@ -301,22 +305,6 @@ The child emits:
 {"type":"live_event","token":u64,"text":string,"origin"?:"user"|"spokesperson"|"handoff"}
 ```
 
-On macOS, `recognition_pending.active` reports the agent speech admission hold, not
-the count of unresolved native recognitions. After local speech ends the hold
-expires after five seconds without a final, or, while Apple's latest result is
-interim words that no final has followed, after up to ten more seconds. Noise with no
-interim words keeps the five seconds. Empty finals settle their audio and resolve
-their turns without emitting a `live_event`. Expiry emits
-`recognition_pending.active:false` without cancelling recognition, clearing audio,
-or changing the recognizer generation, so a late final is still forwarded as a
-`live_event`. New speech reasserts the hold. Native finals carry no utterance
-identity, so each final carries the end of its audio and resolves the ended speech
-turns that audio covers, oldest first, which may include expired ones. A final for
-an earlier phrase of a turn still being spoken resolves nothing, and a final with no
-end resolves the oldest turn. Credit accounting is capped at 1024; at the cap attribution stays ambiguous
-until the recognizer resets, and finals still forward but only the timeout
-releases the hold.
-
 For every final live-side event, the child allocates a strictly increasing token,
 stores it in `SessionCore`, acknowledges the runtime storage receipt, and emits
 `live_event`. Conventional sessions omit `origin`, which means `user`.
@@ -383,7 +371,7 @@ ID and speech ID when it is ready to accept output:
 Before emitting `accepted`, the child installs the admitted speech's leased
 assistant-activity guard. `suppress_input` stops PCM admission so user input
 cannot interrupt the speech; `allow_barge_in` continues PCM admission with the
-same VAD threshold. `accepted` transfers output authority. The
+assistant-sensitive VAD threshold. `accepted` transfers output authority. The
 child then writes Begin and waits for `audio_begin_accepted` before delivering
 PCM. Readiness is bounded to two seconds; expiry emits `speech_failed` with zero output. With `allow_barge_in`, speaking or recognition pending provisionally suspends started output. If both clear without a final, the same speech and player resume. A final, targeted cancellation, host mute/reset while provisionally suspended, pause, or shutdown discards the hold and interrupts exactly once.
 Accepted output owns exactly one assistant-activity guard. The child removes
@@ -425,3 +413,16 @@ receipts, flushes, and exits. EOF, malformed framing, fatal
 input failure, or process death cancels both authorities without transparent
 restart. A fatal error is flushed exactly once and followed by no protocol
 output.
+
+
+## Local speech detection (protocol 7)
+
+Conventional session readiness includes an optional `session.detection` snapshot with `settings.listening` and `settings.interruption` (`value`, `dynamic`), `settings.pending_utterance_timeout_ms`, `settings.interim_words_wait_ms`, `settings.timing.release_ms` and the opt-ins `settings.dynamic.pending_utterance_timeout`, `settings.dynamic.interim_words_wait` and `settings.dynamic.release`, plus `adjustments` (threshold steps), `no_result`, `missed_detection`, `pending_utterance_timeout_adjustments`, `interim_words_wait_adjustments` and `release_adjustments` counters. These local controls are separate from Realtime Spokesperson turn detection.
+
+A host sends `{"type":"set_detection_settings","id":42,"settings":{"listening":{"value":0.7,"dynamic":true},"interruption":{"value":0.8,"dynamic":false}}}` to replace both settings atomically and discard stale input/learning evidence. The session returns `detection_settings_result` with that ID and an applied `snapshot`, or `snapshot:null` and a `message` explaining rejection. Invalid settings leave the current values unchanged. Dynamic choices require macOS STT.
+
+During adaptive tuning, the session sends `detection_settings_result` with `id:null` and the new snapshot. Hosts must handle these unsolicited updates, report applied values, and keep profile persistence associated with their actual input/output device pair. Protocol 7 adds `settings.timing` (`onset_ms`, `release_ms`) for Apple local VAD. Older profiles omit this field and receive defaults of 16 ms onset and 300 ms release. Final transcripts are emitted immediately, independently of the local activity gate.
+
+Protocol 8 adds `settings.pending_utterance_timeout_ms`, an integer from 250 to 30000 (default 5000 when absent from older profiles). It limits the idle agent speech admission hold after local speech ends. Changing settings affects newly armed deadlines. Expiry emits `recognition_pending.active:false` without cancelling recognition, clearing audio, or changing recognizer generation. Valid late final text is still forwarded. New VAD speech reasserts the hold, cancels the idle deadline, and the next speech end arms a fresh deadline.
+
+`recognition_pending.active` reports this admission hold, not unresolved native recognition. Native finals have no utterance identity: expired credits are consumed before newer blocking credits and do not tune newer detector evidence. If an old recognition never produces a final, a newer final may consume its expired credit and leave the newer hold until timeout. Credit accounting caps at 1024; saturation latches ambiguous attribution until an explicit recognizer reset. In that state finals continue forwarding but cannot resolve newer holds or tune evidence.
