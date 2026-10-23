@@ -314,7 +314,7 @@ private final class SpeechSession: @unchecked Sendable {
                             // Empty finals still settle their audio, so the host stops waiting on it.
                             self.emit(finalEvent, text: text, end: end)
                         } else if !text.isEmpty {
-                            self.emit(heardEvent, end: end)
+                            self.emit(heardEvent, text: text, end: end)
                         }
                     }
                     self?.taskCompleted()

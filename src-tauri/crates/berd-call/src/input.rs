@@ -124,6 +124,9 @@ pub enum VoiceInputEvent {
     SpeakingChanged(bool),
     /// Agent speech admission hold, which may expire before recognition finishes.
     RecognitionPendingChanged(bool),
+    /// Display only: words Apple is still transcribing, or empty once none are.
+    /// Never stored, delivered or treated as an utterance.
+    InterimTranscript(String),
     FinalTranscript {
         text: String,
         storage_receipt: FinalTranscriptStorageReceipt,
@@ -756,6 +759,8 @@ struct PendingRecognitions {
     /// audio does rather than at the last word, so order says more than samples.
     #[cfg(target_os = "macos")]
     unfinalized: bool,
+    /// The interim text last shown, so repeats and clears are sent once.
+    interim: String,
 }
 
 impl PendingRecognitions {
@@ -817,6 +822,14 @@ impl PendingRecognitions {
         self.unfinalized = false;
     }
 
+    /// Interim text is best effort: a full event queue drops it rather than stall recognition.
+    fn show_interim(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>, text: &str) {
+        if self.interim != text {
+            self.interim = text.to_string();
+            let _ = events.try_send(VoiceInputEvent::InterimTranscript(self.interim.clone()));
+        }
+    }
+
     fn result_is_current(&self) -> bool {
         !self.ambiguous && self.count == self.blocking
     }
@@ -851,6 +864,7 @@ impl PendingRecognitions {
 
     fn reset(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>) -> Result<(), ()> {
         self.release_hold(events)?;
+        self.show_interim(events, "");
         *self = Self::new();
         Ok(())
     }
@@ -1547,8 +1561,14 @@ fn forward_mac_events(
                 if pending.blocking == 0 {
                     *settle_deadline = None;
                 }
+                if !pending.words_outstanding() {
+                    pending.show_interim(events, "");
+                }
             }
-            crate::mac_speech::MacSpeechRecognitionEvent::Heard(_) => pending.unfinalized = true,
+            crate::mac_speech::MacSpeechRecognitionEvent::Heard(_, text) => {
+                pending.unfinalized = true;
+                pending.show_interim(events, &text);
+            }
             crate::mac_speech::MacSpeechRecognitionEvent::Finished => {
                 if storage_deadline.is_none() {
                     pending.reset(events)?;
@@ -1676,6 +1696,7 @@ fn mac_speech_worker(
                 return;
             }
             pending.abandon_heard_words();
+            pending.show_interim(&events, "");
             settle_deadline = None;
         }
         let frame = match frames.recv_timeout(Duration::from_millis(50)) {
@@ -2836,6 +2857,7 @@ mod tests {
                     storage_receipt.stored();
                     observed.push("final");
                 }
+                VoiceInputEvent::InterimTranscript(_) => {}
                 VoiceInputEvent::Failed(error) => panic!("unexpected input failure: {error}"),
             }
         }
@@ -4016,11 +4038,11 @@ mod tests {
         let (native_tx, mut native_rx) = tokio_mpsc::unbounded_channel();
         use crate::mac_speech::MacSpeechRecognitionEvent::{Final, Heard};
         // Apple re-reports the second sentence's interim words after the first final.
-        native_tx.send(Heard(310_000)).unwrap();
+        native_tx.send(Heard(310_000, "you should".into())).unwrap();
         native_tx
             .send(Final("first".into(), Some(110_000)))
             .unwrap();
-        native_tx.send(Heard(310_000)).unwrap();
+        native_tx.send(Heard(310_000, "you should".into())).unwrap();
         forward_mac_events(&mut native_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
         assert_eq!(pending.blocking, 1);
         assert!(!mac_settle_expired(&pending, deadline, now + timeout));
@@ -4057,7 +4079,7 @@ mod tests {
         }
         let (native_tx, mut native_rx) = tokio_mpsc::unbounded_channel();
         use crate::mac_speech::MacSpeechRecognitionEvent::{Final, Heard};
-        native_tx.send(Heard(130_000)).unwrap();
+        native_tx.send(Heard(130_000, "words".into())).unwrap();
         native_tx
             .send(Final("words".into(), Some(110_000)))
             .unwrap();

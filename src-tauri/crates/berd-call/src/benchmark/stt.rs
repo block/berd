@@ -563,6 +563,7 @@ fn observe_event(
                 tracker.speaking_ended = Some(now);
             }
         }
+        Some(VoiceInputEvent::InterimTranscript(_)) => {}
         Some(VoiceInputEvent::RecognitionPendingChanged(active)) => {
             tracker.pending = active;
             if active {

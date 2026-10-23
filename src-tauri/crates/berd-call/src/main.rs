@@ -7857,6 +7857,13 @@ fn handle_voice_input_event(
             )?;
             update_provisional_suspension(core, active)?;
         }
+        VoiceInputEvent::InterimTranscript(text) => write_message(
+            writer,
+            &SessionMessage::UserInterim {
+                token: *next_token,
+                text,
+            },
+        )?,
         VoiceInputEvent::FinalTranscript {
             text,
             storage_receipt,
@@ -13093,6 +13100,43 @@ mod tests {
             ["live_event", "speech_interrupted"]
         );
         assert_eq!(core.utterances_after(0)[0].token, 1);
+    }
+
+    #[test]
+    fn interim_words_carry_the_token_their_final_will_take() {
+        let mut core = SessionCore::default();
+        let mut active = None;
+        let mut output = Vec::new();
+        let mut next_token = 7;
+        handle_voice_input_event(
+            VoiceInputEvent::InterimTranscript("you sh".into()),
+            &mut core,
+            &mut active,
+            &mut next_token,
+            &mut output,
+        )
+        .unwrap();
+        assert_eq!(next_token, 7);
+        store_and_publish_voice_final(
+            "you should".into(),
+            || {},
+            &mut core,
+            &mut active,
+            &mut next_token,
+            &mut output,
+        )
+        .unwrap();
+        let messages: Vec<Value> = String::from_utf8(output)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(
+            messages[0],
+            json!({"type":"user_interim","token":7,"text":"you sh"})
+        );
+        assert_eq!(messages[1]["type"], "live_event");
+        assert_eq!(messages[1]["token"], 7);
     }
 
     #[test]

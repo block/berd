@@ -197,6 +197,13 @@ impl Transcript {
     }
 }
 
+fn user_interim_line(cursor: u64, text: &str) -> String {
+    format!(
+        "0\tuser_interim\t{}",
+        json!({"cursor": cursor, "text": text})
+    )
+}
+
 fn input_activity_line(speaking: bool, recognizing: bool) -> String {
     format!(
         "0\tinput_activity\t{}",
@@ -978,6 +985,7 @@ struct SessionActor {
     saved: Option<(std::path::PathBuf, crate::saved_settings::SavedSettings)>,
     input_speaking: bool,
     recognition_pending: bool,
+    interim_shown: bool,
     pending_polls: Vec<PendingInputPoll>,
     writer: Arc<Mutex<ChildStdin>>,
     events: Receiver<SessionMessage>,
@@ -1082,6 +1090,7 @@ impl SessionActor {
             saved: None,
             input_speaking: false,
             recognition_pending: false,
+            interim_shown: false,
             pending_polls: Vec::new(),
             writer,
             events,
@@ -1586,10 +1595,16 @@ impl SessionActor {
             SessionMessage::InputMuteApplied { id, active } => {
                 // Commit before acknowledging so a restart cannot read a stale value.
                 self.muted.store(active, Ordering::SeqCst);
+                if active {
+                    self.stream_user_interim(0, "")?;
+                }
                 self.stream_input_activity()?;
                 if let Some(response) = self.pending_settings.remove(&id) {
                     let _ = response.send(Ok(json!({"muted":active})));
                 }
+            }
+            SessionMessage::UserInterim { token, text } if !self.expert_spokesperson => {
+                self.stream_user_interim(token, &text)?
             }
             SessionMessage::LiveEvent {
                 token,
@@ -1730,7 +1745,24 @@ impl SessionActor {
     fn reset_input_activity(&mut self) -> Result<(), String> {
         self.input_speaking = false;
         self.recognition_pending = false;
+        self.stream_user_interim(0, "")?;
         self.stream_input_activity()
+    }
+
+    /// Ephemeral like input activity. Muted words are never shown.
+    fn stream_user_interim(&mut self, cursor: u64, text: &str) -> Result<(), String> {
+        let text = if self.muted.load(Ordering::SeqCst) {
+            ""
+        } else {
+            text
+        };
+        if matches!(&*self.transcript, Transcript::Stdout { .. })
+            && (self.interim_shown || !text.is_empty())
+        {
+            self.interim_shown = !text.is_empty();
+            print_flushed(&user_interim_line(cursor, text))?;
+        }
+        Ok(())
     }
 
     fn stream_live_event(
@@ -4417,6 +4449,87 @@ mod tests {
             Arc::new(Transcript::Stdout { live: false }),
             false,
         )
+    }
+
+    #[test]
+    fn user_interim_stream_shows_words_and_clears_on_mute_and_reset() {
+        const CHILD: &str = "BERD_CALL_TEST_INTERIM_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "host_session::tests::user_interim_stream_shows_words_and_clears_on_mute_and_reset", "--nocapture"])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let rows: Vec<Value> = stdout
+                .lines()
+                .filter_map(|line| {
+                    line.strip_prefix("0\tuser_interim\t")
+                        .map(|text| serde_json::from_str(text).unwrap())
+                })
+                .collect();
+            let expected: Vec<_> = [
+                (3, "you sh"),
+                (3, "you should\tgo"),
+                (3, ""),
+                (4, "next"),
+                (0, ""),
+                (5, "back"),
+                (0, ""),
+            ]
+            .into_iter()
+            .map(|(cursor, text)| json!({"cursor": cursor, "text": text}))
+            .collect();
+            assert_eq!(rows, expected, "{stdout}");
+            return;
+        }
+        for (transcript, expert) in [
+            (Transcript::Stdout { live: false }, false),
+            (Transcript::Silent, false),
+            (Transcript::Stdout { live: true }, true),
+        ] {
+            let mut child = Command::new("/bin/cat")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap();
+            let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+            let (_event_tx, events) = mpsc::sync_channel(1);
+            let (_command_tx, commands) = mpsc::sync_channel(1);
+            let (audio, _audio_rx) = mpsc::sync_channel(1);
+            let mut actor = test_actor(writer, events, commands, audio);
+            actor.transcript = Arc::new(transcript);
+            actor.expert_spokesperson = expert;
+            actor.muted.store(false, Ordering::SeqCst);
+            let interim = |token, text: &str| SessionMessage::UserInterim {
+                token,
+                text: text.into(),
+            };
+            let mute = |active| SessionMessage::InputMuteApplied { id: 0, active };
+            for event in [
+                interim(3, "you sh"),
+                interim(3, "you should\tgo"),
+                interim(3, ""),
+                interim(4, ""),
+                interim(4, "next"),
+                mute(true),
+                interim(4, "muted words"),
+                mute(false),
+                interim(5, "back"),
+            ] {
+                actor.handle_event(event).unwrap();
+            }
+            actor.reset_input_activity().unwrap();
+            actor.reset_input_activity().unwrap();
+            assert!(actor.transcribed.is_empty());
+            child.kill().unwrap();
+            child.wait().unwrap();
+        }
     }
 
     #[test]

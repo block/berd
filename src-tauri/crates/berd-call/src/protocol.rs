@@ -254,6 +254,14 @@ pub enum SessionMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         origin: Option<UtteranceOrigin>,
     },
+    /// The user's words still being transcribed, replaced by each update and
+    /// cleared with empty text. `token` is the one the next final will take, so
+    /// a reply composed against interim words stays current once they finalize.
+    /// Never an utterance itself.
+    UserInterim {
+        token: u64,
+        text: String,
+    },
     /// The user's words as soon as they are transcribed, for hosts that show
     /// the conversation as it happens. `live_event` stays authoritative.
     UserTranscribed {

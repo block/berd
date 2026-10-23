@@ -324,6 +324,18 @@ Expert-Spokesperson sessions use `origin` to distinguish user transcripts,
 Spokesperson transcripts, and handoffs. User finals interrupt reserved or playing
 assistant output only after storage and emission. Final text is at most 64 KiB.
 
+Conventional sessions on macOS also emit the user's words while they are still
+being transcribed:
+
+```text
+{"type":"user_interim","token":u64,"text":string}
+```
+
+Each `user_interim` replaces the previous one, and empty text clears it.
+`token` is the token the next user final will take, so a reply composed against
+interim words is still current once they finalize. The message is never stored,
+never allocates a token, and never interrupts output.
+
 Expert-Spokesperson sessions also emit two previews for hosts that show the
 conversation as it happens:
 
