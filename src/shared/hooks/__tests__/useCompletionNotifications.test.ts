@@ -3,6 +3,7 @@ import type React from "react";
 import { isValidElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  FOCUS_STATE_SEED_TIMEOUT_MS,
   getCompletionOutcome,
   getNotificationBody,
   useCompletionNotifications,
@@ -186,6 +187,7 @@ describe("useCompletionNotifications", () => {
       }),
     );
     mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn().mockResolvedValue(vi.fn()),
       unminimize: vi.fn().mockResolvedValue(undefined),
       show: vi.fn().mockResolvedValue(undefined),
@@ -214,6 +216,7 @@ describe("useCompletionNotifications", () => {
       | null = null;
 
     const appWindow = {
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn((handler) => {
         focusChanged = handler;
         return Promise.resolve(vi.fn());
@@ -278,6 +281,7 @@ describe("useCompletionNotifications", () => {
     let focusChanged: ((event: { payload: boolean }) => void) | null = null;
 
     mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn((handler) => {
         focusChanged = handler;
         return Promise.resolve(vi.fn());
@@ -357,6 +361,7 @@ describe("useCompletionNotifications", () => {
       ),
     );
     mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn((handler) => {
         focusChanged = handler;
         return Promise.resolve(vi.fn());
@@ -401,6 +406,7 @@ describe("useCompletionNotifications", () => {
         : Promise.resolve(undefined),
     );
     mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn((handler) => {
         focusChanged = handler;
         return Promise.resolve(vi.fn());
@@ -453,6 +459,7 @@ describe("useCompletionNotifications", () => {
         : Promise.resolve(undefined),
     );
     mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn((handler) => {
         focusChanged = handler;
         return Promise.resolve(vi.fn());
@@ -502,6 +509,7 @@ describe("useCompletionNotifications", () => {
     window.addEventListener("goose:open-settings", onOpenSettings);
 
     mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn((handler) => {
         focusChanged = handler;
         return Promise.resolve(vi.fn());
@@ -614,6 +622,7 @@ describe("useCompletionNotifications", () => {
     );
 
     mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn((handler) => {
         focusChanged = handler;
         return Promise.resolve(vi.fn());
@@ -660,6 +669,7 @@ describe("useCompletionNotifications", () => {
     );
 
     mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn((handler) => {
         focusChanged = handler;
         return Promise.resolve(vi.fn());
@@ -698,5 +708,248 @@ describe("useCompletionNotifications", () => {
         },
       ),
     );
+  });
+
+  it("routes to desktop delivery when the window starts unfocused before any focus event", async () => {
+    const onFocusChanged = vi.fn().mockResolvedValue(vi.fn());
+    mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(false),
+      onFocusChanged,
+      unminimize: vi.fn().mockResolvedValue(undefined),
+      show: vi.fn().mockResolvedValue(undefined),
+      setFocus: vi.fn().mockResolvedValue(undefined),
+    });
+
+    renderHook(() => useCompletionNotifications(vi.fn()));
+
+    // Wait for the focus listener registration so the isFocused seed has
+    // resolved too; no focus-change event is ever delivered in this test.
+    await waitFor(() => expect(onFocusChanged).toHaveBeenCalled());
+
+    useChatSessionStore.getState().addSession({
+      id: "session-4",
+      title: "Background start",
+      createdAt: "2026-06-05T00:00:00.000Z",
+      updatedAt: "2026-06-05T00:00:00.000Z",
+      messageCount: 1,
+    });
+    useChatStore.getState().setMessages("session-4", [makeMsg("completed")]);
+
+    act(() => {
+      useChatStore.getState().setChatState("session-4", "streaming");
+      useChatStore.getState().setChatState("session-4", "idle");
+    });
+
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        "show_completion_notification",
+        {
+          body: "Background start finished",
+          sessionId: "session-4",
+          sound: "berd-sounds-4.mp3",
+        },
+      ),
+    );
+  });
+
+  function makeAppWindow(isFocused: () => Promise<boolean>) {
+    let focusChanged: ((event: { payload: boolean }) => void) | null = null;
+    const onFocusChanged = vi.fn((handler) => {
+      focusChanged = handler;
+      return Promise.resolve(vi.fn());
+    });
+    mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn(isFocused),
+      onFocusChanged,
+      unminimize: vi.fn().mockResolvedValue(undefined),
+      show: vi.fn().mockResolvedValue(undefined),
+      setFocus: vi.fn().mockResolvedValue(undefined),
+    });
+    return {
+      onFocusChanged,
+      fireFocusChanged: (payload: boolean) => focusChanged?.({ payload }),
+    };
+  }
+
+  function completeSession(sessionId: string, title: string) {
+    useChatSessionStore.getState().addSession({
+      id: sessionId,
+      title,
+      createdAt: "2026-06-05T00:00:00.000Z",
+      updatedAt: "2026-06-05T00:00:00.000Z",
+      messageCount: 1,
+    });
+    useChatStore.getState().setMessages(sessionId, [makeMsg("completed")]);
+    act(() => {
+      useChatStore.getState().setChatState(sessionId, "streaming");
+      useChatStore.getState().setChatState(sessionId, "idle");
+    });
+  }
+
+  it("defers a completion finishing before the focus query settles, then delivers exactly one desktop notification", async () => {
+    const focusQuery = deferred<boolean>();
+    const { onFocusChanged } = makeAppWindow(() => focusQuery.promise);
+
+    renderHook(() => useCompletionNotifications(vi.fn()));
+    await waitFor(() => expect(onFocusChanged).toHaveBeenCalled());
+
+    completeSession("session-defer", "Deferred start");
+
+    // The query is still pending: delivery must be buffered, not routed with
+    // the placeholder focused default.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.invoke).not.toHaveBeenCalledWith(
+      "show_completion_notification",
+      expect.anything(),
+    );
+    expect(mocks.toast).not.toHaveBeenCalled();
+
+    focusQuery.resolve(false);
+
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        "show_completion_notification",
+        {
+          body: "Deferred start finished",
+          sessionId: "session-defer",
+          sound: "berd-sounds-4.mp3",
+        },
+      ),
+    );
+    const desktopCalls = mocks.invoke.mock.calls.filter(
+      ([command]) => command === "show_completion_notification",
+    );
+    expect(desktopCalls).toHaveLength(1);
+    expect(mocks.toast).not.toHaveBeenCalled();
+  });
+
+  it("delivers a desktop notification for an actively viewed session completing before the focus query settles in an unfocused window", async () => {
+    const focusQuery = deferred<boolean>();
+    const { onFocusChanged } = makeAppWindow(() => focusQuery.promise);
+
+    renderHook(() => useCompletionNotifications(vi.fn()));
+    await waitFor(() => expect(onFocusChanged).toHaveBeenCalled());
+
+    // The user is "viewing" this session, but the window is actually
+    // backgrounded — the hook must not drop the completion based on the
+    // placeholder focused default before the query settles.
+    useChatStore.setState({
+      activeSessionId: "session-viewed",
+      isViewingActiveSession: true,
+    });
+    completeSession("session-viewed", "Viewed background");
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.invoke).not.toHaveBeenCalledWith(
+      "show_completion_notification",
+      expect.anything(),
+    );
+
+    focusQuery.resolve(false);
+
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        "show_completion_notification",
+        {
+          body: "Viewed background finished",
+          sessionId: "session-viewed",
+          sound: "berd-sounds-4.mp3",
+        },
+      ),
+    );
+    const desktopCalls = mocks.invoke.mock.calls.filter(
+      ([command]) => command === "show_completion_notification",
+    );
+    expect(desktopCalls).toHaveLength(1);
+    expect(mocks.toast).not.toHaveBeenCalled();
+  });
+
+  it("lets a focus event that arrives before the query settles win over the stale query result", async () => {
+    const focusQuery = deferred<boolean>();
+    const { onFocusChanged, fireFocusChanged } = makeAppWindow(
+      () => focusQuery.promise,
+    );
+
+    renderHook(() => useCompletionNotifications(vi.fn()));
+    await waitFor(() => expect(onFocusChanged).toHaveBeenCalled());
+
+    // Fresh event: the window lost focus after mount, before the (stale)
+    // query reported it as focused.
+    act(() => {
+      fireFocusChanged(false);
+    });
+    focusQuery.resolve(true);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    completeSession("session-race", "Event wins");
+
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        "show_completion_notification",
+        {
+          body: "Event wins finished",
+          sessionId: "session-race",
+          sound: "berd-sounds-4.mp3",
+        },
+      ),
+    );
+    expect(mocks.toast).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the default focus state when the focus query rejects", async () => {
+    const { onFocusChanged } = makeAppWindow(() =>
+      Promise.reject(new Error("focus query failed")),
+    );
+    mocks.toast.mockReturnValue("toast-id");
+
+    renderHook(() => useCompletionNotifications(vi.fn()));
+    await waitFor(() => expect(onFocusChanged).toHaveBeenCalled());
+
+    completeSession("session-reject", "Query rejected");
+
+    // Rejection releases buffered completions with the focused default: the
+    // in-app toast path, exactly once.
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledTimes(1));
+    expect(mocks.invoke).not.toHaveBeenCalledWith(
+      "show_completion_notification",
+      expect.anything(),
+    );
+  });
+
+  it("releases buffered completions after the bounded fallback when the focus query never settles", async () => {
+    const { onFocusChanged } = makeAppWindow(
+      () => new Promise<boolean>(() => {}),
+    );
+    mocks.toast.mockReturnValue("toast-id");
+
+    // Fake timers must be active before mount so the bounded-fallback timer
+    // itself is controllable.
+    vi.useFakeTimers();
+    try {
+      renderHook(() => useCompletionNotifications(vi.fn()));
+      // Flush the dynamic import microtasks so the listener registers.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onFocusChanged).toHaveBeenCalled();
+
+      completeSession("session-timeout", "Hung query");
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.toast).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(FOCUS_STATE_SEED_TIMEOUT_MS);
+      expect(mocks.toast).toHaveBeenCalledTimes(1);
+      expect(mocks.invoke).not.toHaveBeenCalledWith(
+        "show_completion_notification",
+        expect.anything(),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
