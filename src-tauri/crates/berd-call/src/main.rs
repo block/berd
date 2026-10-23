@@ -2917,6 +2917,8 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
 enum LivePlaybackInput {
     Samples(Vec<f32>),
     Finish,
+    #[cfg(test)]
+    Checkpoint(SyncSender<()>),
 }
 
 type LivePlaybackResult = Result<(String, u64), (String, u64, String)>;
@@ -4019,7 +4021,7 @@ fn run_expert_spokesperson_session(
                                 }
                                 // The worker has stopped; its result settles this reply.
                                 Err(mpsc::TrySendError::Disconnected(_)) => {}
-                                Err(mpsc::TrySendError::Full(LivePlaybackInput::Finish)) => {
+                                Err(mpsc::TrySendError::Full(_)) => {
                                     unreachable!("streaming sends samples")
                                 }
                             },
@@ -5554,6 +5556,10 @@ fn spawn_live_playback(
             let mut loudness = berd_call::SpokespersonLoudness::default();
             while let Ok(input) = receiver.recv() {
                 match input {
+                    #[cfg(test)]
+                    LivePlaybackInput::Checkpoint(reached) => {
+                        reached.send(()).unwrap();
+                    }
                     LivePlaybackInput::Samples(mut samples) => {
                         loudness.process(&mut samples);
                         worker_output.write(&samples)?;
@@ -5734,6 +5740,9 @@ fn cancel_live_playback(active: &mut Option<LivePlayback>) {
     if let Some(playback) = active.as_ref() {
         playback.active.store(false, Ordering::SeqCst);
         playback.output.notify_cancel_requested();
+        // The worker may be waiting for provider input instead of an output acknowledgement.
+        // A full queue already wakes it; its next write observes the cancelled authority.
+        let _ = playback.sender.try_send(LivePlaybackInput::Finish);
     }
 }
 
@@ -5918,7 +5927,7 @@ fn flush_active_live_playback(
                 response.pending_frames = 0;
                 return Ok(());
             }
-            Err(mpsc::TrySendError::Full(LivePlaybackInput::Finish)) => {
+            Err(mpsc::TrySendError::Full(_)) => {
                 unreachable!("audio queue contains samples")
             }
         }
@@ -5930,7 +5939,7 @@ fn flush_active_live_playback(
                 mpsc::TrySendError::Full(LivePlaybackInput::Finish)
                 | mpsc::TrySendError::Disconnected(_),
             ) => {}
-            Err(mpsc::TrySendError::Full(LivePlaybackInput::Samples(_))) => {
+            Err(mpsc::TrySendError::Full(_)) => {
                 unreachable!("finish queue contains finish")
             }
         }
@@ -10293,6 +10302,75 @@ mod tests {
         let mut payload = vec![0; length];
         reader.read_exact(&mut payload).unwrap();
         (header[3], payload)
+    }
+
+    #[test]
+    fn live_cancel_wakes_a_worker_waiting_for_more_provider_audio() {
+        for tail_frames in [0, 1, session_audio::MAX_AUDIO_CHUNK_FRAMES - 1] {
+            let (child, mut host) = UnixStream::pair().unwrap();
+            host.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+            let transport =
+                Arc::new(unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap());
+            let (control, _controls) = mpsc::channel();
+            let (completed, results) = mpsc::channel();
+            let playback =
+                spawn_live_playback("response".into(), 7, None, transport, control, completed)
+                    .unwrap();
+            assert_eq!(
+                read_audio_record(&mut host).0,
+                session_audio::AUDIO_BEGIN_KIND
+            );
+            playback
+                .output
+                .handle_ack(AudioHostAck::BeginAccepted)
+                .unwrap();
+            playback
+                .sender
+                .send(LivePlaybackInput::Samples(
+                    vec![0.1; session_audio::MAX_AUDIO_CHUNK_FRAMES],
+                ))
+                .unwrap();
+            assert_eq!(
+                read_audio_record(&mut host).0,
+                session_audio::AUDIO_CHUNK_KIND
+            );
+            playback
+                .output
+                .handle_ack(AudioHostAck::ChunkAccepted { sequence: 1 })
+                .unwrap();
+            if tail_frames > 0 {
+                playback
+                    .sender
+                    .send(LivePlaybackInput::Samples(vec![0.2; tail_frames]))
+                    .unwrap();
+            }
+            let (checkpoint, reached) = mpsc::sync_channel(0);
+            playback
+                .sender
+                .send(LivePlaybackInput::Checkpoint(checkpoint))
+                .unwrap();
+            reached.recv_timeout(Duration::from_secs(1)).unwrap();
+            let mut active = Some(playback);
+            cancel_live_playback(&mut active);
+            assert_eq!(
+                read_audio_record(&mut host).0,
+                session_audio::AUDIO_CANCEL_KIND
+            );
+            active
+                .as_ref()
+                .unwrap()
+                .output
+                .handle_ack(AudioHostAck::Cancelled { played_frames: 0 })
+                .unwrap();
+            assert_eq!(
+                results
+                    .recv_timeout(Duration::from_secs(1))
+                    .unwrap()
+                    .unwrap_err()
+                    .2,
+                session_audio::AUDIO_CANCELLED
+            );
+        }
     }
 
     #[test]
