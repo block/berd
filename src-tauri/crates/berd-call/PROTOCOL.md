@@ -383,7 +383,7 @@ ID and speech ID when it is ready to accept output:
 Before emitting `accepted`, the child installs the admitted speech's leased
 assistant-activity guard. `suppress_input` stops PCM admission so user input
 cannot interrupt the speech; `allow_barge_in` continues PCM admission with the
-assistant-sensitive VAD threshold. `accepted` transfers output authority. The
+same VAD threshold. `accepted` transfers output authority. The
 child then writes Begin and waits for `audio_begin_accepted` before delivering
 PCM. Readiness is bounded to two seconds; expiry emits `speech_failed` with zero output. With `allow_barge_in`, speaking or recognition pending provisionally suspends started output. If both clear without a final, the same speech and player resume. A final, targeted cancellation, host mute/reset while provisionally suspended, pause, or shutdown discards the hold and interrupts exactly once.
 Accepted output owns exactly one assistant-activity guard. The child removes

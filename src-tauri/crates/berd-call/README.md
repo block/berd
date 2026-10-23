@@ -334,7 +334,7 @@ updates keep the prior configuration, and private credentials, endpoints, and
 bundle paths never enter the snapshot.
 
 The session also projects a separately revisioned `input_during_tts` snapshot.
-`allow_barge_in` keeps PCM flowing through assistant-sensitive VAD, while
+`allow_barge_in` keeps PCM flowing through the same VAD threshold, while
 `suppress_input` drops PCM at the shared runtime for the admitted utterance.
 Live policy updates apply to the next admission; host mute remains an
 independent reason, so neither state can accidentally clear the other.
