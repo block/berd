@@ -754,6 +754,9 @@ struct PendingRecognitions {
     ambiguous: bool,
     /// Where each unresolved turn's speech ended, oldest first; None while it continues.
     ends: VecDeque<Option<u64>>,
+    /// Where the furthest final so far ended, since one can arrive before its turn ends.
+    #[cfg(any(target_os = "macos", test))]
+    final_end: Option<u64>,
     /// Apple's latest result was interim words rather than a final. Apple
     /// re-reports words a final left out, and interim results end where its
     /// audio does rather than at the last word, so order says more than samples.
@@ -794,10 +797,18 @@ impl PendingRecognitions {
     }
 
     #[cfg(any(target_os = "macos", test))]
-    fn end_turn(&mut self, speech_end: u64) {
+    fn end_turn(
+        &mut self,
+        events: &tokio_mpsc::Sender<VoiceInputEvent>,
+        speech_end: u64,
+    ) -> Result<(), ()> {
         if let Some(end @ None) = self.ends.back_mut() {
             *end = Some(speech_end);
         }
+        for _ in 0..self.final_end.map_or(0, |end| self.covered(end)) {
+            self.resolve(events)?;
+        }
+        Ok(())
     }
 
     /// Ended turns, oldest first, whose speech a final ending at `end` covers.
@@ -1555,6 +1566,7 @@ fn forward_mac_events(
                 // can produce several finals, so a final with an end resolves
                 // exactly the turns it covers. Without one it resolves the oldest.
                 pending.unfinalized = false;
+                pending.final_end = pending.final_end.max(end);
                 for _ in 0..end.map_or(1, |end| pending.covered(end)) {
                     pending.resolve(events)?;
                 }
@@ -1774,11 +1786,17 @@ fn mac_speech_worker(
                         in_speech = false;
                         // Pushed audio runs slightly ahead of the detector, which
                         // only delays coverage.
-                        pending.end_turn(
-                            recognized.saturating_sub(
-                                (SILENCE_FLUSH_FRAMES * VAD_FRAME_SAMPLES * 3) as u64,
-                            ),
-                        );
+                        if pending
+                            .end_turn(
+                                &events,
+                                recognized.saturating_sub(
+                                    (SILENCE_FLUSH_FRAMES * VAD_FRAME_SAMPLES * 3) as u64,
+                                ),
+                            )
+                            .is_err()
+                        {
+                            return;
+                        }
                         end_mac_turn(
                             &pending,
                             &mut settle_deadline,
@@ -3950,7 +3968,7 @@ mod tests {
         // One sentence split by two pauses, then a turn the final does not reach.
         for end in [48_000, 96_000, 200_000] {
             begin_mac_turn(&mut pending, &event_tx, &mut deadline).unwrap();
-            pending.end_turn(end);
+            pending.end_turn(&event_tx, end).unwrap();
             end_mac_turn(&pending, &mut deadline, Instant::now(), timeout);
         }
         let (native_tx, mut native_rx) = tokio_mpsc::unbounded_channel();
@@ -3987,7 +4005,7 @@ mod tests {
         // Apple finalizes the first phrase while the user is still speaking.
         native_tx.send(final_at(50_000)).unwrap();
         forward_mac_events(&mut native_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
-        pending.end_turn(200_000);
+        pending.end_turn(&event_tx, 200_000).unwrap();
         end_mac_turn(
             &pending,
             &mut deadline,
@@ -4005,16 +4023,44 @@ mod tests {
         assert!(deadline.is_none());
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_final_before_its_turn_ends_releases_the_hold_when_it_does() {
+        let (event_tx, _event_rx) = tokio_mpsc::channel(16);
+        let mut pending = PendingRecognitions::new();
+        let mut deadline = None;
+        let (native_tx, mut native_rx) = tokio_mpsc::unbounded_channel();
+        begin_mac_turn(&mut pending, &event_tx, &mut deadline).unwrap();
+        // Apple finalizes the turn before the detector has heard enough silence to end it.
+        native_tx
+            .send(crate::mac_speech::MacSpeechRecognitionEvent::Final(
+                "words".into(),
+                Some(100_000),
+            ))
+            .unwrap();
+        forward_mac_events(&mut native_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
+        assert_eq!(pending.blocking, 1);
+        pending.end_turn(&event_tx, 105_000).unwrap();
+        end_mac_turn(
+            &pending,
+            &mut deadline,
+            Instant::now(),
+            Duration::from_secs(5),
+        );
+        assert_eq!((pending.count, pending.blocking), (0, 0));
+        assert!(deadline.is_none());
+    }
+
     #[test]
     fn finals_cover_only_ended_turns_in_order() {
         let (event_tx, _event_rx) = tokio_mpsc::channel(4);
         let mut pending = PendingRecognitions::new();
         pending.begin(&event_tx).unwrap();
-        pending.end_turn(10_000);
+        pending.end_turn(&event_tx, 10_000).unwrap();
         pending.begin(&event_tx).unwrap();
         assert_eq!(pending.covered(1_000_000), 1);
-        pending.end_turn(50_000);
-        pending.end_turn(1);
+        pending.end_turn(&event_tx, 50_000).unwrap();
+        pending.end_turn(&event_tx, 1).unwrap();
         assert_eq!(pending.covered(50_000 - FINAL_COVERAGE_SLACK_SAMPLES), 2);
         assert_eq!(pending.covered(49_999 - FINAL_COVERAGE_SLACK_SAMPLES), 1);
         pending.resolve(&event_tx).unwrap();
@@ -4032,7 +4078,7 @@ mod tests {
         // Two sentences: the first final arrives, the second takes longer than the timeout.
         for end in [100_000, 300_000] {
             begin_mac_turn(&mut pending, &event_tx, &mut deadline).unwrap();
-            pending.end_turn(end);
+            pending.end_turn(&event_tx, end).unwrap();
             end_mac_turn(&pending, &mut deadline, now, timeout);
         }
         let (native_tx, mut native_rx) = tokio_mpsc::unbounded_channel();
@@ -4074,7 +4120,7 @@ mod tests {
         // results end where Apple's audio did, past the final's last word.
         for end in [100_000, 300_000] {
             begin_mac_turn(&mut pending, &event_tx, &mut deadline).unwrap();
-            pending.end_turn(end);
+            pending.end_turn(&event_tx, end).unwrap();
             end_mac_turn(&pending, &mut deadline, now, timeout);
         }
         let (native_tx, mut native_rx) = tokio_mpsc::unbounded_channel();
