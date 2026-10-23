@@ -432,7 +432,7 @@ CC BY 4.0, as reflected by the crate's aggregate package-license metadata.
 Input is paced in real time as exact 960-sample frames every 20 ms. Each clip
 has one second of leading silence and 6.5 seconds of trailing silence. The long
 tail deliberately keeps continuous recognizers supplied with capture-like PCM
-through VAD settlement and the runtime's five-second live no-result bound; it
+through VAD settlement and the runtime's five-second pending-utterance timeout; it
 is included in the reported workload. A final transcript is validated and
 stored in its per-utterance result before its storage receipt is acknowledged,
 and the next clip does not begin until authoritative speaking and

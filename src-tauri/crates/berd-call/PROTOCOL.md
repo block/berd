@@ -301,6 +301,17 @@ The child emits:
 {"type":"live_event","token":u64,"text":string,"origin"?:"user"|"spokesperson"|"handoff"}
 ```
 
+On macOS, `recognition_pending.active` reports the agent speech admission hold, not
+the count of unresolved native recognitions. After local speech ends the hold
+expires after five seconds without a final. Expiry emits
+`recognition_pending.active:false` without cancelling recognition, clearing audio,
+or changing the recognizer generation, so a late final is still forwarded as a
+`live_event`. New speech reasserts the hold. Native finals carry no utterance
+identity, so a final first resolves the oldest hold credit, which may be an expired
+one. Credit accounting is capped at 1024; at the cap attribution stays ambiguous
+until the recognizer resets, and finals still forward but only the timeout
+releases the hold.
+
 For every final live-side event, the child allocates a strictly increasing token,
 stores it in `SessionCore`, acknowledges the runtime storage receipt, and emits
 `live_event`. Conventional sessions omit `origin`, which means `user`.
