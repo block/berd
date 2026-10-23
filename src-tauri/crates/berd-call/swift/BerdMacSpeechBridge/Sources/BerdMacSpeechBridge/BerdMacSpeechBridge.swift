@@ -8,8 +8,9 @@ private let finalEvent: Int32 = 1
 private let finishedEvent: Int32 = 2
 private let failedEvent: Int32 = 3
 
+// The Double is where a final's audio ends, in seconds of pushed input, or NaN.
 public typealias BerdMacSpeechEventCallback = @convention(c) (
-    Int32, UnsafePointer<CChar>?, UnsafeMutableRawPointer?
+    Int32, UnsafePointer<CChar>?, Double, UnsafeMutableRawPointer?
 ) -> Void
 public typealias BerdMacSpeechProgressCallback = @convention(c) (
     Double, UnsafeMutableRawPointer?
@@ -308,7 +309,8 @@ private final class SpeechSession: @unchecked Sendable {
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !text.isEmpty else { continue }
                         guard result.isFinal else { continue }
-                        self.emit(finalEvent, text: text)
+                        let end = result.range.end
+                        self.emit(finalEvent, text: text, end: end.isNumeric ? end.seconds : .nan)
                     }
                     self?.taskCompleted()
                 } catch is CancellationError { self?.taskCompleted() }
@@ -417,11 +419,11 @@ private final class SpeechSession: @unchecked Sendable {
         Task.detached { [analyzer] in await analyzer.cancelAndFinishNow() }
     }
 
-    private func emit(_ event: Int32, text: String? = nil) {
+    private func emit(_ event: Int32, text: String? = nil, end: Double = .nan) {
         lock.withLock {
             guard callbacksEnabled, !terminalEmitted else { return }
-            if let text { text.withCString { callback(event, $0, context.pointer) } }
-            else { callback(event, nil, context.pointer) }
+            if let text { text.withCString { callback(event, $0, end, context.pointer) } }
+            else { callback(event, nil, end, context.pointer) }
         }
     }
 
@@ -429,7 +431,7 @@ private final class SpeechSession: @unchecked Sendable {
         let emitted = lock.withLock {
             guard callbacksEnabled, !terminalEmitted else { return false }
             terminalEmitted = true
-            error.localizedDescription.withCString { callback(failedEvent, $0, context.pointer) }
+            error.localizedDescription.withCString { callback(failedEvent, $0, .nan, context.pointer) }
             return true
         }
         if emitted { completion.signal() }
@@ -444,7 +446,7 @@ private final class SpeechSession: @unchecked Sendable {
             completedTasks += 1
             guard completedTasks == 2, callbacksEnabled, !terminalEmitted else { return false }
             terminalEmitted = true
-            callback(finishedEvent, nil, context.pointer)
+            callback(finishedEvent, nil, .nan, context.pointer)
             return true
         }
         if emitted { completion.signal() }

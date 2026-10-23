@@ -23,7 +23,8 @@ pub struct MacSpeechEngineStatus {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum MacSpeechRecognitionEvent {
-    Final(String),
+    /// A final result and where its audio ends, in 48 kHz samples of pushed input.
+    Final(String, Option<u64>),
     Finished,
     Failed(String),
 }
@@ -43,7 +44,7 @@ unsafe extern "C" {
     fn berd_macos_stt_create(
         locale: *const c_char,
         hints_json: *const c_char,
-        event: Option<unsafe extern "C" fn(i32, *const c_char, *mut c_void)>,
+        event: Option<unsafe extern "C" fn(i32, *const c_char, f64, *mut c_void)>,
         context: *mut c_void,
         error_out: *mut *mut c_char,
     ) -> *mut c_void;
@@ -156,9 +157,17 @@ struct RecognitionContext {
     events: mpsc::UnboundedSender<MacSpeechRecognitionEvent>,
 }
 
-fn map_recognition_event(code: i32, text: Option<String>) -> Option<MacSpeechRecognitionEvent> {
+fn map_recognition_event(
+    code: i32,
+    text: Option<String>,
+    end_seconds: f64,
+) -> Option<MacSpeechRecognitionEvent> {
     match code {
-        1 => Some(MacSpeechRecognitionEvent::Final(text.unwrap_or_default())),
+        1 => Some(MacSpeechRecognitionEvent::Final(
+            text.unwrap_or_default(),
+            (end_seconds.is_finite() && end_seconds >= 0.0)
+                .then(|| (end_seconds * 48_000.0).round() as u64),
+        )),
         2 => Some(MacSpeechRecognitionEvent::Finished),
         3 => Some(MacSpeechRecognitionEvent::Failed(text.unwrap_or_else(
             || "macOS speech recognition failed.".to_string(),
@@ -167,14 +176,19 @@ fn map_recognition_event(code: i32, text: Option<String>) -> Option<MacSpeechRec
     }
 }
 
-unsafe extern "C" fn recognition_event(code: i32, text: *const c_char, context: *mut c_void) {
+unsafe extern "C" fn recognition_event(
+    code: i32,
+    text: *const c_char,
+    end_seconds: f64,
+    context: *mut c_void,
+) {
     if context.is_null() {
         return;
     }
     let context = unsafe { &*context.cast::<RecognitionContext>() };
     let text =
         (!text.is_null()).then(|| unsafe { CStr::from_ptr(text).to_string_lossy().into_owned() });
-    if let Some(event) = map_recognition_event(code, text) {
+    if let Some(event) = map_recognition_event(code, text, end_seconds) {
         let _ = context.events.send(event);
     }
 }
@@ -286,20 +300,27 @@ mod tests {
     #[test]
     fn native_event_codes_map_without_provider_types_escaping() {
         assert_eq!(
-            map_recognition_event(1, Some("hello".to_string())),
-            Some(MacSpeechRecognitionEvent::Final("hello".to_string()))
+            map_recognition_event(1, Some("hello".to_string()), 1.5),
+            Some(MacSpeechRecognitionEvent::Final(
+                "hello".to_string(),
+                Some(72_000)
+            ))
         );
         assert_eq!(
-            map_recognition_event(2, None),
+            map_recognition_event(1, Some("hello".to_string()), f64::NAN),
+            Some(MacSpeechRecognitionEvent::Final("hello".to_string(), None))
+        );
+        assert_eq!(
+            map_recognition_event(2, None, f64::NAN),
             Some(MacSpeechRecognitionEvent::Finished)
         );
         assert_eq!(
-            map_recognition_event(3, None),
+            map_recognition_event(3, None, f64::NAN),
             Some(MacSpeechRecognitionEvent::Failed(
                 "macOS speech recognition failed.".to_string()
             ))
         );
-        assert_eq!(map_recognition_event(99, None), None);
+        assert_eq!(map_recognition_event(99, None, f64::NAN), None);
     }
 
     #[test]
@@ -320,12 +341,53 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "runs on-device macOS speech recognition over `say` output"]
+    fn final_end_is_measured_on_the_pushed_audio_timeline() {
+        let path = std::env::temp_dir().join("berd-call-final-end.wav");
+        let status = std::process::Command::new("say")
+            .args(["--data-format=LEF32@48000", "-o"])
+            .arg(&path)
+            .arg("The quick brown fox jumps over the lazy dog.")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let wav = std::fs::read(&path).unwrap();
+        let data = wav.windows(4).position(|w| w == b"data").unwrap() + 8;
+        let speech: Vec<f32> = wav[data..]
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect();
+        let lead = vec![0.0; 48_000];
+        let (mut recognizer, mut events) = MacSpeechRecognizer::new().unwrap();
+        for part in [&lead, &speech, &lead] {
+            for chunk in part.chunks(960) {
+                recognizer.push_48khz_mono_f32(chunk).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
+        recognizer.finish().unwrap();
+        let mut ends = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            if let MacSpeechRecognitionEvent::Final(_, end) = event {
+                ends.push(end.unwrap());
+            }
+        }
+        let (start, stop) = (lead.len() as u64, (lead.len() + speech.len()) as u64);
+        let last = *ends.last().expect("a final");
+        // Apple ends a final about 0.3 s after the last sound.
+        assert!(
+            last > start && last <= stop + 24_000,
+            "{ends:?} not within {start}..{stop}"
+        );
+    }
+
+    #[test]
     fn callback_is_safe_after_the_event_receiver_is_dropped() {
         let (events, receiver) = mpsc::unbounded_channel();
         drop(receiver);
         let context = Box::into_raw(Box::new(RecognitionContext { events }));
         let text = CString::new("ignored").unwrap();
-        unsafe { recognition_event(1, text.as_ptr(), context.cast()) };
+        unsafe { recognition_event(1, text.as_ptr(), f64::NAN, context.cast()) };
         unsafe { drop(Box::from_raw(context)) };
     }
 

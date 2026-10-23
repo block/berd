@@ -307,8 +307,10 @@ expires after five seconds without a final. Expiry emits
 `recognition_pending.active:false` without cancelling recognition, clearing audio,
 or changing the recognizer generation, so a late final is still forwarded as a
 `live_event`. New speech reasserts the hold. Native finals carry no utterance
-identity, so a final first resolves the oldest hold credit, which may be an expired
-one. Credit accounting is capped at 1024; at the cap attribution stays ambiguous
+identity, so each final carries the end of its audio and resolves the ended speech
+turns that audio covers, oldest first, which may include expired ones. A final for
+an earlier phrase of a turn still being spoken resolves nothing, and a final with no
+end resolves the oldest turn. Credit accounting is capped at 1024; at the cap attribution stays ambiguous
 until the recognizer resets, and finals still forward but only the timeout
 releases the hold.
 
