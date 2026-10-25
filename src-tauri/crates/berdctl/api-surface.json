@@ -6,7 +6,7 @@
       "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, notify, open, list, get, rename, move, move to group, clear project, send to a live voice Spokesperson, dismiss voice handoffs, fork, archive.",
       "actions": {
         "create": {
-          "description": "Create a new chat session on any installed agent harness and send the prompt in it. Fire-and-forget: returns the session id immediately and the session runs in the background without changing what the user sees; the user can open it themselves. Use --from to give the delegating session or tool a concise visible label on the initial message. Only check on it later (action \"get\") if the user asks.",
+          "description": "Create a new chat session on any installed agent harness and send the prompt in it. Fire-and-forget: returns the session id immediately and the session runs in the background without changing what the user sees; the user can open it themselves. Use --from to give the delegating session or tool a concise visible label on the initial message. Use --auto-mode-id to select a configured Goose Auto mode explicitly; no parent or active UI session selection is inferred. Only check on it later (action \"get\") if the user asks.",
           "fields": [
             {
               "name": "prompt",
@@ -27,6 +27,13 @@
               "required": false,
               "kind": "string",
               "description": "Id of the model to use (from `berdctl info models`)."
+            },
+            {
+              "name": "auto_mode_id",
+              "required": false,
+              "kind": "string",
+              "description": "Configured Goose Auto mode id (from `berdctl info models --harness-id goose`). Routes each fresh prompt; cannot combine with --model-id or a non-Goose harness. With --agent-id, keeps persona instructions while Auto selects the model.",
+              "min": 1
             },
             {
               "name": "agent_id",
@@ -74,6 +81,11 @@
               "model_id": {
                 "description": "Id of the model to use (from `berdctl info models`).",
                 "type": "string"
+              },
+              "auto_mode_id": {
+                "description": "Configured Goose Auto mode id (from `berdctl info models --harness-id goose`). Routes each fresh prompt; cannot combine with --model-id or a non-Goose harness. With --agent-id, keeps persona instructions while Auto selects the model.",
+                "type": "string",
+                "minLength": 1
               },
               "agent_id": {
                 "description": "Id of the agent (persona) to use (from `berdctl agent list`).",
@@ -1336,7 +1348,7 @@
           }
         },
         "list_models": {
-          "description": "List the models available per agent harness (same source as the app's model picker); omit harness_id to cover every ready harness in one call. Use a model_id (and its harness_id) when creating a session.",
+          "description": "List the models available per agent harness (same source as the app's model picker); omit harness_id to cover every ready harness in one call. Goose also lists configured Auto modes separately in auto_modes. Use --auto-mode-id for those ids, or --model-id for a concrete model when creating a session.",
           "fields": [
             {
               "name": "harness_id",

@@ -128,6 +128,7 @@ export function sessionMetadata(session: ChatSession) {
     harness_id: session.executionTarget?.harnessId ?? "goose",
     model_id: session.executionTarget?.modelId ?? null,
     agent_id: session.personaId ?? null,
+    auto_mode_id: session.autoModeId ?? null,
     project_id: session.projectId ?? null,
     working_dir: session.workingDir ?? null,
     created_at: session.createdAt,

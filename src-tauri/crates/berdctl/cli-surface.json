@@ -8,7 +8,7 @@
         "create": {
           "action": "create",
           "about": "Create a new chat session and send a prompt in it (fire-and-forget)",
-          "afterHelp": "Examples:\n  berdctl session create --prompt \"Triage the failing nightly build\" \\\n    --harness-id claude-acp --from \"the release orchestrator\" --json\n  berdctl session create --prompt \"Implement the fix\" \\\n    --project-id <project-id> --startup-name my-feature\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"harness_id\": \"...\",\n   \"send_status\": \"dispatched\"}\n  The session runs in the background; the user's view does not change. Check\n  progress later with `berdctl session get --session-id <session_id>`."
+          "afterHelp": "Examples:\n  berdctl session create --prompt \"Triage the failing nightly build\" \\\n    --harness-id claude-acp --from \"the release orchestrator\" --json\n  berdctl session create --prompt \"Implement the fix\" \\\n    --project-id <project-id> --startup-name my-feature\n\n  berdctl session create --prompt \"Investigate\" \\\n    --harness-id goose --auto-mode-id <configured-mode-id> --json\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"harness_id\": \"...\",\n   \"auto_mode_id\": \"...\"|null, \"send_status\": \"dispatched\"}\n  The session runs in the background; the user's view does not change. Check\n  progress later with `berdctl session get --session-id <session_id>`."
         },
         "send": {
           "action": "send",
@@ -33,7 +33,7 @@
         "get": {
           "action": "get",
           "about": "Read one session's metadata and optionally its latest messages",
-          "afterHelp": "Example:\n  berdctl session get --session-id <session-id> --messages 5 --json\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"harness_id\": \"...\",\n   \"model_id\": \"...\"|null, \"agent_id\": \"...\"|null,\n   \"project_id\": \"...\"|null, \"working_dir\": \"...\"|null,\n   \"created_at\": \"...\", \"updated_at\": \"...\", \"archived\": false,\n   \"is_running\": false, \"is_open_in_window\": false,\n   \"chat_state\": \"idle\", \"message_count\": 12,\n   \"messages\": [{\"role\": \"user\"|\"assistant\"|null, \"text\": \"...\"}, ...]}\n  \"messages\" is present only when --messages > 0; each message text is\n  truncated to 2000 chars."
+          "afterHelp": "Example:\n  berdctl session get --session-id <session-id> --messages 5 --json\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"harness_id\": \"...\",\n   \"model_id\": \"...\"|null, \"agent_id\": \"...\"|null, \"auto_mode_id\": \"...\"|null,\n   \"project_id\": \"...\"|null, \"working_dir\": \"...\"|null,\n   \"created_at\": \"...\", \"updated_at\": \"...\", \"archived\": false,\n   \"is_running\": false, \"is_open_in_window\": false,\n   \"chat_state\": \"idle\", \"message_count\": 12,\n   \"messages\": [{\"role\": \"user\"|\"assistant\"|null, \"text\": \"...\"}, ...]}\n  \"messages\" is present only when --messages > 0; each message text is\n  truncated to 2000 chars."
         },
         "rename": {
           "action": "rename",
@@ -198,7 +198,7 @@
         "models": {
           "action": "list_models",
           "about": "List the models available per agent harness",
-          "afterHelp": "Example:\n  berdctl info models --harness-id goose --json\n\nResult:\n  {\"harnesses\": [{\"harness_id\": \"...\",\n                  \"models\": [{\"model_id\": \"...\", \"name\": \"...\",\n                              \"provider\": \"...\"?}],\n                  \"warning\": \"...\"?}]}\n  Use a model_id (with its harness) as --model-id when creating a session.\n  \"warning\" appears when a stale cached list was served or when the harness\n  manages its model outside the app."
+          "afterHelp": "Example:\n  berdctl info models --harness-id goose --json\n\nResult:\n  {\"harnesses\": [{\"harness_id\": \"...\",\n                  \"models\": [{\"model_id\": \"...\", \"name\": \"...\",\n                              \"provider\": \"...\"?}],\n                  \"auto_modes\": [{\"id\": \"...\", \"name\": \"...\", \"is_default\": true}]?,\n                  \"warning\": \"...\"?}]}\n  Use a model_id (with its harness) as --model-id when creating a session.\n  Goose auto_modes ids are not model ids; pass one as --auto-mode-id to route\n  each fresh prompt. auto_modes is omitted for non-Goose harnesses.\n  \"warning\" appears when a stale cached list was served or when the harness\n  manages its model outside the app."
         },
         "context": {
           "action": "get_context",
