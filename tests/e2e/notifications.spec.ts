@@ -12,64 +12,33 @@ import { buildInitScript } from "./fixtures/tauri-mock";
 
 declare global {
   interface Window {
-    __NOTIFY_E2E__: {
-      shown: Array<{ body?: string; sessionId?: string; sound?: unknown }>;
-      focused: boolean;
-      blurListeners: number;
-    };
     __GOOSE_E2E__: {
       emitTauriEvent: (event: string, payload: unknown) => void;
+      getWindowFocused: () => boolean;
+      setWindowFocused: (focused: boolean) => void;
+      shownCompletionNotifications: () => Array<{
+        body?: string;
+        sessionId?: string;
+        sound?: unknown;
+      }>;
+      tauriEventListenerCount: (event: string) => number;
       holdPrompt: (sessionId: string) => void;
       releasePrompt: (sessionId: string) => void;
     };
   }
 }
 
-/**
- * Wraps the mocked Tauri invoke to capture notification commands and answer
- * the window-focus seed query deterministically.
- */
-function notificationCaptureScript(options: { initialFocused: boolean }) {
-  return `
-    (() => {
-      window.__NOTIFY_E2E__ = {
-        shown: [],
-        focused: ${options.initialFocused},
-        blurListeners: 0,
-      };
-      const original = window.__TAURI_INTERNALS__.invoke.bind(
-        window.__TAURI_INTERNALS__,
-      );
-      window.__TAURI_INTERNALS__.invoke = (cmd, args) => {
-        if (cmd === "show_completion_notification") {
-          window.__NOTIFY_E2E__.shown.push(args ?? {});
-          return Promise.resolve(null);
-        }
-        if (cmd === "should_suppress_completion_notification") {
-          return Promise.resolve(false);
-        }
-        if (cmd === "plugin:window|is_focused") {
-          return Promise.resolve(window.__NOTIFY_E2E__.focused);
-        }
-        if (cmd === "plugin:event|listen" && args?.event === "tauri://blur") {
-          window.__NOTIFY_E2E__.blurListeners += 1;
-        }
-        return original(cmd, args);
-      };
-    })();
-  `;
-}
-
 const test = base.extend<{
   notifyPage: Page;
-  initialFocused: boolean;
+  windowFocused: boolean | undefined;
   notificationPrefs: Record<string, unknown> | null;
 }>({
-  initialFocused: [true, { option: true }],
+  windowFocused: [undefined, { option: true }],
   notificationPrefs: [null, { option: true }],
-  notifyPage: async ({ page, initialFocused, notificationPrefs }, use) => {
+  notifyPage: async ({ page, windowFocused, notificationPrefs }, use) => {
     await page.addInitScript({
       content: buildInitScript({
+        ...(windowFocused === undefined ? {} : { windowFocused }),
         // The default inventory configures only "claude" while the mocked
         // _goose/defaults/read reports "openai", which trips the
         // provider-setup-required home and disables the composer. Supply a
@@ -104,9 +73,6 @@ const test = base.extend<{
         ],
       }),
     });
-    await page.addInitScript({
-      content: notificationCaptureScript({ initialFocused }),
-    });
     if (notificationPrefs) {
       await page.addInitScript(
         (prefs) =>
@@ -130,7 +96,11 @@ async function waitForHome(page: Page) {
 /** Wait until the hook's focus listener is registered so a blur event lands. */
 async function waitForFocusListener(page: Page) {
   await expect
-    .poll(() => page.evaluate(() => window.__NOTIFY_E2E__.blurListeners))
+    .poll(() =>
+      page.evaluate(() =>
+        window.__GOOSE_E2E__.tauriEventListenerCount("tauri://blur"),
+      ),
+    )
     .toBeGreaterThan(0);
 }
 
@@ -141,12 +111,49 @@ async function sendPromptFromHome(page: Page, text: string) {
 }
 
 function shownNotifications(page: Page) {
-  return page.evaluate(() => window.__NOTIFY_E2E__.shown);
+  return page.evaluate(() =>
+    window.__GOOSE_E2E__.shownCompletionNotifications(),
+  );
+}
+
+function queryMockedWindowFocus(page: Page) {
+  return page.evaluate(() =>
+    (
+      window.__TAURI_INTERNALS__ as {
+        invoke: (command: string, args?: unknown) => Promise<boolean>;
+      }
+    ).invoke("plugin:window|is_focused", { label: "main" }),
+  );
 }
 
 test.describe("completion notification delivery (simulated Tauri)", () => {
+  test("shared Tauri mock reports focused by default", async ({
+    notifyPage: page,
+  }) => {
+    await page.goto("/");
+
+    await expect.poll(() => queryMockedWindowFocus(page)).toBe(true);
+    expect(
+      await page.evaluate(() => window.__GOOSE_E2E__.getWindowFocused()),
+    ).toBe(true);
+  });
+
+  test("shared Tauri mock can switch focus to false", async ({
+    notifyPage: page,
+  }) => {
+    await page.goto("/");
+    await waitForHome(page);
+    await waitForFocusListener(page);
+
+    await page.evaluate(() => window.__GOOSE_E2E__.setWindowFocused(false));
+
+    await expect.poll(() => queryMockedWindowFocus(page)).toBe(false);
+    expect(
+      await page.evaluate(() => window.__GOOSE_E2E__.getWindowFocused()),
+    ).toBe(false);
+  });
   test.describe("window starts backgrounded (seeded focus state)", () => {
-    test.use({ initialFocused: false });
+    test.use({ windowFocused: false });
 
     test("routes a completion to native delivery exactly once with session metadata", async ({
       notifyPage: page,
@@ -179,7 +186,7 @@ test.describe("completion notification delivery (simulated Tauri)", () => {
     });
     await sendPromptFromHome(page, "background me");
     await page.evaluate(() => {
-      window.__GOOSE_E2E__.emitTauriEvent("tauri://blur", null);
+      window.__GOOSE_E2E__.setWindowFocused(false);
       window.__GOOSE_E2E__.releasePrompt("*");
     });
 
@@ -225,7 +232,7 @@ test.describe("completion notification delivery (simulated Tauri)", () => {
 
   test.describe("notifications disabled", () => {
     test.use({
-      initialFocused: false,
+      windowFocused: false,
       notificationPrefs: { enabled: false },
     });
 

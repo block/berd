@@ -34,6 +34,7 @@ export function buildInitScript(options?: {
     lines: string[];
     errorMessage: string;
   };
+  windowFocused?: boolean;
 }): string {
   const personas = JSON.stringify(options?.personas ?? MOCK_PERSONAS);
   const skills = JSON.stringify(options?.skills ?? MOCK_SKILLS);
@@ -119,6 +120,7 @@ export function buildInitScript(options?: {
       const PROVIDER_CATALOG = ${providerCatalog};
       const PROVIDER_INVENTORY = ${providerInventory};
       const AGENT_SETUP_FAILURE = ${agentSetupFailure};
+      let windowFocused = ${JSON.stringify(options?.windowFocused ?? true)};
       const DISTRO = {
         present: false,
         kgooseConfigured: false,
@@ -292,6 +294,7 @@ export function buildInitScript(options?: {
       })();
       const SKILL_SOURCES = SKILLS.map(skillToSourceEntry);
       const POCKET_VOICE_SPOKEN_TEXTS = [];
+      const SHOWN_COMPLETION_NOTIFICATIONS = [];
 
       // sessionId -> { promise, resolve } used to keep a session/prompt turn
       // open until a test explicitly releases it.
@@ -330,6 +333,14 @@ export function buildInitScript(options?: {
           }
         },
         emitTauriEvent,
+        getWindowFocused: () => windowFocused,
+        setWindowFocused: (focused) => {
+          windowFocused = focused;
+          emitTauriEvent(focused ? "tauri://focus" : "tauri://blur", null);
+        },
+        shownCompletionNotifications: () =>
+          clone(SHOWN_COMPLETION_NOTIFICATIONS),
+        tauriEventListenerCount: (event) => EVENT_LISTENERS.get(event)?.size ?? 0,
         pocketVoiceSpokenTexts: () => clone(POCKET_VOICE_SPOKEN_TEXTS),
       };
 
@@ -877,6 +888,13 @@ export function buildInitScript(options?: {
               });
             case "list_session_windows":
               return Promise.resolve([]);
+            case "plugin:window|is_focused":
+              return Promise.resolve(windowFocused);
+            case "show_completion_notification":
+              SHOWN_COMPLETION_NOTIFICATIONS.push(args ?? {});
+              return Promise.resolve(null);
+            case "should_suppress_completion_notification":
+              return Promise.resolve(false);
             case "plugin:window|is_fullscreen":
               return Promise.resolve(false);
             case "plugin:window|set_min_size":
