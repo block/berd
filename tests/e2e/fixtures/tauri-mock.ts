@@ -34,6 +34,7 @@ export function buildInitScript(options?: {
     lines: string[];
     errorMessage: string;
   };
+  windowFocused?: boolean;
 }): string {
   const personas = JSON.stringify(options?.personas ?? MOCK_PERSONAS);
   const skills = JSON.stringify(options?.skills ?? MOCK_SKILLS);
@@ -119,6 +120,7 @@ export function buildInitScript(options?: {
       const PROVIDER_CATALOG = ${providerCatalog};
       const PROVIDER_INVENTORY = ${providerInventory};
       const AGENT_SETUP_FAILURE = ${agentSetupFailure};
+      let windowFocused = ${JSON.stringify(options?.windowFocused ?? true)};
       const DISTRO = {
         present: false,
         kgooseConfigured: false,
@@ -292,8 +294,27 @@ export function buildInitScript(options?: {
       })();
       const SKILL_SOURCES = SKILLS.map(skillToSourceEntry);
       const POCKET_VOICE_SPOKEN_TEXTS = [];
+      const SHOWN_COMPLETION_NOTIFICATIONS = [];
+      const COMPLETED_PROMPT_SESSION_IDS = [];
+
+      // sessionId -> { promise, resolve } used to keep a session/prompt turn
+      // open until a test explicitly releases it.
+      const PROMPT_HOLDS = new Map();
 
       window.__GOOSE_E2E__ = {
+        completedPromptSessionIds: () => clone(COMPLETED_PROMPT_SESSION_IDS),
+        holdPrompt: (sessionId) => {
+          let resolve;
+          const promise = new Promise((r) => {
+            resolve = r;
+          });
+          PROMPT_HOLDS.set(sessionId, { promise, resolve });
+        },
+        releasePrompt: (sessionId) => {
+          const hold = PROMPT_HOLDS.get(sessionId);
+          PROMPT_HOLDS.delete(sessionId);
+          hold?.resolve();
+        },
         listAgentSources: () => clone(AGENT_SOURCES),
         clearAgentSources: () => {
           AGENT_SOURCES = PERSONAS.map(personaToSourceEntry);
@@ -314,6 +335,14 @@ export function buildInitScript(options?: {
           }
         },
         emitTauriEvent,
+        getWindowFocused: () => windowFocused,
+        setWindowFocused: (focused) => {
+          windowFocused = focused;
+          emitTauriEvent(focused ? "tauri://focus" : "tauri://blur", null);
+        },
+        shownCompletionNotifications: () =>
+          clone(SHOWN_COMPLETION_NOTIFICATIONS),
+        tauriEventListenerCount: (event) => EVENT_LISTENERS.get(event)?.size ?? 0,
         pocketVoiceSpokenTexts: () => clone(POCKET_VOICE_SPOKEN_TEXTS),
       };
 
@@ -478,6 +507,15 @@ export function buildInitScript(options?: {
                 model: "gpt-4.1",
               };
               persistAgentSources();
+            }
+            const holdRelease =
+              PROMPT_HOLDS.get(message.params?.sessionId) ??
+              PROMPT_HOLDS.get("*");
+            if (holdRelease) {
+              // A test asked to hold this turn open; resolve when released.
+              return holdRelease.promise.then(() =>
+                jsonRpcResult(message.id, { stopReason: "end_turn" }),
+              );
             }
             return jsonRpcResult(message.id, { stopReason: "end_turn" });
           }
@@ -649,12 +687,19 @@ export function buildInitScript(options?: {
           if (!response) {
             return;
           }
-          queueMicrotask(() => {
+          // Responses may be promises (e.g. a held session/prompt) so tests
+          // can control when an agent turn finishes.
+          Promise.resolve(response).then((resolved) => {
+            if (!resolved) return;
             this.dispatchEvent(
               new MessageEvent("message", {
-                data: JSON.stringify(response),
+                data: JSON.stringify(resolved),
               }),
             );
+            // Record only completed turns whose end_turn response was delivered.
+            if (message.method === "session/prompt" && resolved.result?.stopReason === "end_turn") {
+              COMPLETED_PROMPT_SESSION_IDS.push(message.params.sessionId);
+            }
           });
         }
 
@@ -849,6 +894,13 @@ export function buildInitScript(options?: {
               });
             case "list_session_windows":
               return Promise.resolve([]);
+            case "plugin:window|is_focused":
+              return Promise.resolve(windowFocused);
+            case "show_completion_notification":
+              SHOWN_COMPLETION_NOTIFICATIONS.push(args ?? {});
+              return Promise.resolve(null);
+            case "should_suppress_completion_notification":
+              return Promise.resolve(false);
             case "plugin:window|is_fullscreen":
               return Promise.resolve(false);
             case "plugin:window|set_min_size":
