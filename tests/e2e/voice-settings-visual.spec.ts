@@ -23,6 +23,64 @@ async function openVoiceSettings(page: Page) {
   ).toBeVisible();
 }
 
+test("Siri picker uses catalog labels and alphabetical order", async ({
+  page,
+}) => {
+  await page.addInitScript({
+    content: buildInitScript({
+      enabledExperiments: ["voice-conversation"],
+      siriVoiceStatus: {
+        supported: true,
+        availableLanguages: ["en-US"],
+        selectedVoice: { name: "en-US-F", language: "en-US" },
+        selectedVoiceInstalled: true,
+        playbackSpeed: 1,
+        voices: [
+          {
+            name: "en-US-F",
+            displayName: "Zack",
+            language: "en-US",
+            sizeBytes: 1,
+            installed: true,
+          },
+          {
+            name: "en-US-G",
+            displayName: "Evan",
+            language: "en-US",
+            sizeBytes: 1,
+            installed: false,
+          },
+        ],
+      },
+    }),
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem("goose:voice-conversation-mode", "chained");
+    localStorage.setItem("goose:voice-input-backend", "macos");
+    localStorage.setItem("goose:voice-output-backend", "siri");
+  });
+  await openVoiceSettings(page);
+  await page.getByRole("button", { name: "Choose a voice: Zack" }).click();
+  await expect(
+    page.getByRole("button", { name: "Download Evan" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Preview Zack" }),
+  ).toBeVisible();
+  const rows = page.locator('[data-testid^="siri-voice-"]');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toHaveAttribute(
+    "data-testid",
+    "siri-voice-en-us-g|en-us",
+  );
+  await expect(rows.nth(1)).toHaveAttribute(
+    "data-testid",
+    "siri-voice-en-us-f|en-us",
+  );
+  await expect(page.getByText("en-US-F", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("en-US-G", { exact: true })).toHaveCount(0);
+});
+
 test("captures consistent voice controls for each backend", async ({
   settings: page,
 }, testInfo) => {
