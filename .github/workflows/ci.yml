@@ -39,6 +39,9 @@ jobs:
         run: pnpm --filter @aaif/goose-sdk build
 
       - name: Run frontend checks
+        # TypeScript's full-program check exceeds Node's 2 GiB runner default.
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: just check
 
       - name: Run unit tests
