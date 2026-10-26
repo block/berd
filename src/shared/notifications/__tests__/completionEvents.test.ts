@@ -7,7 +7,7 @@ import {
 } from "../completionEvents";
 
 describe("createCompletionNotificationEvent", () => {
-  it("derives the per-emission id from the session and emission moment", () => {
+  it("assigns distinct IDs to same-session events with the same timestamp", () => {
     const first = createCompletionNotificationEvent({
       sessionId: "session-1",
       outcome: "completed",
@@ -27,8 +27,10 @@ describe("createCompletionNotificationEvent", () => {
       occurredAtMs: 1_750_000_000_000,
     });
 
-    expect(first.id).toBe(duplicate.id);
+    expect(first.id).not.toBe(duplicate.id);
     expect(first.id).not.toBe(other.id);
+    expect(first.occurredAt).toBe(duplicate.occurredAt);
+    expect(first.occurredAt).toBe(new Date(1_750_000_000_000).toISOString());
   });
 
   it("carries session, project, outcome, and navigation references", () => {

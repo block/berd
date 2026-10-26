@@ -32,11 +32,11 @@ export type NotificationNavigationTarget = SessionNavigationTarget;
 
 export interface CompletionNotificationEvent {
   /**
-   * Renderer-emission identifier: unique per emitted event within this
-   * renderer process (`completion:<sessionId>:<emission ms>`). It is NOT a
-   * durable identity — it is minted at emission time, so the same underlying
-   * completion re-observed later (or in another process) gets a different id.
-   * Consumers may use it to key UI lists, not to deduplicate across restarts.
+   * Renderer-emission identifier: unique per event within this renderer
+   * process. It is NOT a durable identity — it is minted at emission time, so
+   * the same underlying completion re-observed later (or in another process)
+   * gets a different id. Consumers may use it to key UI lists, not to
+   * deduplicate across restarts.
    */
   id: string;
   sessionId: string;
@@ -49,6 +49,9 @@ export interface CompletionNotificationEvent {
   occurredAt: string;
   navigation: NotificationNavigationTarget;
 }
+
+// This renderer-local sequence disambiguates events emitted in the same ms.
+let nextCompletionEventSequence = 0;
 
 export function createCompletionNotificationEvent({
   sessionId,
@@ -63,8 +66,9 @@ export function createCompletionNotificationEvent({
   body: string;
   occurredAtMs: number;
 }): CompletionNotificationEvent {
+  nextCompletionEventSequence += 1;
   return {
-    id: `completion:${sessionId}:${occurredAtMs}`,
+    id: `completion:${sessionId}:${occurredAtMs}:${nextCompletionEventSequence}`,
     sessionId,
     projectId: projectId ?? null,
     outcome,

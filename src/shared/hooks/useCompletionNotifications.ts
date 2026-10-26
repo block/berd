@@ -214,6 +214,7 @@ export function useCompletionNotifications(
               prev === "thinking")
           ) {
             pendingSessions.delete(sessionId);
+            const occurredAtMs = Date.now();
 
             const chatStoreState = useChatStore.getState();
             const isViewingThisSession = isSessionActivelyViewed(
@@ -259,7 +260,7 @@ export function useCompletionNotifications(
                     projectId: session?.projectId ?? null,
                     outcome,
                     body,
-                    occurredAtMs: Date.now(),
+                    occurredAtMs,
                   }),
                 );
                 if (!windowFocused) {
