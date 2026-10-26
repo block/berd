@@ -295,12 +295,14 @@ export function buildInitScript(options?: {
       const SKILL_SOURCES = SKILLS.map(skillToSourceEntry);
       const POCKET_VOICE_SPOKEN_TEXTS = [];
       const SHOWN_COMPLETION_NOTIFICATIONS = [];
+      const COMPLETED_PROMPT_SESSION_IDS = [];
 
       // sessionId -> { promise, resolve } used to keep a session/prompt turn
       // open until a test explicitly releases it.
       const PROMPT_HOLDS = new Map();
 
       window.__GOOSE_E2E__ = {
+        completedPromptSessionIds: () => clone(COMPLETED_PROMPT_SESSION_IDS),
         holdPrompt: (sessionId) => {
           let resolve;
           const promise = new Promise((r) => {
@@ -694,6 +696,10 @@ export function buildInitScript(options?: {
                 data: JSON.stringify(resolved),
               }),
             );
+            // Record only completed turns whose end_turn response was delivered.
+            if (message.method === "session/prompt" && resolved.result?.stopReason === "end_turn") {
+              COMPLETED_PROMPT_SESSION_IDS.push(message.params.sessionId);
+            }
           });
         }
 

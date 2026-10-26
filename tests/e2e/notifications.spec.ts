@@ -22,6 +22,7 @@ declare global {
         sound?: unknown;
       }>;
       tauriEventListenerCount: (event: string) => number;
+      completedPromptSessionIds: () => string[];
       holdPrompt: (sessionId: string) => void;
       releasePrompt: (sessionId: string) => void;
     };
@@ -108,6 +109,26 @@ async function sendPromptFromHome(page: Page, text: string) {
   const input = page.getByRole("textbox", { name: "Start a conversation" });
   await input.fill(text);
   await input.press("Enter");
+}
+
+/** Require a delivered end_turn and the renderer leaving its running state. */
+async function completePrompt(page: Page, text: string) {
+  await page.evaluate(() => window.__GOOSE_E2E__.holdPrompt("*"));
+  await sendPromptFromHome(page, text);
+  const stop = page.getByRole("button", {
+    name: "Stop generation",
+    exact: true,
+  });
+  await expect(stop).toBeVisible();
+  await page.evaluate(() => window.__GOOSE_E2E__.releasePrompt("*"));
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => window.__GOOSE_E2E__.completedPromptSessionIds()),
+      { message: "mocked turn delivered its end_turn completion" },
+    )
+    .toHaveLength(1);
+  await expect(stop).toHaveCount(0);
 }
 
 function shownNotifications(page: Page) {
@@ -222,9 +243,9 @@ test.describe("completion notification delivery (simulated Tauri)", () => {
   }) => {
     await page.goto("/");
     await waitForHome(page);
-    await sendPromptFromHome(page, "watching this one");
+    await completePrompt(page, "watching this one");
 
-    // Give delivery routing time to (incorrectly) fire if it were going to.
+    // After proven completion, allow delayed delivery routing to fire if broken.
     await page.waitForTimeout(1500);
     await expect(page.getByText(/finished$/)).toHaveCount(0);
     expect(await shownNotifications(page)).toHaveLength(0);
@@ -241,7 +262,7 @@ test.describe("completion notification delivery (simulated Tauri)", () => {
     }) => {
       await page.goto("/");
       await waitForHome(page);
-      await sendPromptFromHome(page, "disabled background");
+      await completePrompt(page, "disabled background");
 
       await page.waitForTimeout(1500);
       expect(await shownNotifications(page)).toHaveLength(0);
