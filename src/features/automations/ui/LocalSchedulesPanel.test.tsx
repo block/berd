@@ -241,6 +241,9 @@ describe("LocalSchedulesPanel", () => {
   });
 
   it("surfaces a backend rejection and retains the user's draft", async () => {
+    vi.mocked(listLocalSchedules)
+      .mockResolvedValueOnce([schedule])
+      .mockResolvedValueOnce([{ ...schedule, cron: "0 10 * * 1-5" }]);
     vi.mocked(updateLocalScheduleCron).mockRejectedValue({
       message: "Update failed",
       data: "schedule rejected",
@@ -280,6 +283,7 @@ describe("LocalSchedulesPanel", () => {
       .mockResolvedValueOnce({ ...schedule, cron: "0 11 * * 1-5" });
     vi.mocked(listLocalSchedules)
       .mockResolvedValueOnce([schedule])
+      .mockResolvedValueOnce([schedule])
       .mockResolvedValueOnce([{ ...schedule, cron: "0 11 * * 1-5" }]);
     renderPanel();
 
@@ -298,6 +302,9 @@ describe("LocalSchedulesPanel", () => {
       screen.getByLabelText("Cron expression for weekday-report"),
       { target: { value: "0 11 * * 1-5" } },
     );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(updateLocalScheduleCron).toHaveBeenCalledTimes(2),
@@ -313,7 +320,9 @@ describe("LocalSchedulesPanel", () => {
     );
     input = screen.getByLabelText("Cron expression for weekday-report");
     fireEvent.change(input, { target: { value: "0 10 * * 1-5" } });
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled(),
+    );
   });
 
   it("shows the scheduler error when the first local-schedule request fails", async () => {
