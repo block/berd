@@ -412,7 +412,9 @@ export function NavigationPanesView({
         settingsSections={visibleSettingsSections}
         showBottomMask={showBottomMask}
         showTopMask={showTopMask}
-        showAutomationsSurface={capabilities.automations}
+        showAutomationsSurface={
+          capabilities.automations || capabilities.localSchedules
+        }
         showBuilderbotSurface={capabilities.builderbot}
         showSecondaryBottomMask={showSecondaryBottomMask}
         width={width}

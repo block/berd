@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { listLocalSchedules } from "@/features/automations/api/localSchedules";
 import {
   createAutomationTile,
   deleteAutomationTile,
@@ -32,6 +33,12 @@ if (!HTMLElement.prototype.hasPointerCapture) {
 if (!HTMLElement.prototype.scrollIntoView) {
   HTMLElement.prototype.scrollIntoView = () => {};
 }
+
+vi.mock("@/features/automations/api/localSchedules", () => ({
+  LOCAL_SCHEDULES_QUERY_KEY: ["local-goose-schedules"],
+  LOCAL_SCHEDULES_REFETCH_INTERVAL_MS: 15_000,
+  listLocalSchedules: vi.fn().mockResolvedValue([]),
+}));
 
 vi.mock("@/features/automations/api/kgooseAutomations", () => ({
   getAutomationTiles: vi.fn(),
@@ -68,12 +75,14 @@ vi.mock("@/features/automations/ui/AutomationBuilderView", () => ({
 }));
 
 function renderAutomationsView(props?: {
+  companyAutomationsEnabled?: boolean;
   route?: AutomationNavigationRoute;
   onRouteChange?: (
     route: AutomationNavigationRoute,
     options?: { replace?: boolean },
   ) => void;
 }) {
+  const { companyAutomationsEnabled = true, ...routeProps } = props ?? {};
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -84,7 +93,10 @@ function renderAutomationsView(props?: {
     <QueryClientProvider client={queryClient}>
       <TopBarActionsProvider>
         <TopBarActionsOutlet />
-        <AutomationsView {...props} />
+        <AutomationsView
+          {...routeProps}
+          companyAutomationsEnabled={companyAutomationsEnabled}
+        />
       </TopBarActionsProvider>
     </QueryClientProvider>,
   );
@@ -108,6 +120,7 @@ describe("AutomationsView", () => {
   beforeEach(() => {
     resetHomeWidgetStoreForTests();
     vi.clearAllMocks();
+    vi.mocked(listLocalSchedules).mockResolvedValue([]);
     vi.mocked(getAutomationTiles).mockResolvedValue({
       tiles: [
         {
@@ -234,6 +247,140 @@ describe("AutomationsView", () => {
     expect(screen.queryByText("Last status")).not.toBeInTheDocument();
     expect(screen.queryByText("Recent notifications")).not.toBeInTheDocument();
     expect(screen.getByText("Revenue was up.")).toBeInTheDocument();
+  });
+
+  it("shows local schedules without invoking company-managed automation APIs", async () => {
+    vi.mocked(listLocalSchedules).mockResolvedValue([
+      {
+        id: "local-daily-report",
+        source: "Daily report",
+        cron: "0 9 * * *",
+        paused: false,
+        currentlyRunning: false,
+      },
+    ]);
+    renderAutomationsView({ companyAutomationsEnabled: false });
+
+    expect(await screen.findByText("local-daily-report")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "View schedules configured in your local Goose instance.",
+      ),
+    ).toBeInTheDocument();
+    expect(getAutomationTiles).not.toHaveBeenCalled();
+    expect(getAutomationTile).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "History" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add automation" })).toBeNull();
+  });
+
+  it("stops company-query retries after capability revocation", async () => {
+    let rejectRequest!: (error: Error) => void;
+    vi.mocked(getAutomationTiles).mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectRequest = reject;
+        }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: true, retryDelay: 0 } },
+    });
+    const app = render(
+      <QueryClientProvider client={queryClient}>
+        <TopBarActionsProvider>
+          <TopBarActionsOutlet />
+          <AutomationsView companyAutomationsEnabled />
+        </TopBarActionsProvider>
+      </QueryClientProvider>,
+    );
+    expect(getAutomationTiles).toHaveBeenCalledOnce();
+
+    app.rerender(
+      <QueryClientProvider client={queryClient}>
+        <TopBarActionsProvider>
+          <TopBarActionsOutlet />
+          <AutomationsView companyAutomationsEnabled={false} />
+        </TopBarActionsProvider>
+      </QueryClientProvider>,
+    );
+    await act(async () => {
+      rejectRequest(new Error("company service unavailable"));
+      await Promise.resolve();
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    expect(getAutomationTiles).toHaveBeenCalledOnce();
+  });
+
+  it("clears company deletion confirmation when the company capability is revoked", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const app = render(
+      <QueryClientProvider client={queryClient}>
+        <TopBarActionsProvider>
+          <TopBarActionsOutlet />
+          <AutomationsView companyAutomationsEnabled />
+        </TopBarActionsProvider>
+      </QueryClientProvider>,
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    app.rerender(
+      <QueryClientProvider client={queryClient}>
+        <TopBarActionsProvider>
+          <TopBarActionsOutlet />
+          <AutomationsView companyAutomationsEnabled={false} />
+        </TopBarActionsProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(deleteAutomationTile).not.toHaveBeenCalled();
+  });
+
+  it("keeps company automations visible when the local scheduler fails", async () => {
+    vi.mocked(listLocalSchedules).mockRejectedValue(
+      new Error("scheduler disabled"),
+    );
+    renderAutomationsView();
+
+    expect(
+      await screen.findByText("Could not load Goose schedules"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Company-managed automations" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows Goose schedules with company automations in the same overview when enabled", async () => {
+    vi.mocked(listLocalSchedules).mockResolvedValue([
+      {
+        id: "local-daily-report",
+        source: "/tmp/scheduled_recipes/daily-report.yaml",
+        cron: "0 9 * * *",
+        paused: false,
+        currentlyRunning: false,
+      },
+    ]);
+    renderAutomationsView();
+
+    await screen.findByRole("button", { name: "Daily revenue digest" });
+    expect(await screen.findByText("Goose schedules")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Company-managed automations" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("local-daily-report")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Daily revenue digest" }),
+    ).toBeInTheDocument();
   });
 
   it("renders markdown emphasis in overview summaries", async () => {
@@ -1010,21 +1157,43 @@ describe("AutomationsView", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders kgoose access failures on the overview", async () => {
-    vi.mocked(getAutomationTiles).mockRejectedValue(
-      "Unable to reach the internal service. Please check that you're connected to Cloudflare WARP and try again.",
+  it("does not request company automations when that capability is disabled", async () => {
+    renderAutomationsView({ companyAutomationsEnabled: false });
+    await screen.findByText("No local schedules yet");
+    expect(getAutomationTiles).not.toHaveBeenCalled();
+    expect(getAutomationTile).not.toHaveBeenCalled();
+  });
+
+  it("requests company automations only when the company capability is enabled", async () => {
+    vi.mocked(getAutomationTiles).mockResolvedValue({
+      tiles: [
+        {
+          id: "automation-1",
+          title: "Daily revenue digest",
+          schedule: "0 9 * * *",
+        },
+      ],
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, retryDelay: 0 } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TopBarActionsProvider>
+          <TopBarActionsOutlet />
+          <AutomationsView />
+        </TopBarActionsProvider>
+      </QueryClientProvider>,
     );
 
-    renderAutomationsView();
-
     expect(
-      await screen.findByText("Automations failed to load"),
+      await screen.findByRole("heading", {
+        name: "Company-managed automations",
+      }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Unable to reach the internal service. Please check that you're connected to Cloudflare WARP and try again.",
-      ),
-    ).toBeInTheDocument();
+    expect(getAutomationTiles).toHaveBeenCalledOnce();
+    expect(getAutomationTile).not.toHaveBeenCalled();
+    expect(await screen.findByText("Daily revenue digest")).toBeInTheDocument();
   });
 
   it("edits a generic automation title", async () => {
