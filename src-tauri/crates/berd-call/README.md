@@ -176,6 +176,21 @@ Siri preflight validates the exact case-sensitive installed name, normalized
 BCP-47 language, and a responsive sirittsd availability query; later synthesis
 can still fail and is reported through the normal terminal speech lifecycle.
 
+## Claude Code plugin
+
+`berd-call plugin install claude-code` installs a Claude Code plugin at `~/.claude/skills/berd-call` (under `$CLAUDE_CONFIG_DIR` when set). It loads in every new session and has two parts: a skill that tells the agent how to use a call, and hooks that hold the agent that starts a call to answering it. `berd-call plugin uninstall claude-code` removes it. Neither command touches a directory of that name it didn't write, so remove an older hand-installed `berd-call` skill first.
+
+The plugin's files are embedded in the binary, and each `berd-call start` brings an installed copy up to the running version. Each hook runs `berd-call hook EVENT`, so the hook logic updates with the binary.
+
+A call's hooks act only for one agent session: the ID passed to `start --enable-hooks-for-session-id`, or else the `CLAUDE_CODE_SESSION_ID` of the Claude Code session that runs `start`. They pass through for other sessions, subagents, and calls started outside an agent. While they hold a session:
+
+- A tool call is refused while the user has said something the agent hasn't answered. The reason quotes the input and the `speak --re` (or `message-spokesperson`) command that answers it. Commands that run `berd-call` are never refused, so the agent can always answer, wait or stop.
+- Ending the turn is refused while input is unanswered, after tools with nothing said since, or, when neither `--stream` nor `--codex` delivers the transcript, at all: the agent is told to `wait-for-input` or `stop`.
+- A permission request is announced on the call, so the user knows to look at the screen. The request itself is left to Claude Code.
+- Prompts and tools report `working`, and an end of turn that is allowed, or held only to wait for input, reports `waiting`, for status sounds.
+
+Hooks reach the call on port 5222. A call on another port is reached by hooks run with `--port`.
+
 ## Synthesize to WAV
 
 `synthesize` renders through the same TTS backends without opening an audio device. It writes mono signed 16-bit little-endian PCM WAV to a new file:

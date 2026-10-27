@@ -26,6 +26,7 @@ use berd_call::protocol::{
 use berd_call::PocketAudioPlayer;
 
 use crate::codex::{self, CodexRecord, CodexRelay, CodexTarget};
+use crate::hooks::{HookBinding, HookEvent, Reply, UNHEARD};
 use crate::host_control::{ControlServer, HostControl};
 use crate::saved_settings;
 use crate::session_audio::{
@@ -47,6 +48,13 @@ const MAX_AUDIO_RECORD_BYTES: usize = 4096 * std::mem::size_of::<f32>() + 16;
 
 pub(crate) fn run(options: StartOptions) -> Result<(), String> {
     let server = ControlServer::bind(options.port)?;
+    let hooks = Arc::new(HookBinding::new(
+        options
+            .hook_session
+            .clone()
+            .or_else(crate::hooks::environment_session),
+        options.port,
+    ));
     let transcript = Arc::new(Transcript::for_options(&options)?);
     transcript.start()?;
     let non_blocking = Arc::new(AtomicBool::new(options.non_blocking));
@@ -84,6 +92,7 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
             &non_blocking,
             &stop_requested,
             &status_sounds,
+            &hooks,
         ) {
             Ok(None) => {
                 transcript.finish(CLEAN_STOP);
@@ -236,6 +245,7 @@ fn run_session(
     non_blocking: &Arc<AtomicBool>,
     stop_requested: &Arc<AtomicBool>,
     status_sounds: &Arc<Mutex<StatusSounds>>,
+    hooks: &Arc<HookBinding>,
 ) -> Result<Option<SessionStart>, String> {
     let SessionStart {
         saved,
@@ -258,6 +268,7 @@ fn run_session(
         non_blocking,
         stop_requested,
         status_sounds,
+        hooks,
         saved,
     );
     let StartedSession {
@@ -391,6 +402,7 @@ fn start_session(
     non_blocking: &Arc<AtomicBool>,
     stop_requested: &Arc<AtomicBool>,
     status_sounds: &Arc<Mutex<StatusSounds>>,
+    hooks: &Arc<HookBinding>,
     saved: Option<(std::path::PathBuf, crate::saved_settings::SavedSettings)>,
 ) -> Result<StartedSession, String> {
     let mut child = SessionProcess::spawn(arguments.clone())?;
@@ -482,6 +494,7 @@ fn start_session(
                 .iter()
                 .any(|argument| argument == crate::DIRECT_AGENT_SPEECH),
         session_arguments: arguments,
+        hooks: Arc::clone(hooks),
     });
     Ok(StartedSession {
         child,
@@ -619,9 +632,40 @@ struct SessionControl {
     // Whether the Expert may speak to the user rather than only through the Spokesperson.
     speaks: bool,
     session_arguments: Vec<String>,
+    hooks: Arc<HookBinding>,
 }
 
 impl SessionControl {
+    /// Tells the call whether the agent is working, unless it already knows.
+    fn report(&self, status: berd_call::ConversationStatus) {
+        if self
+            .status_sounds
+            .lock()
+            .is_ok_and(|sounds| sounds.status != Some(status))
+        {
+            let _ = self.request(|response| ControlCommand::StatusSounds {
+                mode: None,
+                status: Some(status),
+                response,
+            });
+        }
+    }
+
+    /// Says `text` to the user without waiting for it, as the agent would.
+    fn announce(&self, text: &str) {
+        let (response, _) = mpsc::sync_channel(1);
+        let _ = self.commands.send(ControlCommand::Speak {
+            text: text.into(),
+            acknowledgement: None,
+            resolved_handoff_ids: Vec::new(),
+            voice: None,
+            language: None,
+            relay: !self.speaks,
+            non_blocking: false,
+            response,
+        });
+    }
+
     fn restart_with(
         &self,
         session_arguments: Vec<String>,
@@ -936,8 +980,70 @@ impl HostControl for SessionControl {
                 response: tx,
             })
             .map_err(|_| "voice call is not running".to_string())?;
-        rx.recv()
-            .map_err(|_| "voice call stopped before speech completed".to_string())?
+        let result = rx
+            .recv()
+            .map_err(|_| "voice call stopped before speech completed".to_string())?;
+        if result.as_ref().is_ok_and(|value| {
+            matches!(
+                value["status"].as_str(),
+                Some("completed" | "interrupted" | "accepted")
+            )
+        }) {
+            self.hooks.worked.store(false, Ordering::SeqCst);
+        }
+        result
+    }
+
+    fn hook(
+        &self,
+        event: HookEvent,
+        session_id: &str,
+        subagent: bool,
+        call: bool,
+    ) -> Result<Value, String> {
+        if !self.hooks.holds(session_id, subagent) {
+            return Ok(json!({}));
+        }
+        let reply = Reply {
+            relays: !self.speaks,
+            port: self.hooks.port,
+        };
+        // Input the agent hasn't answered. If the session can't say in time, the hook lets the agent go on.
+        let unanswered = || {
+            self.poll_input(None, false, 1)
+                .ok()
+                .and_then(|poll| reply.unanswered(&poll))
+        };
+        let block = match event {
+            HookEvent::PromptSubmit | HookEvent::PostTool => {
+                self.report(berd_call::ConversationStatus::Working);
+                None
+            }
+            // Working the call itself is never refused, so the agent can always answer.
+            HookEvent::PreTool if call => None,
+            HookEvent::PreTool => {
+                self.hooks.worked.store(true, Ordering::SeqCst);
+                self.report(berd_call::ConversationStatus::Working);
+                unanswered()
+            }
+            HookEvent::Stop => unanswered()
+                .or_else(|| {
+                    self.hooks
+                        .worked
+                        .load(Ordering::SeqCst)
+                        .then(|| reply.unspoken())
+                })
+                .or_else(|| {
+                    self.report(berd_call::ConversationStatus::Waiting);
+                    (!self.transcript.delivers()).then(|| UNHEARD.to_string())
+                }),
+            HookEvent::PermissionRequest => {
+                self.report(berd_call::ConversationStatus::Waiting);
+                self.announce("I need you to review a permission request.");
+                None
+            }
+        };
+        Ok(block.map_or_else(|| json!({}), |reason| json!({ "block": reason })))
     }
 
     fn stop(&self) -> Result<Value, String> {
@@ -5582,6 +5688,110 @@ mod tests {
     }
 
     #[test]
+    fn hooks_hold_the_bound_session_to_answering_the_call() {
+        let (commands, receiver) = mpsc::sync_channel(8);
+        let input = Arc::new(Mutex::new(json!([])));
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let worker = {
+            let (input, seen) = (Arc::clone(&input), Arc::clone(&seen));
+            thread::spawn(move || {
+                while let Ok(command) = receiver.recv() {
+                    let mut seen = seen.lock().unwrap();
+                    match command {
+                        ControlCommand::PollInput {
+                            since: None,
+                            wait: false,
+                            response,
+                            ..
+                        } => {
+                            let utterances = input.lock().unwrap().clone();
+                            let _ = response.send(Ok(json!({
+                                "utterances": utterances, "cursor": 4,
+                                "unresolvedHandoffIds": [], "timedOut": false,
+                            })));
+                        }
+                        ControlCommand::StatusSounds {
+                            mode: None,
+                            status: Some(status),
+                            response,
+                        } => {
+                            seen.push(format!("{status:?}"));
+                            let _ = response.send(Ok(json!({})));
+                        }
+                        ControlCommand::Speak { text, response, .. } => {
+                            seen.push(text);
+                            let _ = response.send(Ok(json!({"spoke":true,"status":"completed"})));
+                        }
+                        _ => panic!("unexpected command"),
+                    }
+                }
+            })
+        };
+        let control = SessionControl {
+            commands,
+            running: Arc::new(AtomicBool::new(true)),
+            ready: ReadyState {
+                session: Arc::new(Mutex::new(test_snapshot())),
+            },
+            non_blocking: Arc::new(AtomicBool::new(false)),
+            stop_requested: Arc::new(AtomicBool::new(false)),
+            muted: Arc::new(AtomicBool::new(false)),
+            status_sounds: Arc::default(),
+            transcript: Arc::new(Transcript::Silent),
+            speaks: true,
+            session_arguments: vec!["session".into()],
+            hooks: Arc::new(HookBinding::new(Some("main".into()), 5222)),
+        };
+        let hook = |event, session, subagent, call| {
+            control.hook(event, session, subagent, call).unwrap()["block"]
+                .as_str()
+                .map(str::to_string)
+        };
+
+        // Other sessions and subagents go untouched.
+        assert_eq!(hook(HookEvent::PreTool, "other", false, false), None);
+        assert_eq!(hook(HookEvent::Stop, "main", true, false), None);
+        assert!(seen.lock().unwrap().is_empty());
+
+        *input.lock().unwrap() = json!([{"token": 4, "text": "check the build"}]);
+        let refused = hook(HookEvent::PreTool, "main", false, false).unwrap();
+        assert!(refused.contains("[4] check the build"));
+        assert!(refused.ends_with("berd-call speak --re 4 'REPLY'"));
+        // The agent can always answer.
+        assert_eq!(hook(HookEvent::PreTool, "main", false, true), None);
+        assert!(hook(HookEvent::Stop, "main", false, false)
+            .unwrap()
+            .contains("[4] check the build"));
+
+        *input.lock().unwrap() = json!([]);
+        assert_eq!(
+            hook(HookEvent::Stop, "main", false, false).as_deref(),
+            Some(Reply { relays: false, port: 5222 }.unspoken().as_str())
+        );
+        control
+            .speak("Done.".into(), Some(4), Vec::new(), None, None, false)
+            .unwrap();
+        // Nothing delivers the transcript, so the agent waits for input.
+        assert_eq!(
+            hook(HookEvent::Stop, "main", false, false).as_deref(),
+            Some(UNHEARD)
+        );
+        assert_eq!(hook(HookEvent::PermissionRequest, "main", false, false), None);
+        drop(control);
+        worker.join().unwrap();
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [
+                "Working",
+                "Done.",
+                "Waiting",
+                "Waiting",
+                "I need you to review a permission request.",
+            ]
+        );
+    }
+
+    #[test]
     fn stop_is_recorded_even_when_the_session_never_reads_it() {
         let (commands, receiver) = mpsc::sync_channel(1);
         let stop_requested = Arc::new(AtomicBool::new(false));
@@ -5598,6 +5808,7 @@ mod tests {
             transcript: Arc::new(Transcript::Silent),
             speaks: true,
             session_arguments: vec!["session".into()],
+            hooks: Arc::new(HookBinding::new(None, 5222)),
         };
         drop(receiver);
         assert_eq!(control.stop().unwrap(), json!({"stopping":true}));
@@ -5637,6 +5848,7 @@ mod tests {
                 ]
                 .map(str::to_string)
                 .to_vec(),
+                hooks: Arc::new(HookBinding::new(None, 5222)),
             };
             let worker = thread::spawn(move || match receiver.recv().unwrap() {
                 ControlCommand::Restart {
@@ -5725,6 +5937,7 @@ mod tests {
             ]
             .map(str::to_string)
             .to_vec(),
+            hooks: Arc::new(HookBinding::new(None, 5222)),
         };
         let worker = thread::spawn(move || match receiver.recv().unwrap() {
             ControlCommand::Restart {
@@ -5774,6 +5987,7 @@ mod tests {
             transcript: Arc::new(Transcript::Silent),
             speaks: false,
             session_arguments: vec!["session".into()],
+            hooks: Arc::new(HookBinding::new(None, 5222)),
         };
         let refusal = control
             .speak("Hello".into(), None, Vec::new(), None, None, false)
@@ -5813,6 +6027,7 @@ mod tests {
             transcript: Arc::new(Transcript::Silent),
             speaks: true,
             session_arguments: vec!["session".into()],
+            hooks: Arc::new(HookBinding::new(None, 5222)),
         };
         let worker = thread::spawn(move || match receiver.recv().unwrap() {
             ControlCommand::TtsSettings {
@@ -5857,6 +6072,7 @@ mod tests {
             transcript: Arc::new(Transcript::Silent),
             speaks: true,
             session_arguments: vec!["session".into()],
+            hooks: Arc::new(HookBinding::new(None, 5222)),
         };
         let worker = thread::spawn(move || match receiver.recv().unwrap() {
             ControlCommand::TtsSettings {
@@ -5906,6 +6122,7 @@ mod tests {
             transcript: Arc::new(Transcript::Silent),
             speaks: true,
             session_arguments: vec!["session".into()],
+            hooks: Arc::new(HookBinding::new(None, 5222)),
         };
         let refusal = control.set_spokesperson(None, Some(1.5)).unwrap_err();
         assert!(
@@ -5961,6 +6178,7 @@ mod tests {
                 transcript: Arc::new(Transcript::Silent),
                 speaks: true,
                 session_arguments: vec!["session".into()],
+                hooks: Arc::new(HookBinding::new(None, 5222)),
             };
             let worker = thread::spawn(move || {
                 receiver

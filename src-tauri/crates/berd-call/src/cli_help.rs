@@ -16,6 +16,10 @@ Call runtime:
   stop                    Stop the active local call
   session                 Run the host-facing framed voice-session protocol
 
+Agent harnesses:
+  plugin                  Install or remove the Claude Code plugin
+  hook                    Run one agent harness hook against the active call
+
 Speech and models:
   synthesize              Render text to a WAV file
   voices                  List, download, or preview Siri voices
@@ -35,7 +39,7 @@ const START_HELP: &str = r#"Run a local voice call backed by the shared session 
 
 Usage:
   berd-call start [--port PORT] [--stream [live] | --codex] [--non-blocking]
-    [--no-menu-bar]
+    [--no-menu-bar] [--enable-hooks-for-session-id ID]
     --voice NAME --language BCP47 [session options]
 
 The foreground process owns the default microphone and audio output. Session
@@ -47,6 +51,10 @@ row as it happens. `--codex` delivers the same batches as `--stream` to the
 calling Codex task (requires CODEX_THREAD_ID). A
 menu-bar item controls speech rate, input muting, and ending the call; pass
 `--no-menu-bar` to omit it.
+
+Hooks from `berd-call plugin` act only for the agent session the call is bound
+to: `--enable-hooks-for-session-id`, or else the CLAUDE_CODE_SESSION_ID of the
+Claude Code session that runs `start`. A call with neither holds no agent.
 
 Accepted voice, rate, and input policy settings are saved for the next call.
 Microphone mute is temporary; each new call starts unmuted. Explicit startup
@@ -137,6 +145,32 @@ const STOP_HELP: &str = r#"Stop the active local voice call.
 
 Usage:
   berd-call stop [--port PORT]"#;
+
+const PLUGIN_HELP: &str = r#"Install or remove the Claude Code plugin.
+
+Usage:
+  berd-call plugin install claude-code
+  berd-call plugin uninstall claude-code
+
+The plugin is a skill for using a call plus hooks that hold the session that
+starts one to answering it. It is written to $CLAUDE_CONFIG_DIR/skills/berd-call,
+or ~/.claude/skills/berd-call, and loads in new Claude Code sessions. Each
+`berd-call start` brings an installed plugin up to this version. Neither command
+touches a directory of that name it didn't write."#;
+
+const HOOK_HELP: &str = r#"Run one agent harness hook against the active call.
+
+Usage:
+  berd-call hook prompt-submit|pre-tool|post-tool|stop|permission-request
+    [--port PORT]
+
+The plugin runs this with the harness's hook payload on stdin and prints the
+call's decision. While the bound session has input it hasn't answered, a tool
+call is refused; ending the turn is also refused after tools with nothing said
+since, or while nothing delivers the transcript. Commands that run berd-call are
+never refused. A permission request is announced on the call. The hooks also
+report whether the agent is working, for status sounds. With no call running,
+or for any other session or a subagent, the hook does nothing."#;
 
 const SESSION_HELP: &str = r#"Run the host-facing framed voice-session protocol.
 
@@ -260,6 +294,8 @@ fn help_for(topic: &[&str]) -> Option<&'static str> {
         ["settings"] => Some(SETTINGS_HELP),
         ["stop"] => Some(STOP_HELP),
         ["session"] => Some(SESSION_HELP),
+        ["plugin"] | ["plugin", "install" | "uninstall"] => Some(PLUGIN_HELP),
+        ["hook"] => Some(HOOK_HELP),
         ["synthesize"] => Some(SYNTHESIZE_HELP),
         ["voices"] | ["voices", "list" | "download" | "preview"] => Some(VOICES_HELP),
         ["models"]
