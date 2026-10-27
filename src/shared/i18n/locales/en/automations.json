@@ -28,6 +28,26 @@
     "error": "Failed to duplicate automation.",
     "unsupportedType": "This automation type cannot be duplicated."
   },
+  "companyAutomations": {
+    "title": "Company-managed automations"
+  },
+  "localSchedules": {
+    "title": "Goose schedules",
+    "description": "Schedules run locally through this Goose instance.",
+    "sourceLabel": "Recipe file: {{name}}",
+    "hubTitle": "Automations",
+    "hubDescription": "View your local Goose schedules and company-managed automations.",
+    "hubLocalOnlyDescription": "View schedules configured in your local Goose instance.",
+    "loading": "Loading Goose schedules",
+    "loadErrorTitle": "Could not load Goose schedules",
+    "loadErrorDescription": "The local scheduler may be unavailable or Goose may not be connected.",
+    "refreshError": "Could not refresh schedules: {{error}}. Showing the last loaded list.",
+    "emptyTitle": "No local schedules yet",
+    "emptyBody": "Schedules you create in Goose will appear here. Use the Goose CLI or another Goose client to schedule and configure recipes.",
+    "paused": "Paused",
+    "running": "Running",
+    "lastRun": "Last run: {{time}}"
+  },
   "builder": {
     "blockedBody": "The last response wasn't a valid automation. Try rephrasing what you want.",
     "blockedTitle": "Automation rejected",
