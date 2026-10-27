@@ -48,7 +48,20 @@
     "unknownLastRun": "Desconocida",
     "paused": "En pausa",
     "running": "En ejecución",
-    "lastRun": "Última ejecución: {{time}}"
+    "lastRun": "Última ejecución: {{time}}",
+    "editCron": "Editar la expresion cron de {{id}}",
+    "cronLabel": "Expresion cron de {{id}}",
+    "cronHelp": "Usa cinco campos (minuto hora dia-del-mes mes dia-de-la-semana) o seis campos con segundos al inicio. Goose usa la zona horaria de este equipo; si especificas dia-del-mes y dia-de-la-semana, ambos deben coincidir. Este editor admite comodines numericos, listas, rangos, pasos y nombres de dias. Las ediciones personalizadas deben repetirse cada mes o mas frecuentemente. Usa un comodin para el mes y para dia-del-mes o dia-de-la-semana. Goose podria quitar el temporizador anterior si una actualizacion falla inesperadamente; verifica la programacion despues de un error al guardar.",
+    "saving": "Guardando…",
+    "updateError": "No se pudo actualizar la programacion de Goose.",
+    "updateFailureCaution": "Es posible que el programador haya quitado el temporizador anterior si la actualizacion fallo inesperadamente. Verifica la programacion en Goose antes de depender de ella.",
+    "failedUpdateRetry": "Esta misma expresion ya fallo. No la reintentes: es posible que Goose haya quitado el temporizador anterior. Verifica la programacion o prueba otra expresion valida.",
+    "changedElsewhere": "Esta programacion cambio mientras la editabas. Cancela y vuelve a abrirla para revisar el valor mas reciente.",
+    "validation": {
+      "fieldCount": "Ingresa una expresion cron de cinco o seis campos.",
+      "unsupported": "La expresion no es valida o usa una sintaxis que este editor no puede actualizar de forma segura. La programacion existente no cambio.",
+      "safeWindow": "Usa un comodin para el mes y un comodin en dia-del-mes o dia-de-la-semana. Goose exige que ambos campos de dia coincidan si ninguno es comodin y busca la siguiente ejecucion hasta por un ano."
+    }
   },
   "builder": {
     "blockedBody": "La última respuesta no fue una automatización válida. Intenta reformular lo que quieres.",

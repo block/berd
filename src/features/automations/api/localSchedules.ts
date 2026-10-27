@@ -9,3 +9,15 @@ export async function listLocalSchedules(): Promise<ScheduledJobDto[]> {
   const response = await client.goose.GooseUnstableSchedulesList({});
   return response.jobs;
 }
+
+export async function updateLocalScheduleCron(
+  scheduleId: string,
+  cron: string,
+): Promise<ScheduledJobDto> {
+  const client = await getClient();
+  const response = await client.goose.GooseUnstableSchedulesUpdate({
+    scheduleId,
+    cron,
+  });
+  return response.job;
+}
