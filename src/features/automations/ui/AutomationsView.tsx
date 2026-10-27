@@ -141,7 +141,10 @@ export function AutomationsWorkbench({
     refetch: refetchAutomations,
   } = useQuery({
     queryKey: AUTOMATION_TILES_QUERY_KEY,
-    queryFn: fetchAutomationTilesList,
+    queryFn: () =>
+      companyAutomationsEnabledRef.current
+        ? fetchAutomationTilesList()
+        : Promise.resolve([]),
     enabled: companyAutomationsEnabled,
     retry: (failureCount) =>
       companyAutomationsEnabledRef.current && failureCount < 1,
@@ -221,7 +224,10 @@ export function AutomationsWorkbench({
     refetch: refetchDetail,
   } = useQuery({
     queryKey: automationTileQueryKey(detailAutomationId),
-    queryFn: () => fetchAutomationTileDetail(detailAutomationId ?? ""),
+    queryFn: () =>
+      companyAutomationsEnabledRef.current && detailAutomationId
+        ? fetchAutomationTileDetail(detailAutomationId)
+        : Promise.resolve({ tileInfo: undefined }),
     enabled: companyAutomationsEnabled && Boolean(detailAutomationId),
     retry: (failureCount) =>
       companyAutomationsEnabledRef.current && failureCount < 1,

@@ -273,6 +273,55 @@ describe("AutomationsView", () => {
     expect(screen.queryByRole("button", { name: "Add automation" })).toBeNull();
   });
 
+  it("does not execute a scheduled retry after capability revocation", async () => {
+    vi.useFakeTimers();
+    let rejectRequest!: (error: Error) => void;
+    vi.mocked(getAutomationTiles)
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectRequest = reject;
+          }),
+      )
+      .mockResolvedValue({ tiles: [] });
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: 1,
+          retryDelay: 1_000,
+        },
+      },
+    });
+    const app = render(
+      <QueryClientProvider client={queryClient}>
+        <TopBarActionsProvider>
+          <TopBarActionsOutlet />
+          <AutomationsView companyAutomationsEnabled />
+        </TopBarActionsProvider>
+      </QueryClientProvider>,
+    );
+    expect(getAutomationTiles).toHaveBeenCalledOnce();
+    await act(async () => {
+      rejectRequest(new Error("first request failed"));
+      await Promise.resolve();
+    });
+
+    app.rerender(
+      <QueryClientProvider client={queryClient}>
+        <TopBarActionsProvider>
+          <TopBarActionsOutlet />
+          <AutomationsView companyAutomationsEnabled={false} />
+        </TopBarActionsProvider>
+      </QueryClientProvider>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(getAutomationTiles).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
   it("stops company-query retries after capability revocation", async () => {
     let rejectRequest!: (error: Error) => void;
     vi.mocked(getAutomationTiles).mockImplementationOnce(
