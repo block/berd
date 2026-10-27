@@ -48,7 +48,20 @@
     "unknownLastRun": "Unknown",
     "paused": "Paused",
     "running": "Running",
-    "lastRun": "Last run: {{time}}"
+    "lastRun": "Last run: {{time}}",
+    "editCron": "Edit cron schedule for {{id}}",
+    "cronLabel": "Cron expression for {{id}}",
+    "cronHelp": "Use five fields (minute hour day-of-month month weekday) or six fields with seconds first. Goose uses this computer's time zone; day-of-month and weekday must both match when both are specified. This editor supports numeric wildcards, lists, ranges, steps, and weekday names. Custom edits must recur monthly or more often. Use a wildcard for month and for either day-of-month or weekday. Goose may remove the old timer if an unexpected update fails; verify the schedule after a save error.",
+    "saving": "Saving…",
+    "updateError": "Could not update the Goose schedule.",
+    "updateFailureCaution": "The scheduler may have removed the old timer if this update failed unexpectedly. Verify the schedule in Goose before relying on it.",
+    "failedUpdateRetry": "This same expression already failed. Do not retry it: Goose may have removed the old timer. Verify the schedule or try a different valid expression.",
+    "changedElsewhere": "This schedule changed elsewhere while you were editing. Cancel and reopen to review the latest value.",
+    "validation": {
+      "fieldCount": "Enter a five- or six-field cron expression.",
+      "unsupported": "This expression is invalid or uses syntax this editor cannot safely update. The existing schedule was not changed.",
+      "safeWindow": "Use a wildcard for month and a wildcard in either day-of-month or weekday. Goose requires both day fields to match when neither is a wildcard, and the scheduler searches up to one year for the next run."
+    }
   },
   "builder": {
     "blockedBody": "The last response wasn't a valid automation. Try rephrasing what you want.",

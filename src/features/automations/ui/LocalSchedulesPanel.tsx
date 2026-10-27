@@ -7,6 +7,7 @@ import {
   LOCAL_SCHEDULES_REFETCH_INTERVAL_MS,
   listLocalSchedules,
 } from "@/features/automations/api/localSchedules";
+import { LocalScheduleCronEditor } from "@/features/automations/ui/LocalScheduleCronEditor";
 import { EmptyState } from "@/features/automations/ui/RunOutput";
 import { useLocaleFormatting } from "@/shared/i18n";
 import { Alert, AlertTitle, AlertDescription } from "@/shared/ui/alert";
@@ -135,6 +136,7 @@ export function LocalSchedulesPanel() {
                       ) : null}
                     </div>
                   </div>
+                  <LocalScheduleCronEditor schedule={schedule} />
                 </article>
               ))}
             </div>
