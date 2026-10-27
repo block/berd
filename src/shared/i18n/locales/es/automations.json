@@ -55,12 +55,13 @@
     "saving": "Guardando…",
     "updateError": "No se pudo actualizar la programacion de Goose.",
     "updateFailureCaution": "Es posible que el programador haya quitado el temporizador anterior si la actualizacion fallo inesperadamente. Verifica la programacion en Goose antes de depender de ella.",
+    "refreshAfterUpdateError": "La actualizacion de la lista tambien fallo, asi que se desconoce el estado actual de la programacion.",
     "failedUpdateRetry": "Esta misma expresion ya fallo. No la reintentes: es posible que Goose haya quitado el temporizador anterior. Verifica la programacion o prueba otra expresion valida.",
     "changedElsewhere": "Esta programacion cambio mientras la editabas. Cancela y vuelve a abrirla para revisar el valor mas reciente.",
     "validation": {
       "fieldCount": "Ingresa una expresion cron de cinco o seis campos.",
       "unsupported": "La expresion no es valida o usa una sintaxis que este editor no puede actualizar de forma segura. La programacion existente no cambio.",
-      "safeWindow": "Usa un comodin para el mes y un comodin en dia-del-mes o dia-de-la-semana. Goose exige que ambos campos de dia coincidan si ninguno es comodin y busca la siguiente ejecucion hasta por un ano."
+      "safeWindow": "Usa un comodin para el mes y un comodin en dia-del-mes o dia-de-la-semana. Goose exige que ambos campos de dia coincidan si ninguno es comodin y los combina con AND."
     }
   },
   "builder": {

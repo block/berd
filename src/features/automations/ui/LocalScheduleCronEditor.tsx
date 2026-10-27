@@ -26,8 +26,11 @@ export function LocalScheduleCronEditor({
   const [baselineCron, setBaselineCron] = useState(schedule.cron);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isReconciling, setIsReconciling] = useState(false);
   const editButtonRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const shouldRestoreFocusOnSaveRef = useRef(false);
   const wasEditingRef = useRef(false);
   const restoreFocusAfterEditRef = useRef(false);
   const [failedCrons, setFailedCrons] = useState<Set<string>>(() => new Set());
@@ -41,6 +44,7 @@ export function LocalScheduleCronEditor({
       updateLocalScheduleCron(scheduleId, cron),
     onMutate: async () => {
       setIsSaving(true);
+      setIsReconciling(false);
       await queryClient.cancelQueries({ queryKey: LOCAL_SCHEDULES_QUERY_KEY });
     },
     onSuccess: async () => {
@@ -52,24 +56,49 @@ export function LocalScheduleCronEditor({
       setError(null);
       setFailedCrons(new Set());
       setIsSaving(false);
+      setIsReconciling(false);
       restoreFocusAfterEditRef.current =
-        document.activeElement === inputRef.current;
+        shouldRestoreFocusOnSaveRef.current ||
+        editorRef.current?.contains(document.activeElement) === true;
       setIsEditing(false);
     },
-    onError: (mutationError, variables) => {
+    onError: async (mutationError, variables) => {
       setError(
         formatAcpErrorMessage(mutationError, t("localSchedules.updateError")),
       );
       setFailedCrons((previous) => new Set(previous).add(variables.cron));
       setIsSaving(false);
+      setIsReconciling(true);
       restoreFocusAfterEditRef.current =
-        document.activeElement === document.body ||
-        document.activeElement === editButtonRef.current;
+        shouldRestoreFocusOnSaveRef.current ||
+        editorRef.current?.contains(document.activeElement) === true ||
+        document.activeElement === document.body;
+      try {
+        await queryClient.refetchQueries(
+          {
+            queryKey: LOCAL_SCHEDULES_QUERY_KEY,
+            predicate: (query) => query.state.fetchStatus !== "paused",
+          },
+          { throwOnError: true, cancelRefetch: false },
+        );
+      } catch {
+        setError((current) =>
+          current
+            ? `${current} ${t("localSchedules.refreshAfterUpdateError")}`
+            : t("localSchedules.refreshAfterUpdateError"),
+        );
+      } finally {
+        setIsReconciling(false);
+      }
     },
   });
 
   const scheduleChangedElsewhere =
-    isEditing && !updateMutation.isError && schedule.cron !== baselineCron;
+    isEditing &&
+    !isReconciling &&
+    !updateMutation.isError &&
+    !error &&
+    schedule.cron !== baselineCron;
 
   useLayoutEffect(() => {
     if (isEditing) {
@@ -95,6 +124,7 @@ export function LocalScheduleCronEditor({
 
   function beginEditing() {
     restoreFocusAfterEditRef.current = true;
+    shouldRestoreFocusOnSaveRef.current = false;
     setBaselineCron(schedule.cron);
     setDraft(schedule.cron);
     setError(null);
@@ -102,6 +132,7 @@ export function LocalScheduleCronEditor({
   }
 
   function cancelEditing() {
+    shouldRestoreFocusOnSaveRef.current = false;
     setBaselineCron(schedule.cron);
     setDraft(schedule.cron);
     setError(null);
@@ -109,7 +140,10 @@ export function LocalScheduleCronEditor({
   }
 
   function save() {
+    shouldRestoreFocusOnSaveRef.current =
+      editorRef.current?.contains(document.activeElement) === true;
     if (
+      isReconciling ||
       !hasChanged ||
       (validationError && !hasKnownCron) ||
       sameAsFailedCron ||
@@ -139,7 +173,7 @@ export function LocalScheduleCronEditor({
   }
 
   return (
-    <div className="w-full space-y-2">
+    <div ref={editorRef} className="w-full space-y-2">
       <label className="sr-only" htmlFor={`local-schedule-cron-${schedule.id}`}>
         {t("localSchedules.cronLabel", { id: schedule.id })}
       </label>
@@ -164,7 +198,14 @@ export function LocalScheduleCronEditor({
       >
         {t("localSchedules.cronHelp")}
       </p>
-      {scheduleChangedElsewhere ? (
+      {error ? (
+        <div role="alert" className="text-xs text-destructive">
+          <p>{error}</p>
+          <p className="mt-1 text-muted-foreground">
+            {t("localSchedules.updateFailureCaution")}
+          </p>
+        </div>
+      ) : scheduleChangedElsewhere ? (
         <p role="alert" className="text-xs text-destructive">
           {t("localSchedules.changedElsewhere")}
         </p>
@@ -172,17 +213,10 @@ export function LocalScheduleCronEditor({
         <p role="alert" className="text-xs text-destructive">
           {t(`localSchedules.validation.${validationError}`)}
         </p>
-      ) : sameAsFailedCron && !error ? (
+      ) : sameAsFailedCron ? (
         <p role="alert" className="text-xs text-destructive">
           {t("localSchedules.failedUpdateRetry")}
         </p>
-      ) : error ? (
-        <div role="alert" className="text-xs text-destructive">
-          <p>{error}</p>
-          <p className="mt-1 text-muted-foreground">
-            {t("localSchedules.updateFailureCaution")}
-          </p>
-        </div>
       ) : null}
       <div className="flex justify-end gap-2">
         <Button
@@ -202,6 +236,7 @@ export function LocalScheduleCronEditor({
             !hasChanged ||
             (!!validationError && !hasKnownCron) ||
             sameAsFailedCron ||
+            isReconciling ||
             scheduleChangedElsewhere ||
             schedule.currentlyRunning ||
             isSaving

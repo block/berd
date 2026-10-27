@@ -55,12 +55,13 @@
     "saving": "Saving…",
     "updateError": "Could not update the Goose schedule.",
     "updateFailureCaution": "The scheduler may have removed the old timer if this update failed unexpectedly. Verify the schedule in Goose before relying on it.",
+    "refreshAfterUpdateError": "The refresh also failed, so the schedule's current state is unknown.",
     "failedUpdateRetry": "This same expression already failed. Do not retry it: Goose may have removed the old timer. Verify the schedule or try a different valid expression.",
     "changedElsewhere": "This schedule changed elsewhere while you were editing. Cancel and reopen to review the latest value.",
     "validation": {
       "fieldCount": "Enter a five- or six-field cron expression.",
       "unsupported": "This expression is invalid or uses syntax this editor cannot safely update. The existing schedule was not changed.",
-      "safeWindow": "Use a wildcard for month and a wildcard in either day-of-month or weekday. Goose requires both day fields to match when neither is a wildcard, and the scheduler searches up to one year for the next run."
+      "safeWindow": "Use a wildcard for month and a wildcard in either day-of-month or weekday. Goose requires both day fields to match when neither is a wildcard, and the scheduler combines them with AND."
     }
   },
   "builder": {
