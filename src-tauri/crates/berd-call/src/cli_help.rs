@@ -167,10 +167,10 @@ Usage:
 The plugin runs this with the harness's hook payload on stdin and prints the
 call's decision. While the bound session has input it hasn't answered, a tool
 call is refused; ending the turn is also refused after tools with nothing said
-since, or while nothing delivers the transcript. Commands that run berd-call are
-never refused. A permission request is announced on the call. The hooks also
-report whether the agent is working, for status sounds. With no call running,
-or for any other session or a subagent, the hook does nothing."#;
+since, or while nothing delivers the transcript. A command that runs only
+berd-call is never refused. A permission request is announced on the call. The
+hooks also report whether the agent is working, for status sounds. With no call
+running, or for any other session or a subagent, the hook does nothing."#;
 
 const SESSION_HELP: &str = r#"Run the host-facing framed voice-session protocol.
 

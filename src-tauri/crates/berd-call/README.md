@@ -184,7 +184,7 @@ The plugin's files are embedded in the binary, and each `berd-call start` brings
 
 A call's hooks act only for one agent session: the ID passed to `start --enable-hooks-for-session-id`, or else the `CLAUDE_CODE_SESSION_ID` of the Claude Code session that runs `start`. They pass through for other sessions, subagents, and calls started outside an agent. While they hold a session:
 
-- A tool call is refused while the user has said something the agent hasn't answered. The reason quotes the input and the `speak --re` (or `message-spokesperson`) command that answers it. Commands that run `berd-call` are never refused, so the agent can always answer, wait or stop.
+- A tool call is refused while the user has said something the agent hasn't answered. The reason quotes the input and the `speak --re` (or `message-spokesperson`) command that answers it. A command that runs only `berd-call` is never refused, so the agent can always answer, wait or stop; one that chains another command onto it is treated like any other tool.
 - Ending the turn is refused while input is unanswered, after tools with nothing said since, or, when neither `--stream` nor `--codex` delivers the transcript, at all: the agent is told to `wait-for-input` or `stop`.
 - A permission request is announced on the call, so the user knows to look at the screen. The request itself is left to Claude Code.
 - Prompts and tools report `working`, and an end of turn that is allowed, or held only to wait for input, reports `waiting`, for status sounds.

@@ -11,7 +11,7 @@ Use `berd-call` as the voice-call interface. Discover the binary with `command -
 
 Run `berd-call start` as a background command and keep it running for the whole call. Saved settings supply the voice, speech rate, backend, and call mode, so add those flags only when the user asks to override one for this call. Use the call's actual control port for every other command; pass `--port` only when the call was started with one.
 
-This plugin's hooks bind to the session that starts the call, from `CLAUDE_CODE_SESSION_ID`. While the call runs they hold you to it: a tool call is refused while the user has spoken and you haven't answered, and ending your turn is refused until you have answered, said something since your last tool, and are waiting for more. Subagents and other sessions are not held. When a hook refuses, do what its reason says.
+This plugin's hooks bind to the session that starts the call, from `CLAUDE_CODE_SESSION_ID`. While the call runs they hold you to it: a tool call is refused while the user has spoken and you haven't answered, and ending your turn is refused until you have answered, said something since your last tool, and are waiting for more. Subagents and other sessions are not held. Run each `berd-call` command on its own: one chained with another command is held like any other tool. When a hook refuses, do what its reason says.
 
 Wait for the user with `berd-call wait-for-input`, which returns their input as JSON with a `cursor`. Alternatively, start the call with `--stream live` under a monitor that delivers each transcript row to you; then you don't need to poll.
 

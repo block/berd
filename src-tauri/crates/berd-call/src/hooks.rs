@@ -165,11 +165,45 @@ fn runs_call(payload: &Value) -> bool {
         .is_some_and(|name| name.contains("berd_call"))
         || payload["tool_input"]["command"]
             .as_str()
-            .is_some_and(|command| {
-                command
-                    .split(|c: char| c.is_whitespace() || ";&|()`'\"".contains(c))
-                    .any(|word| word.rsplit('/').next() == Some(NAME))
-            })
+            .is_some_and(only_berd_call)
+}
+
+/// Whether a shell command runs `berd-call` and nothing else, so another
+/// command can't ride along with it.
+fn only_berd_call(command: &str) -> bool {
+    let command = command.trim();
+    let program = command.split_whitespace().next().unwrap_or_default();
+    if program.rsplit('/').next() != Some(NAME) {
+        return false;
+    }
+    let (mut quote, mut escaped, mut previous) = (None, false, ' ');
+    for c in command.chars() {
+        if escaped {
+            // An escaped character is literal, and starts nothing.
+            (escaped, previous) = (false, ' ');
+            continue;
+        }
+        match quote {
+            Some('\'') if c == '\'' => quote = None,
+            Some('\'') => {}
+            _ if c == '\\' => escaped = true,
+            Some(_) => match c {
+                '"' => quote = None,
+                '`' => return false,
+                '(' if previous == '$' => return false,
+                _ => {}
+            },
+            None => match c {
+                '\'' | '"' => quote = Some(c),
+                ';' | '|' | '`' | '(' | ')' | '\n' => return false,
+                // Redirections such as 2>&1 run nothing else.
+                '&' if previous != '>' => return false,
+                _ => {}
+            },
+        }
+        previous = c;
+    }
+    true
 }
 
 fn directory() -> Result<PathBuf, String> {
@@ -291,19 +325,32 @@ mod tests {
     }
 
     #[test]
-    fn call_commands_are_recognized_wherever_they_appear() {
+    fn only_commands_that_run_berd_call_alone_work_the_call() {
         for command in [
             "berd-call speak --re 3 'hi'",
             "/Applications/Berd.app/Contents/MacOS/berd-call wait-for-input",
-            "cd /tmp && berd-call status",
-            "(berd-call catch-up)",
+            "berd-call speak --re 3 'Done; tests pass | all of them (really) & more'",
+            "berd-call speak --re 3 \"It's \\\"done\\\"; \\$(no)\" 2>&1",
+            "  berd-call status --port $PORT",
         ] {
             assert!(
                 runs_call(&json!({"tool_name": "Bash", "tool_input": {"command": command}})),
                 "{command}"
             );
         }
-        for command in ["cargo test -p berd-call-extra", "echo berd-calling", "ls"] {
+        for command in [
+            "cargo test -p berd-call",
+            "echo berd-call",
+            "berd-call status && echo hello",
+            "berd-call status; echo hello",
+            "berd-call status | tee log",
+            "berd-call speak \"$(cat notes)\"",
+            "berd-call speak `cat notes`",
+            "cd /tmp && berd-call status",
+            "(berd-call catch-up)",
+            "berd-call wait-for-input &",
+            "berd-call status\necho hello",
+        ] {
             assert!(
                 !runs_call(&json!({"tool_name": "Bash", "tool_input": {"command": command}})),
                 "{command}"
