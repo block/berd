@@ -95,7 +95,9 @@ impl Reply {
             .iter()
             .filter(|item| item.origin != Some(UtteranceOrigin::Spokesperson))
             .map(|item| match item.origin {
-                Some(UtteranceOrigin::Handoff) => format!("[{}] handoff: {}", item.token, item.text),
+                Some(UtteranceOrigin::Handoff) => {
+                    format!("[{}] handoff: {}", item.token, item.text)
+                }
                 _ => format!("[{}] {}", item.token, item.text),
             })
             .collect::<Vec<_>>();
@@ -223,10 +225,7 @@ fn files() -> [(&'static str, String); 3] {
         "skills": ["./"],
     });
     [
-        (
-            ".claude-plugin/plugin.json",
-            format!("{manifest:#}\n"),
-        ),
+        (".claude-plugin/plugin.json", format!("{manifest:#}\n")),
         ("hooks/hooks.json", HOOKS.into()),
         ("SKILL.md", SKILL.into()),
     ]
@@ -307,10 +306,8 @@ mod tests {
     use super::*;
 
     fn temporary(name: &str) -> PathBuf {
-        let directory = std::env::temp_dir().join(format!(
-            "berd-call-plugin-{name}-{}",
-            std::process::id()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("berd-call-plugin-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&directory);
         directory
     }
@@ -356,8 +353,12 @@ mod tests {
                 "{command}"
             );
         }
-        assert!(runs_call(&json!({"tool_name": "mcp__buzz__berd_call_status"})));
-        assert!(!runs_call(&json!({"tool_name": "Read", "tool_input": {"file_path": "berd-call"}})));
+        assert!(runs_call(
+            &json!({"tool_name": "mcp__buzz__berd_call_status"})
+        ));
+        assert!(!runs_call(
+            &json!({"tool_name": "Read", "tool_input": {"file_path": "berd-call"}})
+        ));
     }
 
     #[test]
@@ -389,9 +390,8 @@ mod tests {
         }))
         .unwrap();
         assert!(relayed.contains("[9] handoff: look into it"));
-        assert!(relayed.ends_with(
-            "berd-call message-spokesperson --port 6000 --re 9 --resolves h1 'REPLY'"
-        ));
+        assert!(relayed
+            .ends_with("berd-call message-spokesperson --port 6000 --re 9 --resolves h1 'REPLY'"));
     }
 
     #[test]

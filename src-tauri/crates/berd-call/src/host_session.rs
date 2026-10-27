@@ -5766,7 +5766,14 @@ mod tests {
         *input.lock().unwrap() = json!([]);
         assert_eq!(
             hook(HookEvent::Stop, "main", false, false).as_deref(),
-            Some(Reply { relays: false, port: 5222 }.unspoken().as_str())
+            Some(
+                Reply {
+                    relays: false,
+                    port: 5222
+                }
+                .unspoken()
+                .as_str()
+            )
         );
         control
             .speak("Done.".into(), Some(4), Vec::new(), None, None, false)
@@ -5776,7 +5783,10 @@ mod tests {
             hook(HookEvent::Stop, "main", false, false).as_deref(),
             Some(UNHEARD)
         );
-        assert_eq!(hook(HookEvent::PermissionRequest, "main", false, false), None);
+        assert_eq!(
+            hook(HookEvent::PermissionRequest, "main", false, false),
+            None
+        );
         drop(control);
         worker.join().unwrap();
         assert_eq!(
