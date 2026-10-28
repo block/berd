@@ -48,7 +48,7 @@ const PRODUCTION_OTLP_LOGS_ENDPOINT = "https://otel.berd.xyz/v1/logs";
 // The staging gateway (squareup/berd-monitoring's staging deployment) —
 // injected whenever VITE_ENVIRONMENT=staging.
 const STAGING_OTLP_LOGS_ENDPOINT =
-  "https://otel.test.blockstaging.build/v1/logs";
+  "https://otel.block.builderlabstaging.xyz/v1/logs";
 
 // DUMMY placeholder for development. The telemetry send path (OTel logs over
 // OTLP) is gated to production/staging, so this fake host is never contacted

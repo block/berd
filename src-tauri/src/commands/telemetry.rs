@@ -45,7 +45,7 @@ const TELEMETRY_SCHEMA_VERSION: &str = "berd-otlp-logs-v3";
 //
 // - otel.berd.xyz — the production gateway (squareup/berd-monitoring's
 //   production deployment), injected for VITE_ENVIRONMENT=production builds.
-// - otel.test.blockstaging.build — the staging gateway
+// - otel.block.builderlabstaging.xyz — the staging gateway
 //   (squareup/berd-monitoring's staging deployment), injected for
 //   VITE_ENVIRONMENT=staging builds.
 // - otlp.invalid.goose-internal.example — DUMMY placeholder injected in
@@ -56,7 +56,7 @@ const TELEMETRY_SCHEMA_VERSION: &str = "berd-otlp-logs-v3";
 // tauri.conf.json's CSP connect-src.
 const ALLOWED_OTEL_LOGS_HOSTS: [&str; 3] = [
     "otel.berd.xyz",
-    "otel.test.blockstaging.build",
+    "otel.block.builderlabstaging.xyz",
     "otlp.invalid.goose-internal.example",
 ];
 
@@ -1674,17 +1674,17 @@ mod tests {
     #[test]
     fn allows_the_staging_gateway_host_and_derives_its_bootstrap_url() {
         let logs_url =
-            allowed_otel_logs_endpoint("https://otel.test.blockstaging.build/v1/logs").unwrap();
+            allowed_otel_logs_endpoint("https://otel.block.builderlabstaging.xyz/v1/logs").unwrap();
 
         let bootstrap_url = telemetry_bootstrap_url(&logs_url).unwrap();
 
         assert_eq!(
             logs_url.as_str(),
-            "https://otel.test.blockstaging.build/v1/logs"
+            "https://otel.block.builderlabstaging.xyz/v1/logs"
         );
         assert_eq!(
             bootstrap_url.as_str(),
-            "https://otel.test.blockstaging.build/v1/bootstrap"
+            "https://otel.block.builderlabstaging.xyz/v1/bootstrap"
         );
     }
 
@@ -1719,9 +1719,10 @@ mod tests {
     /// request; the error must not echo the credential either.
     #[test]
     fn rejects_endpoint_with_userinfo_credentials() {
-        let error =
-            allowed_otel_logs_endpoint("https://user:hunter2@otel.test.blockstaging.build/v1/logs")
-                .unwrap_err();
+        let error = allowed_otel_logs_endpoint(
+            "https://user:hunter2@otel.block.builderlabstaging.xyz/v1/logs",
+        )
+        .unwrap_err();
 
         assert!(error.contains("credentials"));
         assert!(!error.contains("hunter2"));
@@ -1729,8 +1730,9 @@ mod tests {
 
     #[test]
     fn rejects_endpoint_with_username_only_userinfo() {
-        let error = allowed_otel_logs_endpoint("https://user@otel.test.blockstaging.build/v1/logs")
-            .unwrap_err();
+        let error =
+            allowed_otel_logs_endpoint("https://user@otel.block.builderlabstaging.xyz/v1/logs")
+                .unwrap_err();
 
         assert!(error.contains("credentials"));
     }
@@ -1740,8 +1742,9 @@ mod tests {
     /// and installation id.
     #[test]
     fn rejects_endpoint_with_explicit_port() {
-        let error = allowed_otel_logs_endpoint("https://otel.test.blockstaging.build:8443/v1/logs")
-            .unwrap_err();
+        let error =
+            allowed_otel_logs_endpoint("https://otel.block.builderlabstaging.xyz:8443/v1/logs")
+                .unwrap_err();
 
         assert!(error.contains("port"));
     }
@@ -1751,9 +1754,13 @@ mod tests {
     #[test]
     fn allows_the_scheme_default_port() {
         let url =
-            allowed_otel_logs_endpoint("https://otel.test.blockstaging.build:443/v1/logs").unwrap();
+            allowed_otel_logs_endpoint("https://otel.block.builderlabstaging.xyz:443/v1/logs")
+                .unwrap();
 
-        assert_eq!(url.as_str(), "https://otel.test.blockstaging.build/v1/logs");
+        assert_eq!(
+            url.as_str(),
+            "https://otel.block.builderlabstaging.xyz/v1/logs"
+        );
     }
 
     #[test]

@@ -25,7 +25,7 @@ import { JsonLogsSerializer } from "@opentelemetry/otlp-transformer";
 // Injected by vite.config.ts from VITE_OTLP_LOGS_ENDPOINT: the full telemetry
 // gateway `https://<host>/v1/logs` URL. Production builds get the production
 // gateway (otel.berd.xyz), staging builds the staging gateway
-// (otel.test.blockstaging.build); development gets an obviously-fake DUMMY
+// (otel.block.builderlabstaging.xyz); development gets an obviously-fake DUMMY
 // host, so the prod/staging gate (see `./client`) plus that placeholder keep
 // the path inert in dev and external clones. The native side derives the
 // anonymous `/v1/bootstrap` URL from this same endpoint, so no bootstrap URL
