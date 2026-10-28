@@ -63,6 +63,75 @@ describe("sanitizeReplayMessages", () => {
     ]);
   });
 
+  it("restores the user and spoken bubbles of a hidden legacy Expert wake batch", () => {
+    const message = createTextMessage(
+      "expert-wake",
+      "user",
+      "[Voice transcript; cursor 4] User said: Check my Development folder.\n" +
+        "[Voice transcript; cursor 5] Spokesperson said: Let me check that.\n" +
+        "[Voice transcript; cursor 6] Spokesperson said (interrupted; best effort): One mo\n" +
+        "[Handoff handoff-123e4567-e89b-12d3-a456-426614174000-6 from spokesperson; cursor 7] Count the repositories.",
+    );
+    message.metadata = {
+      ...message.metadata,
+      origin: "voice_conversation",
+      userVisible: false,
+    };
+
+    expect(sanitizeReplayMessages([message])).toMatchObject([
+      {
+        id: "expert-wake",
+        role: "user",
+        content: [{ type: "text", text: "Check my Development folder." }],
+        metadata: { userVisible: true, agentVisible: false },
+      },
+      {
+        id: "expert-wake:voice:1",
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "Let me check that.",
+            speech: { status: "spoken" },
+          },
+        ],
+        metadata: { userVisible: true, agentVisible: false },
+      },
+      {
+        id: "expert-wake:voice:2",
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "One mo",
+            speech: { status: "interrupted" },
+          },
+        ],
+        metadata: { userVisible: true },
+      },
+    ]);
+  });
+
+  it("keeps voice-origin messages that are not legacy transcripts", () => {
+    const message = createTextMessage("voice-1", "user", "Open the settings");
+    message.metadata = { ...message.metadata, origin: "voice_conversation" };
+    const handoff = createTextMessage(
+      "handoff-1",
+      "user",
+      "[Handoff handoff-123e4567-e89b-12d3-a456-426614174000-1 from spokesperson; cursor 1] Check it.",
+    );
+    handoff.metadata = {
+      ...handoff.metadata,
+      origin: "voice_conversation",
+      userVisible: false,
+    };
+
+    expect(sanitizeReplayMessages([message, handoff])).toEqual([
+      message,
+      handoff,
+    ]);
+  });
+
   it("keeps TTS control lookalikes that are not voice-origin messages", () => {
     const message = createTextMessage(
       "user-1",

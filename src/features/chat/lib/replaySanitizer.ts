@@ -81,6 +81,60 @@ function sanitizeTtsDeliveryReplayArtifact(message: Message): Message | null {
   };
 }
 
+// Calls made before the Spokesperson was removed saved their transcripts as
+// hidden batches. Replay shows the spoken lines and drops the handoffs.
+const LEGACY_VOICE_BOUNDARY =
+  /\n(?=\[(?:Voice transcript(?:; cursor \d+)?|Handoff handoff-[A-Za-z0-9-]+ from spokesperson; cursor \d+)\] )/;
+const LEGACY_VOICE_LINE =
+  /^\[Voice transcript(?:; cursor \d+)?\] (User|Spokesperson) said( \(interrupted; best[- ]effort(?: transcript)?\))?: ([\s\S]*)$/;
+const LEGACY_HANDOFF = /^\[Handoff handoff-[A-Za-z0-9-]+ from spokesperson; /;
+
+function restoreLegacyVoiceMessages(message: Message): Message[] | null {
+  if (
+    message.role !== "user" ||
+    message.metadata?.origin !== "voice_conversation" ||
+    message.content.some((content) => content.type !== "text")
+  ) {
+    return null;
+  }
+
+  const restored: Message[] = [];
+  for (const [index, segment] of getTextContent(message)
+    .split(LEGACY_VOICE_BOUNDARY)
+    .entries()) {
+    if (LEGACY_HANDOFF.test(segment)) continue;
+    const line = LEGACY_VOICE_LINE.exec(segment);
+    if (!line) return null;
+    const [, speaker, interrupted, text] = line;
+    const user = speaker === "User";
+    restored.push({
+      ...message,
+      id: index ? `${message.id}:voice:${index}` : message.id,
+      role: user ? "user" : "assistant",
+      content: [
+        {
+          type: "text",
+          text,
+          ...(user
+            ? {}
+            : {
+                speech: interrupted
+                  ? { status: "interrupted", confidence: "low" }
+                  : { status: "spoken", spokenThrough: text.length },
+              }),
+        },
+      ],
+      metadata: {
+        ...message.metadata,
+        userVisible: true,
+        agentVisible: false,
+        completionStatus: "completed",
+      },
+    });
+  }
+  return restored.length ? restored : null;
+}
+
 export function isManualCompactReplayArtifact(message: Message): boolean {
   if (message.role !== "user") {
     return false;
@@ -106,8 +160,7 @@ export function isManualCompactReplayArtifact(message: Message): boolean {
 export function sanitizeReplayMessages(messages: Message[]): Message[] {
   return messages.flatMap((message) => {
     const sanitized = sanitizeTtsDeliveryReplayArtifact(message);
-    return !sanitized || isManualCompactReplayArtifact(sanitized)
-      ? []
-      : [sanitized];
+    if (!sanitized || isManualCompactReplayArtifact(sanitized)) return [];
+    return restoreLegacyVoiceMessages(sanitized) ?? [sanitized];
   });
 }
