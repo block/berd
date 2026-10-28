@@ -65,6 +65,7 @@ use serde::Serialize;
 mod cli_help;
 #[cfg(target_os = "macos")]
 mod codex;
+mod hooks;
 mod host_control;
 #[cfg(unix)]
 mod host_lifetime;
@@ -547,6 +548,9 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("start") => {
             let options = parse_or_exit(parse_saved_start_args(&args), &args);
+            if let Err(error) = hooks::refresh() {
+                eprintln!("berd-call could not update its Claude Code plugin: {error}");
+            }
             #[cfg(target_os = "macos")]
             if let Err(error) = host_lifetime::route_stop_signals(options.port) {
                 eprintln!("berd-call start failed: {error}");
@@ -605,6 +609,22 @@ fn main() {
             .unwrap_or_else(|error| operational_error("message-spokesperson", error));
             print_pretty_json(&response)
                 .unwrap_or_else(|error| operational_error("message-spokesperson", error));
+        }
+        Some("hook") => {
+            let (event, port) = parse_or_exit(parse_hook_args(&args), &args);
+            println!("{}", hooks::run(event, port));
+        }
+        Some("plugin") => {
+            let install = parse_or_exit(parse_plugin_args(&args), &args);
+            let result = if install {
+                hooks::install()
+            } else {
+                hooks::uninstall()
+            };
+            match result {
+                Ok(message) => println!("{message}"),
+                Err(error) => operational_error("plugin", error),
+            }
         }
         Some("status") => {
             let port = parse_or_exit(parse_control_port(&args), &args);
@@ -849,6 +869,8 @@ struct StartOptions {
     non_blocking: bool,
     expert_spokesperson: bool,
     session_arguments: Vec<String>,
+    // The agent session the call's hooks hold; the harness's own when unset.
+    hook_session: Option<String>,
 }
 
 fn validate_session_arguments(arguments: &[String]) -> Result<bool, String> {
@@ -873,6 +895,7 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
     let mut transcript = TranscriptDestination::None;
     let mut menu_bar = true;
     let mut non_blocking = false;
+    let mut hook_session = None;
     let mut session_arguments = vec!["session".to_string()];
     let mut index = 2;
     while index < args.len() {
@@ -912,6 +935,17 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
                 index += 2;
             }
             "--port" => return Err("--port may be provided only once".into()),
+            "--enable-hooks-for-session-id" if hook_session.is_none() => {
+                let value = args
+                    .get(index + 1)
+                    .filter(|value| !value.is_empty())
+                    .ok_or("--enable-hooks-for-session-id requires a session ID")?;
+                hook_session = Some(value.clone());
+                index += 2;
+            }
+            "--enable-hooks-for-session-id" => {
+                return Err("--enable-hooks-for-session-id may be provided only once".into())
+            }
             "--pcm-output-fd" => {
                 return Err("berd-call start owns its PCM output descriptor".into())
             }
@@ -936,6 +970,7 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
         non_blocking,
         expert_spokesperson,
         session_arguments,
+        hook_session,
     })
 }
 
@@ -1274,6 +1309,35 @@ fn parse_bool_setting(flag: &str, value: Option<&String>) -> Result<bool, String
         Some("true") => Ok(true),
         Some("false") => Ok(false),
         _ => Err(format!("{flag} requires true or false")),
+    }
+}
+
+fn parse_hook_args(args: &[String]) -> Result<(hooks::HookEvent, u16), ParseFailure> {
+    let (event, rest) = match args.get(2..).unwrap_or_default() {
+        [help, ..] if is_help_flag(help) => return Err(ParseFailure::HelpRequested),
+        [event, rest @ ..] => (event, rest),
+        [] => return Err("hook requires an event".into()),
+    };
+    let event = serde_json::from_value(serde_json::Value::String(event.clone()))
+        .map_err(|_| format!("unknown hook event: {event}"))?;
+    let port = match rest {
+        [] => 5222,
+        [flag, value] if flag == "--port" => parse_port(value)?,
+        _ => return Err("hook accepts only an event and --port PORT".into()),
+    };
+    Ok((event, port))
+}
+
+/// Whether `plugin` installs, rather than uninstalls.
+fn parse_plugin_args(args: &[String]) -> Result<bool, ParseFailure> {
+    match args.get(2..).unwrap_or_default() {
+        [help, ..] if is_help_flag(help) => Err(ParseFailure::HelpRequested),
+        [action, harness] if harness == "claude-code" => match action.as_str() {
+            "install" => Ok(true),
+            "uninstall" => Ok(false),
+            _ => Err(format!("unknown plugin action: {action}").into()),
+        },
+        _ => Err("plugin accepts install|uninstall claude-code".into()),
     }
 }
 
@@ -13560,6 +13624,54 @@ mod tests {
             .iter()
             .any(|arg| arg == "--no-menu-bar"));
         assert!(start(&["--no-menu-bar", "--no-menu-bar"]).is_err());
+    }
+
+    #[test]
+    fn start_parser_binds_hooks_to_one_session_without_passing_it_on() {
+        let start = |flags: &[&str]| {
+            let mut all = vec!["berd-call", "start"];
+            all.extend_from_slice(flags);
+            all.extend(["--voice", "Aaron", "--language", "en-US"]);
+            parse_start_args(&args(&all))
+        };
+        assert_eq!(start(&[]).unwrap().hook_session, None);
+        let parsed = start(&["--enable-hooks-for-session-id", "abc"]).unwrap();
+        assert_eq!(parsed.hook_session.as_deref(), Some("abc"));
+        assert_eq!(
+            parsed.session_arguments[1..],
+            ["--voice", "Aaron", "--language", "en-US"]
+        );
+        assert!(start(&["--enable-hooks-for-session-id", ""]).is_err());
+        assert!(start(&[
+            "--enable-hooks-for-session-id",
+            "a",
+            "--enable-hooks-for-session-id",
+            "b"
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn hook_and_plugin_commands_name_what_they_do() {
+        assert_eq!(
+            parse_hook_args(&args(&["berd-call", "hook", "pre-tool"])).unwrap(),
+            (hooks::HookEvent::PreTool, 5222)
+        );
+        assert_eq!(
+            parse_hook_args(&args(&["berd-call", "hook", "stop", "--port", "6000"])).unwrap(),
+            (hooks::HookEvent::Stop, 6000)
+        );
+        assert!(parse_hook_args(&args(&["berd-call", "hook", "session-start"])).is_err());
+        assert!(parse_hook_args(&args(&["berd-call", "hook"])).is_err());
+        assert_eq!(
+            parse_plugin_args(&args(&["berd-call", "plugin", "install", "claude-code"])),
+            Ok(true)
+        );
+        assert_eq!(
+            parse_plugin_args(&args(&["berd-call", "plugin", "uninstall", "claude-code"])),
+            Ok(false)
+        );
+        assert!(parse_plugin_args(&args(&["berd-call", "plugin", "install", "codex"])).is_err());
     }
 
     #[test]

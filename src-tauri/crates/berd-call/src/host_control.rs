@@ -52,6 +52,15 @@ pub(crate) trait HostControl: Send + Sync + 'static {
     fn restart(&self, session_arguments: Vec<String>) -> Result<Value, String>;
     /// Restarts the call's session with the Spokesperson on or off.
     fn set_spokesperson_mode(&self, on: bool) -> Result<Value, String>;
+    /// Decides an agent harness hook: `{"block": reason}` refuses what the
+    /// agent is about to do, and `{}` lets it go on.
+    fn hook(
+        &self,
+        event: crate::hooks::HookEvent,
+        session_id: &str,
+        subagent: bool,
+        call: bool,
+    ) -> Result<Value, String>;
 }
 
 pub(crate) struct ControlServer {
@@ -168,6 +177,13 @@ pub(crate) enum ControlRequest {
     },
     SpokespersonMode {
         on: bool,
+    },
+    Hook {
+        event: crate::hooks::HookEvent,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        subagent: bool,
+        call: bool,
     },
 }
 
@@ -300,6 +316,12 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
                 }
                 ControlRequest::Restart { session_arguments } => control.restart(session_arguments),
                 ControlRequest::SpokespersonMode { on } => control.set_spokesperson_mode(on),
+                ControlRequest::Hook {
+                    event,
+                    session_id,
+                    subagent,
+                    call,
+                } => control.hook(event, &session_id, subagent, call),
             },
         );
     let response = match result {
@@ -453,6 +475,15 @@ mod tests {
         fn set_spokesperson_mode(&self, on: bool) -> Result<Value, String> {
             Ok(json!({"spokesperson": on}))
         }
+        fn hook(
+            &self,
+            event: crate::hooks::HookEvent,
+            session_id: &str,
+            subagent: bool,
+            call: bool,
+        ) -> Result<Value, String> {
+            Ok(json!({"event": event, "sessionId": session_id, "subagent": subagent, "call": call}))
+        }
         fn status(&self) -> Result<Value, String> {
             Ok(json!({"running": !self.stopped.load(Ordering::SeqCst)}))
         }
@@ -491,7 +522,7 @@ mod tests {
         });
         let control: Arc<dyn HostControl> = concrete.clone();
         let worker = thread::spawn(move || {
-            for _ in 0..4 {
+            for _ in 0..5 {
                 server.serve_one(control.as_ref()).unwrap();
             }
         });
@@ -533,6 +564,19 @@ mod tests {
                 "language":"en-GB",
                 "relay":false,
             })
+        );
+        assert_eq!(
+            request(
+                port,
+                ControlRequest::Hook {
+                    event: crate::hooks::HookEvent::PreTool,
+                    session_id: "session".into(),
+                    subagent: false,
+                    call: true,
+                }
+            )
+            .unwrap(),
+            json!({"event":"pre-tool","sessionId":"session","subagent":false,"call":true})
         );
         assert_eq!(
             request(port, ControlRequest::Stop).unwrap()["stopping"],
