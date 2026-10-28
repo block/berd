@@ -108,9 +108,10 @@ fi
 
 ARCHIVE="$OUTPUT_DIR/$ARCHIVE_NAME"
 rm -f "$ARCHIVE" "$ARCHIVE.sha256"
-# Fixed metadata keeps rebuilds of the same signed binary byte-identical.
+# Plain USTAR has no room for PAX or AppleDouble metadata, and fixed metadata
+# keeps rebuilds of the same signed binary byte-identical.
 touch -t 200001010000 "$CALL"
-COPYFILE_DISABLE=1 tar -C "$STAGE" --owner=0 --group=0 --numeric-owner -cf - berd-call |
+COPYFILE_DISABLE=1 tar -C "$STAGE" --format=ustar --owner=0 --group=0 --numeric-owner -cf - berd-call |
   gzip -9n > "$ARCHIVE"
 [[ "$(tar -tzf "$ARCHIVE")" == berd-call ]] || { echo "unexpected $ARCHIVE_NAME contents" >&2; exit 1; }
 

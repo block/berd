@@ -1303,6 +1303,15 @@ describe("package-berd-call", () => {
       archives.push(await readFile(join(output, name)));
     }
     expect(archives[0].equals(archives[1])).toBe(true);
+    // Consumers read one plain USTAR regular file: no PAX or AppleDouble headers.
+    const tar = gunzipSync(archives[0]);
+    const field = (start, end) =>
+      tar.subarray(start, end).toString().replace(/\0.*$/s, "");
+    expect(field(0, 100)).toBe("berd-call");
+    expect(String.fromCharCode(tar[156])).toBe("0");
+    expect(tar.subarray(257, 263).toString()).toBe("ustar\0");
+    expect(Number.parseInt(field(124, 136), 8)).toBe("signed call".length);
+    expect(tar.subarray(1024).every((byte) => byte === 0)).toBe(true);
     const archive = join(dir, "one", name);
     const listing = run("tar", ["-tvzf", archive]);
     expect(listing.status, listing.stderr).toBe(0);
