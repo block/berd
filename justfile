@@ -288,6 +288,7 @@ ci-windows:
 # Run release/updater script tests.
 release-scripts-test:
     pnpm test:release-scripts
+    node --test scripts/install-berd-call*.test.mjs
 
 # Verify lockstep app, CLI, plugin, and Cargo.lock versions. An expected version
 # also requires the matching linked CHANGELOG.md entry.
