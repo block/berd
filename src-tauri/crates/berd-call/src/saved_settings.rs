@@ -61,6 +61,12 @@ pub(crate) fn load(path: &Path) -> Result<SavedSettings, String> {
             .cloned()
             .collect();
     }
+    // Spokesperson calls without agent speech saved the Realtime model as their
+    // speech settings. The speech endpoint rejects it, so fall back to the
+    // startup configuration, and the next save overwrites it.
+    settings.tts = settings.tts.take().filter(|tts| {
+        !matches!(tts, TtsSettings::OpenAi { model, .. } if model.to_ascii_lowercase().contains("realtime"))
+    });
     validate_arguments(&settings.arguments)?;
     Ok(settings)
 }
@@ -326,6 +332,48 @@ mod tests {
             );
         }
         assert_eq!(load(&path).unwrap().arguments, ["--voice", "Aaron"]);
+    }
+
+    fn saved_with_tts(model: &str) -> serde_json::Value {
+        serde_json::json!({
+            "arguments": ["--mode", "expert-spokesperson", "--tts-backend", "openai", "--rate", "1.2"],
+            "tts": {"backend": "openai", "model": model, "voice": "cedar", "rate": 1.2},
+        })
+    }
+
+    #[test]
+    fn a_realtime_model_saved_as_speech_settings_falls_back_and_is_overwritten() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        std::fs::write(&path, saved_with_tts("gpt-realtime-2.1").to_string()).unwrap();
+        let restored = load(&path).unwrap();
+        assert_eq!(restored.tts, None);
+        assert_eq!(
+            restored.arguments,
+            ["--tts-backend", "openai", "--rate", "1.2"]
+        );
+        update(&path, |latest| {
+            latest.status_sounds = Some(StatusSoundMode::Off)
+        })
+        .unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("realtime"), "survived in {written}");
+        assert_eq!(load(&path).unwrap().tts, None);
+    }
+
+    #[test]
+    fn speech_settings_for_a_speech_model_survive_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        std::fs::write(&path, saved_with_tts("gpt-4o-mini-tts").to_string()).unwrap();
+        assert_eq!(
+            load(&path).unwrap().tts,
+            Some(TtsSettings::OpenAi {
+                model: "gpt-4o-mini-tts".into(),
+                voice: "cedar".into(),
+                rate: 1.2,
+            })
+        );
     }
 }
 
