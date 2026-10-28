@@ -6,7 +6,6 @@ use tauri::{AppHandle, Emitter};
 
 use crate::services::atomic_file::write_bytes_atomically;
 
-pub(crate) const REALTIME_DEFAULT: &str = "wss://api.openai.com/v1/realtime";
 pub(crate) const STT_DEFAULT: &str = "wss://api.openai.com/v1/realtime?intent=transcription";
 pub(crate) const TTS_DEFAULT: &str = "https://api.openai.com/v1/audio/speech";
 pub(crate) const SETTINGS_CHANGED_EVENT: &str = "openai-voice:settings-changed";
@@ -17,7 +16,6 @@ static SETTINGS_UPDATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum VoiceEndpointKind {
-    Realtime,
     Stt,
     Tts,
 }
@@ -25,7 +23,6 @@ pub(crate) enum VoiceEndpointKind {
 impl VoiceEndpointKind {
     pub(crate) const fn default_url(self) -> &'static str {
         match self {
-            Self::Realtime => REALTIME_DEFAULT,
             Self::Stt => STT_DEFAULT,
             Self::Tts => TTS_DEFAULT,
         }
@@ -36,8 +33,6 @@ impl VoiceEndpointKind {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct VoiceEndpointSettings {
     #[serde(default)]
-    pub realtime: Option<String>,
-    #[serde(default)]
     pub stt: Option<String>,
     #[serde(default)]
     pub tts: Option<String>,
@@ -46,7 +41,6 @@ pub(crate) struct VoiceEndpointSettings {
 impl VoiceEndpointSettings {
     fn get(&self, kind: VoiceEndpointKind) -> Option<&str> {
         match kind {
-            VoiceEndpointKind::Realtime => self.realtime.as_deref(),
             VoiceEndpointKind::Stt => self.stt.as_deref(),
             VoiceEndpointKind::Tts => self.tts.as_deref(),
         }
@@ -54,7 +48,6 @@ impl VoiceEndpointSettings {
 
     fn set(&mut self, kind: VoiceEndpointKind, value: Option<String>) {
         *match kind {
-            VoiceEndpointKind::Realtime => &mut self.realtime,
             VoiceEndpointKind::Stt => &mut self.stt,
             VoiceEndpointKind::Tts => &mut self.tts,
         } = value;
@@ -121,7 +114,7 @@ fn validate(kind: VoiceEndpointKind, raw: &str) -> Result<Option<String>, String
     }
     let mut url = url::Url::parse(raw).map_err(|error| format!("Invalid endpoint URL: {error}"))?;
     let protocol = match kind {
-        VoiceEndpointKind::Realtime | VoiceEndpointKind::Stt => EndpointProtocol::WebSocket,
+        VoiceEndpointKind::Stt => EndpointProtocol::WebSocket,
         VoiceEndpointKind::Tts => EndpointProtocol::Http,
     };
     if !is_allowed_endpoint_url(&url, protocol) {
@@ -166,9 +159,7 @@ fn endpoint_for_base_url(base_url: &str, path: &str) -> Result<String, String> {
 }
 
 pub(crate) fn uses_legacy_environment_credential(kind: VoiceEndpointKind) -> Result<bool, String> {
-    Ok(!matches!(kind, VoiceEndpointKind::Realtime)
-        && std::env::var_os(BASE_URL_ENV).is_some()
-        && read_settings()?.get(kind).is_none())
+    Ok(std::env::var_os(BASE_URL_ENV).is_some() && read_settings()?.get(kind).is_none())
 }
 
 pub(crate) fn effective_url(kind: VoiceEndpointKind) -> Result<String, String> {
@@ -182,14 +173,11 @@ fn effective_url_from(
     if let Some(saved) = settings.get(kind) {
         return Ok(saved.to_string());
     }
-    if !matches!(kind, VoiceEndpointKind::Realtime)
-        && std::env::var_os("BERD_OPENAI_VOICE_BASE_URL").is_some()
-    {
+    if std::env::var_os("BERD_OPENAI_VOICE_BASE_URL").is_some() {
         let base = base_url()?;
         let path = match kind {
             VoiceEndpointKind::Stt => "realtime",
             VoiceEndpointKind::Tts => "audio/speech",
-            VoiceEndpointKind::Realtime => unreachable!(),
         };
         let mut url = url::Url::parse(&endpoint_for_base_url(&base, path)?)
             .map_err(|error| format!("Invalid OpenAI voice endpoint: {error}"))?;
@@ -292,11 +280,7 @@ mod tests {
 
     #[test]
     fn startup_keeps_the_credential_and_destination_paired_during_endpoint_changes() {
-        for kind in [
-            VoiceEndpointKind::Stt,
-            VoiceEndpointKind::Tts,
-            VoiceEndpointKind::Realtime,
-        ] {
+        for kind in [VoiceEndpointKind::Stt, VoiceEndpointKind::Tts] {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("endpoints.json");
             let (first, second) = if matches!(kind, VoiceEndpointKind::Tts) {
@@ -450,6 +434,24 @@ mod tests {
     }
 
     #[test]
+    fn a_removed_realtime_endpoint_is_dropped_on_the_next_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("endpoints.json");
+        std::fs::write(
+            &path,
+            r#"{"realtime":"wss://old.test/realtime","stt":"wss://stt.test/realtime"}"#,
+        )
+        .unwrap();
+        set_endpoint_at(&path, VoiceEndpointKind::Tts, "https://tts.test/speech").unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            saved,
+            serde_json::json!({"stt":"wss://stt.test/realtime","tts":"https://tts.test/speech"})
+        );
+    }
+
+    #[test]
     fn base_url_environment_override_keeps_the_v1_root_and_custom_path() {
         assert_eq!(
             normalize_base_url("https://proxy.example".into()).unwrap(),
@@ -473,7 +475,6 @@ mod tests {
 
     #[test]
     fn endpoints_are_full_urls_with_independent_openai_defaults() {
-        assert_eq!(VoiceEndpointKind::Realtime.default_url(), REALTIME_DEFAULT);
         assert_eq!(VoiceEndpointKind::Stt.default_url(), STT_DEFAULT);
         assert_eq!(VoiceEndpointKind::Tts.default_url(), TTS_DEFAULT);
         assert!(validate(VoiceEndpointKind::Stt, "wss://example.test/stt?mode=live").is_ok());
@@ -491,10 +492,6 @@ mod tests {
         )
         .is_ok());
         assert!(validate(VoiceEndpointKind::Stt, "ws://[::1]:18870/v1/realtime").is_ok());
-        assert!(validate(
-            VoiceEndpointKind::Realtime,
-            "wss://key@example.test/realtime"
-        )
-        .is_err());
+        assert!(validate(VoiceEndpointKind::Stt, "wss://key@example.test/realtime").is_err());
     }
 }

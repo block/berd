@@ -19,7 +19,7 @@ async def main(binary):
     sandbox = TemporaryDirectory(prefix="berd-voice-routing-")
     config = Path(sandbox.name) / "config" / "openai-voice-endpoints.json"
     config.parent.mkdir()
-    saved_settings = b'{"stt":"wss://saved.example/stt","tts":"https://saved.example/tts","realtime":"wss://saved.example/realtime"}'
+    saved_settings = b'{"stt":"wss://saved.example/stt","tts":"https://saved.example/tts"}'
     config.write_bytes(saved_settings)
     async def websocket(ws):
         observed.append(urlsplit(ws.request.path).path)
@@ -110,11 +110,10 @@ async def main(binary):
                     await process.wait()
                 await audio_task
         await run(['--tts-backend','openai','--stt-backend','openai','--stt-url',f'ws://127.0.0.1:{ws_port}/stt','--tts-url',f'http://127.0.0.1:{http_port}/tts'], True)
-        await run(['--mode','expert-spokesperson','--tts-backend','openai','--realtime-url',f'ws://127.0.0.1:{ws_port}/realtime'])
         await run(['--tts-backend','openai','--stt-backend','openai'], True, True)
         http.close()
         await http.wait_closed()
-    assert sorted(observed) == ['/default-stt','/default/audio/speech','/realtime','/stt','/tts'], observed
+    assert sorted(observed) == ['/default-stt','/default/audio/speech','/stt','/tts'], observed
     assert config.read_bytes() == saved_settings
     sandbox.cleanup()
     print(json.dumps({'requests':observed,'speech':'completed','savedSettings':'unchanged','nextSession':'uses environment defaults','audio':'PCM test host, no microphone or speakers'}, indent=2))

@@ -27,7 +27,6 @@ const MAX_PROMPT_BYTES: usize = 40_000;
 pub(crate) struct CodexRecord {
     pub cursor: Option<u64>,
     pub role: String,
-    pub handoff_id: Option<String>,
     pub text: String,
 }
 
@@ -36,9 +35,6 @@ impl CodexRecord {
         let mut header = self.role.to_uppercase();
         if let Some(cursor) = self.cursor {
             header = format!("{cursor} {header}");
-        }
-        if let Some(handoff_id) = &self.handoff_id {
-            header = format!("{header} {handoff_id}");
         }
         format!("[{header}]\n{}", self.text)
     }
@@ -293,7 +289,7 @@ pub(crate) fn delivery_prompt<'a>(
 pub(crate) fn guidance(executable: &Path, port: u16) -> String {
     let speak = format!("{} speak --port {port}", executable.display());
     format!(
-        "This is a live Berd Call. Treat USER records as live voice input: reply visibly, then run `{speak} --re CURSOR` with the same substantive reply. In Expert-Spokesperson mode, SPOKESPERSON records are context; answer HANDOFF records, whose header ends with the handoff ID, and add `--resolves HANDOFF_ID` for each handoff the reply answers. SPEECH_RESULT records report interruptions, failures, or newer user speech; LIFECYCLE records report call state. Do not start a second call."
+        "This is a live Berd Call. Treat USER records as live voice input: reply visibly, then run `{speak} --re CURSOR` with the same substantive reply. SPEECH_RESULT records report interruptions, failures, or newer user speech; LIFECYCLE records report call state. Do not start a second call."
     )
 }
 
@@ -472,7 +468,6 @@ mod tests {
         CodexRecord {
             cursor,
             role: role.into(),
-            handoff_id: None,
             text: text.into(),
         }
     }
@@ -481,15 +476,12 @@ mod tests {
     fn prompt_places_cursor_and_role_above_each_message() {
         let records = [
             record(Some(3), "user", "Tell me a story."),
-            CodexRecord {
-                handoff_id: Some("handoff-a-4".into()),
-                ..record(Some(4), "handoff", "Explain the lifecycle.")
-            },
+            record(Some(4), "user", "Explain the lifecycle."),
             record(None, "lifecycle", "Berd Call stopped."),
         ];
         assert_eq!(
             delivery_prompt(&records, Some("guidance")),
-            "[3 USER]\nTell me a story.\n\n[4 HANDOFF handoff-a-4]\nExplain the lifecycle.\n\n[LIFECYCLE]\nBerd Call stopped.\n\nguidance"
+            "[3 USER]\nTell me a story.\n\n[4 USER]\nExplain the lifecycle.\n\n[LIFECYCLE]\nBerd Call stopped.\n\nguidance"
         );
         assert_eq!(
             delivery_prompt(&records[..1], None),

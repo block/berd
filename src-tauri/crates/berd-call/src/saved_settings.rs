@@ -20,6 +20,8 @@ pub(crate) struct SavedSettings {
     pub _legacy_debug_sounds: Option<serde::de::IgnoredAny>,
 }
 
+const REMOVED_FLAGS: [&str; 3] = ["--mode", "--spokesperson-voice", "--spokesperson-rate"];
+
 pub(crate) fn path() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("BERD_CALL_SETTINGS_FILE") {
         return Ok(PathBuf::from(path));
@@ -46,8 +48,19 @@ pub(crate) fn load(path: &Path) -> Result<SavedSettings, String> {
     if bytes.len() > 65536 {
         return Err("saved call settings exceed 64 KiB".into());
     }
-    let settings: SavedSettings = serde_json::from_slice(&bytes)
+    let mut settings: SavedSettings = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid saved call settings: {error}"))?;
+    // Calls once chose a mode and a Spokesperson voice. Those options fall back
+    // to the defaults, and the next save overwrites them.
+    if settings.arguments.len().is_multiple_of(2) {
+        settings.arguments = settings
+            .arguments
+            .chunks_exact(2)
+            .filter(|pair| !REMOVED_FLAGS.contains(&pair[0].as_str()))
+            .flatten()
+            .cloned()
+            .collect();
+    }
     validate_arguments(&settings.arguments)?;
     Ok(settings)
 }
@@ -99,14 +112,11 @@ fn validate_arguments(arguments: &[String]) -> Result<(), String> {
                 pair[0].as_str(),
                 "--tts-backend"
                     | "--stt-backend"
-                    | "--mode"
                     | "--voice"
                     | "--language"
                     | "--rate"
                     | "--model-dir"
                     | "--stt-model-dir"
-                    | "--spokesperson-voice"
-                    | "--spokesperson-rate"
             )
         })
     {
@@ -134,49 +144,9 @@ pub(crate) fn merge_arguments(saved: &[String], explicit: &[String]) -> Vec<Stri
 }
 
 pub(crate) fn persistable_arguments(arguments: &[String]) -> Vec<String> {
-    let arguments: Vec<_> = arguments
-        .iter()
-        .filter(|argument| *argument != crate::DIRECT_AGENT_SPEECH)
-        .cloned()
-        .collect();
     arguments
         .chunks_exact(2)
-        .filter(|pair| {
-            !matches!(
-                pair[0].as_str(),
-                "--realtime-url"
-                    | "--stt-url"
-                    | "--tts-url"
-                    | "--spokesperson-options"
-                    | "--stt-hint"
-            )
-        })
-        .flatten()
-        .cloned()
-        .collect()
-}
-
-fn spokesperson_flag(pair: &[String]) -> bool {
-    matches!(
-        pair[0].as_str(),
-        "--spokesperson-voice" | "--spokesperson-rate"
-    )
-}
-
-/// Leaves out the Spokesperson's own voice, which only calls whose replies have theirs take.
-pub(crate) fn without_spokesperson(arguments: &[String]) -> Vec<String> {
-    arguments
-        .chunks_exact(2)
-        .filter(|pair| !spokesperson_flag(pair))
-        .flatten()
-        .cloned()
-        .collect()
-}
-
-pub(crate) fn only_spokesperson(arguments: &[String]) -> Vec<String> {
-    arguments
-        .chunks_exact(2)
-        .filter(|pair| spokesperson_flag(pair))
+        .filter(|pair| !matches!(pair[0].as_str(), "--stt-url" | "--tts-url" | "--stt-hint"))
         .flatten()
         .cloned()
         .collect()
@@ -194,44 +164,6 @@ pub(crate) fn without_tts(arguments: &[String]) -> Vec<String> {
         .flatten()
         .cloned()
         .collect()
-}
-
-/// The same call's session options with the Spokesperson on or off. Options only one mode takes are left out of the
-/// other; with the Spokesperson on, `direct` lets agents also speak in their own voice.
-/// The Spokesperson keeps as close to the agents' speed as it can.
-pub(crate) fn with_spokesperson(arguments: &[String], on: bool, direct: bool) -> Vec<String> {
-    let mut result: Vec<_> = arguments
-        .iter()
-        .filter(|argument| *argument != crate::DIRECT_AGENT_SPEECH)
-        .cloned()
-        .collect::<Vec<_>>()
-        .chunks_exact(2)
-        .filter(|pair| match pair[0].as_str() {
-            "--mode" => false,
-            "--realtime-url" => on,
-            "--stt-url" => !on,
-            "--tts-url" => !on || direct,
-            // The Spokesperson's speed follows the agents'.
-            "--spokesperson-rate" => false,
-            _ => on || !spokesperson_flag(pair),
-        })
-        .flatten()
-        .cloned()
-        .collect();
-    result.extend([
-        "--mode".into(),
-        if on {
-            "expert-spokesperson"
-        } else {
-            "conventional"
-        }
-        .into(),
-    ]);
-    if on && direct {
-        // Last, since it takes no value.
-        result.push(crate::DIRECT_AGENT_SPEECH.into());
-    }
-    result
 }
 
 #[cfg(test)]
@@ -341,8 +273,6 @@ mod tests {
     #[test]
     fn removing_tts_preferences_preserves_other_call_preferences() {
         let arguments = [
-            "--mode",
-            "chained",
             "--stt-backend",
             "macos",
             "--tts-backend",
@@ -356,71 +286,46 @@ mod tests {
         ]
         .map(str::to_string);
 
-        assert_eq!(
-            without_tts(&arguments),
-            ["--mode", "chained", "--stt-backend", "macos"]
-        );
+        assert_eq!(without_tts(&arguments), ["--stt-backend", "macos"]);
     }
 
     #[test]
-    fn turning_the_spokesperson_off_and_on_keeps_the_options_both_modes_take() {
-        let strings = |values: &[&str]| {
-            values
-                .iter()
-                .map(|value| value.to_string())
-                .collect::<Vec<_>>()
-        };
-        let realtime = strings(&[
-            "--mode",
-            "expert-spokesperson",
-            "--voice",
-            "Aaron",
-            "--rate",
-            "2",
-            "--spokesperson-voice",
-            "cedar",
-            "--spokesperson-rate",
-            "1",
-            "--realtime-url",
-            "wss://realtime.test/",
-            "--allow-direct-agent-speech",
-        ]);
-        let conventional = with_spokesperson(&realtime, false, true);
+    fn removed_mode_and_spokesperson_options_fall_back_to_defaults_and_are_overwritten() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "arguments": [
+                    "--mode", "expert-spokesperson",
+                    "--voice", "Aaron",
+                    "--spokesperson-voice", "cedar",
+                    "--spokesperson-rate", "1"
+                ],
+                "tts": null,
+                "input_policy": "suppress_input",
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let restored = load(&path).unwrap();
+        assert_eq!(restored.arguments, ["--voice", "Aaron"]);
         assert_eq!(
-            conventional,
-            strings(&["--voice", "Aaron", "--rate", "2", "--mode", "conventional"])
+            restored.input_policy,
+            Some(InputDuringTtsPolicy::SuppressInput)
         );
-        assert_eq!(
-            with_spokesperson(
-                &[
-                    conventional.clone(),
-                    strings(&["--stt-url", "wss://stt.test/"])
-                ]
-                .concat(),
-                true,
-                true
-            ),
-            strings(&[
-                "--voice",
-                "Aaron",
-                "--rate",
-                "2",
-                "--mode",
-                "expert-spokesperson",
-                "--allow-direct-agent-speech"
-            ])
-        );
-        assert_eq!(
-            with_spokesperson(&conventional, true, false),
-            strings(&[
-                "--voice",
-                "Aaron",
-                "--rate",
-                "2",
-                "--mode",
-                "expert-spokesperson"
-            ])
-        );
+        update(&path, |latest| {
+            latest.status_sounds = Some(StatusSoundMode::Off)
+        })
+        .unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        for removed in ["--mode", "expert-spokesperson", "spokesperson"] {
+            assert!(
+                !written.contains(removed),
+                "{removed} survived in {written}"
+            );
+        }
+        assert_eq!(load(&path).unwrap().arguments, ["--voice", "Aaron"]);
     }
 }
 

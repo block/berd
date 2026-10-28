@@ -234,8 +234,7 @@ impl TtsConfiguration {
             }
         }
         if let Self::OpenAi { voice, .. } = &self {
-            if !crate::openai_realtime_protocol::OPENAI_REALTIME_VOICE_IDS.contains(&voice.as_str())
-            {
+            if !crate::openai::OPENAI_VOICE_IDS.contains(&voice.as_str()) {
                 return Err(format!("OpenAI has no voice named {voice}"));
             }
         }
