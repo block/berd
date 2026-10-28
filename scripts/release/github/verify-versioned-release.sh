@@ -59,6 +59,8 @@ case "$PLATFORM" in
       "Berd_${VERSION}_${PLATFORM}.app.zip"
       "Berd_${VERSION}_${PLATFORM}.dmg"
     )
+    CALL_ARCHIVE_NAME="$(release_call_archive_name "$VERSION" "$PLATFORM")"
+    EXPECTED_ASSETS+=("$CALL_ARCHIVE_NAME" "$CALL_ARCHIVE_NAME.sha256")
     ;;
   windows-*)
     EXPECTED_ASSETS=("$(release_installer_name "$VERSION" "$PLATFORM")")

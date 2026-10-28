@@ -553,7 +553,7 @@ fn main() {
                 std::process::exit(1);
             }
             #[cfg(target_os = "macos")]
-            let _update_guard = guard_and_request_bundled_app_update();
+            let _update_guard = guard_and_request_update();
             #[cfg(target_os = "macos")]
             if let Err(error) = menu_bar::run(options) {
                 eprintln!("berd-call start failed: {error}");
@@ -759,19 +759,54 @@ fn bundled_app_path(executable: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
-fn guard_and_request_bundled_app_update() -> Option<std::fs::File> {
-    let app_path = std::env::current_exe()
-        .ok()
-        .and_then(|executable| bundled_app_path(&executable))?;
+fn guard_and_request_update() -> Option<std::fs::File> {
+    use std::os::unix::process::CommandExt;
+    let executable = resolved_executable_path(&std::env::current_exe().ok()?);
     let guard = match berd_call::update_guard::hold_call() {
         Ok(guard) => guard,
         Err(error) => {
-            eprintln!("berd-call could not guard app updates during this call: {error}");
+            eprintln!("berd-call could not guard updates during this call: {error}");
             return None;
         }
     };
-    request_bundled_app_update(&app_path);
+    if let Some(app_path) = bundled_app_path(&executable) {
+        request_bundled_app_update(&app_path);
+    } else if std::env::var("BERD_CALL_AUTO_UPDATE").as_deref() != Ok("0") {
+        if let Some(helper) = standalone_update_helper(&executable) {
+            match std::process::Command::new("/bin/bash")
+                .arg(helper)
+                .process_group(0)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            {
+                Ok(mut child) => {
+                    std::thread::spawn(move || {
+                        let _ = child.wait();
+                    });
+                }
+                Err(error) => eprintln!("berd-call could not check standalone updates: {error}"),
+            }
+        }
+    }
     Some(guard)
+}
+
+// A managed standalone install has its helper and metadata beside the binary.
+// Every app bundle, including Buzz, keeps ownership of its own executable.
+#[cfg(any(target_os = "macos", test))]
+fn standalone_update_helper(executable: &Path) -> Option<PathBuf> {
+    if executable.file_name()?.to_str()? != "berd-call"
+        || executable
+            .ancestors()
+            .any(|path| path.extension().is_some_and(|ext| ext == "app"))
+    {
+        return None;
+    }
+    let root = executable.parent()?.join(".berd-call");
+    let helper = root.join("update");
+    (root.join("installed").is_file() && helper.is_file()).then_some(helper)
 }
 
 #[cfg(target_os = "macos")]
@@ -8779,6 +8814,26 @@ mod tests {
     use std::os::fd::IntoRawFd;
     use std::os::unix::net::UnixStream;
     use std::sync::Mutex;
+
+    #[test]
+    fn standalone_updates_require_a_managed_install_outside_app_bundles() {
+        let directory = tempfile::tempdir().unwrap();
+        let bin = directory.path().join("bin with spaces");
+        std::fs::create_dir_all(bin.join(".berd-call")).unwrap();
+        let executable = bin.join("berd-call");
+        assert!(standalone_update_helper(&executable).is_none());
+        std::fs::write(bin.join(".berd-call/installed"), "0.6.5\n").unwrap();
+        std::fs::write(bin.join(".berd-call/update"), "").unwrap();
+        assert_eq!(
+            standalone_update_helper(&executable),
+            Some(bin.join(".berd-call/update"))
+        );
+        let app = directory.path().join("Buzz.app/Contents/MacOS");
+        std::fs::create_dir_all(app.join(".berd-call")).unwrap();
+        std::fs::write(app.join(".berd-call/installed"), "0.6.5\n").unwrap();
+        std::fs::write(app.join(".berd-call/update"), "").unwrap();
+        assert!(standalone_update_helper(&app.join("berd-call")).is_none());
+    }
 
     #[cfg(target_os = "macos")]
     #[test]
