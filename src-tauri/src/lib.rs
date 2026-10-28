@@ -237,9 +237,7 @@ pub fn run() {
             app.manage(commands::siri_voice::SiriVoiceState::default());
             app.manage(commands::openai_audio::OpenAiVoiceState::default());
             app.manage(commands::native_voice::NativeVoiceState::default());
-            app.manage(commands::voice_buddy::RealtimeVoiceControlsState::default());
             app.manage(commands::voice_capture::VoiceCaptureState::default());
-            app.manage(commands::openai_realtime::OpenAiRealtimeRuntimeState::default());
             app.manage(commands::telemetry::TelemetryAuthState::new(
                 app_data_dir.clone(),
             ));
@@ -607,24 +605,7 @@ pub fn run() {
             commands::model_setup::clear_model_setup_status,
             commands::notifications::show_completion_notification,
             commands::openai_realtime::get_openai_realtime_status,
-            commands::openai_realtime::set_openai_realtime_api_key,
-            commands::openai_realtime::clear_openai_realtime_api_key,
             commands::openai_realtime::create_openai_realtime_session,
-            commands::openai_realtime::start_openai_realtime_spokesperson_runtime,
-            commands::openai_realtime::send_openai_realtime_spokesperson_runtime_event,
-            commands::openai_realtime::push_openai_realtime_spokesperson_audio,
-            commands::openai_realtime::stop_openai_realtime_spokesperson_runtime,
-            commands::openai_realtime::release_openai_realtime_spokesperson_runtime,
-            commands::openai_realtime::update_openai_realtime_spokesperson_settings,
-            commands::openai_realtime::update_openai_realtime_status_sounds,
-            commands::openai_realtime::create_openai_realtime_expert_instructions,
-            commands::openai_realtime::create_openai_realtime_transcript_seed,
-            commands::openai_realtime::deliver_openai_realtime_expert_message,
-            commands::openai_realtime::dismiss_openai_realtime_handoffs_with_context,
-            commands::openai_realtime::complete_openai_realtime_expert_turn,
-            commands::openai_realtime::flush_openai_realtime_expert_events,
-            commands::openai_realtime::reduce_openai_realtime_spokesperson_event,
-            commands::openai_realtime::request_openai_realtime_typed_user_message,
             commands::openai_realtime::claim_voice_dictation_microphone,
             commands::openai_realtime::release_voice_dictation_microphone,
             commands::agent_setup::start_agent_setup,
@@ -734,15 +715,6 @@ pub fn run() {
             commands::voice_buddy::show_voice_conversation_controls,
             commands::voice_buddy::set_voice_conversation_controls_suppressed,
             commands::voice_buddy::stop_voice_conversation_from_buddy,
-            commands::voice_buddy::start_openai_realtime_voice_controls,
-            commands::voice_buddy::get_openai_realtime_voice_controls_status,
-            commands::voice_buddy::rebind_openai_realtime_voice_controls,
-            commands::voice_buddy::show_openai_realtime_voice_controls,
-            commands::voice_buddy::set_openai_realtime_voice_controls_suppressed,
-            commands::voice_buddy::publish_openai_realtime_voice_activity,
-            commands::voice_buddy::publish_openai_realtime_voice_microphone_muted,
-            commands::voice_buddy::request_openai_realtime_voice_control,
-            commands::voice_buddy::stop_openai_realtime_voice_controls,
             commands::notifications::should_suppress_completion_notification,
             commands::voice_capture::register_voice_renderer_instance,
             commands::voice_capture::set_voice_renderer_foreground_session,
@@ -831,10 +803,6 @@ fn attach_main_window_lifecycle(app: &tauri::App) {
     main.on_window_event(move |event| {
         if matches!(event, WindowEvent::Destroyed) {
             commands::native_voice::handle_voice_owner_window_destroyed(&app_handle, "main");
-            commands::voice_buddy::handle_realtime_voice_owner_window_destroyed(
-                &app_handle,
-                "main",
-            );
             return;
         }
         if let WindowEvent::CloseRequested { api, .. } = event {
@@ -845,13 +813,7 @@ fn attach_main_window_lifecycle(app: &tauri::App) {
             let active_voice_owner_window_label = app_handle
                 .state::<commands::native_voice::NativeVoiceState>()
                 .active_session_lifecycle_target()
-                .map(|(_, owner_window_label, _)| owner_window_label)
-                .or_else(|| {
-                    app_handle
-                        .state::<commands::voice_buddy::RealtimeVoiceControlsState>()
-                        .active_target()
-                        .map(|(_, owner_window_label, _)| owner_window_label)
-                });
+                .map(|(_, owner_window_label, _)| owner_window_label);
             let controls_match_active_voice =
                 commands::voice_buddy::matches_active_lifecycle(&app_handle);
             let preserve_for_voice = commands::voice_buddy::should_preserve_main_for_voice(

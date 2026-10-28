@@ -5,11 +5,8 @@ import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { SessionChatRuntime } from "@/shared/types/chat";
 import { QueuedMessageOwnershipLostError } from "./preCommitSendRejection";
 import { dispatchPrompt } from "./sendCore";
-import { registerRealtimeEmissary } from "@/features/voice-conversation/lib/realtimeEmissaryBridge";
-import { setVoiceConversationMode } from "@/features/voice-conversation/lib/voiceConversationModePreference";
 
 const mocks = vi.hoisted(() => ({
-  acpExportSession: vi.fn(),
   acpSendMessage: vi.fn(),
   archiveSession: vi.fn(),
   unarchiveSession: vi.fn(),
@@ -22,7 +19,6 @@ vi.mock("./autoRoutingDispatch", () => ({
 }));
 
 vi.mock("@/shared/api/acp", () => ({
-  acpExportSession: (...args: unknown[]) => mocks.acpExportSession(...args),
   acpSendMessage: (...args: unknown[]) => mocks.acpSendMessage(...args),
 }));
 
@@ -37,8 +33,6 @@ vi.mock("@/shared/api/acpApi", () => ({
 describe("dispatchPrompt pre-commit rejection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    window.localStorage.removeItem("goose:voice-conversation-mode");
-    mocks.acpExportSession.mockResolvedValue("{}");
     useChatStore.setState({
       messagesBySession: {},
       sessionStateById: {},
@@ -215,7 +209,6 @@ describe("dispatchPrompt voice conversation no-op", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.acpExportSession.mockResolvedValue("{}");
     useChatStore.setState({
       messagesBySession: {},
       sessionStateById: {},
@@ -286,7 +279,7 @@ describe("dispatchPrompt voice conversation no-op", () => {
     rejectCommittedPrompt(emptyResponseError);
 
     await expect(
-      dispatchPrompt("session-1", "Emissary said: Hello", {
+      dispatchPrompt("session-1", "Hello", {
         userMessageMetadata: { origin: "voice_conversation" },
       }),
     ).resolves.toBeUndefined();
@@ -342,10 +335,9 @@ describe("dispatchPrompt voice conversation no-op", () => {
   });
 });
 
-describe("dispatchPrompt realtime Master transcript recovery", () => {
+describe("dispatchPrompt hydrating session", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.acpExportSession.mockResolvedValue("{}");
     useChatStore.setState({
       messagesBySession: {},
       sessionStateById: {},
@@ -356,198 +348,7 @@ describe("dispatchPrompt realtime Master transcript recovery", () => {
     });
   });
 
-  it("does not notify the emissary when a Master turn completes", async () => {
-    const sendMasterMessage = vi.fn();
-    const completeMasterTurn = vi.fn();
-    const release = registerRealtimeEmissary({
-      sessionId: "session-1",
-      sendMasterMessage,
-      dismissHandoffs: vi.fn(),
-      completeMasterTurn,
-    });
-    mocks.acpSendMessage.mockImplementationOnce(
-      (
-        sessionId: string,
-        _prompt: string,
-        options: {
-          onPromptDispatching(): void;
-          onPromptDispatched(): void;
-        },
-      ) => {
-        options.onPromptDispatching();
-        options.onPromptDispatched();
-        useChatStore.getState().addMessage(sessionId, {
-          id: "master-final",
-          role: "assistant",
-          created: Date.now(),
-          content: [{ type: "text", text: "There are 20 repositories." }],
-          metadata: {
-            agentVisible: true,
-            userVisible: true,
-            completionStatus: "completed",
-          },
-        });
-        return Promise.resolve();
-      },
-    );
-
-    await dispatchPrompt("session-1", "Count repositories", {});
-
-    expect(sendMasterMessage).not.toHaveBeenCalled();
-    expect(completeMasterTurn).toHaveBeenCalledWith({
-      reminderHandoffIds: [],
-    });
-    expect(useChatStore.getState().messagesBySession["session-1"]).toHaveLength(
-      2,
-    );
-    release();
-  });
-
-  it("keeps a completed Expert turn successful when Realtime completion fails", async () => {
-    const release = registerRealtimeEmissary({
-      sessionId: "session-1",
-      sendMasterMessage: vi.fn(),
-      dismissHandoffs: vi.fn(),
-      completeMasterTurn: () => {
-        throw new Error("Realtime owner disappeared");
-      },
-    });
-    mocks.acpSendMessage.mockImplementationOnce(
-      (
-        sessionId: string,
-        _prompt: string,
-        options: {
-          onPromptDispatching(): void;
-          onPromptDispatched(): void;
-        },
-      ) => {
-        options.onPromptDispatching();
-        options.onPromptDispatched();
-        useChatStore.getState().addMessage(sessionId, {
-          id: "master-final",
-          role: "assistant",
-          created: Date.now(),
-          content: [{ type: "text", text: "The Expert finished." }],
-          metadata: { completionStatus: "completed" },
-        });
-        return Promise.resolve();
-      },
-    );
-
-    await expect(
-      dispatchPrompt("session-1", "Complete the work", {}),
-    ).resolves.toBeUndefined();
-    expect(
-      useChatStore.getState().getSessionRuntime("session-1").error,
-    ).toBeNull();
-    release();
-  });
-
-  it("returns private reminder handoff ids to the realtime bridge", async () => {
-    const completeMasterTurn = vi.fn();
-    const release = registerRealtimeEmissary({
-      sessionId: "session-1",
-      sendMasterMessage: vi.fn(),
-      dismissHandoffs: vi.fn(),
-      completeMasterTurn,
-    });
-    mocks.acpSendMessage.mockImplementationOnce(
-      (
-        sessionId: string,
-        _prompt: string,
-        options: {
-          onPromptDispatching(): void;
-          onPromptDispatched(): void;
-        },
-      ) => {
-        options.onPromptDispatching();
-        options.onPromptDispatched();
-        useChatStore.getState().addMessage(sessionId, {
-          id: "master-reminder-final",
-          role: "assistant",
-          created: Date.now(),
-          content: [{ type: "text", text: "Reminder handled." }],
-          metadata: {
-            agentVisible: true,
-            userVisible: true,
-            completionStatus: "completed",
-          },
-        });
-        return Promise.resolve();
-      },
-    );
-
-    await dispatchPrompt("session-1", "Private reminder", {
-      acpGooseMetadata: {
-        realtimeHandoffReminderIds: ["handoff-1", "handoff-2"],
-      },
-    });
-
-    expect(completeMasterTurn).toHaveBeenCalledWith({
-      reminderHandoffIds: ["handoff-1", "handoff-2"],
-    });
-    release();
-  });
-
-  it("completes a realtime lifecycle that joins an existing Master run", async () => {
-    let finishPrompt: (() => void) | undefined;
-    mocks.acpSendMessage.mockImplementationOnce(
-      (
-        sessionId: string,
-        _prompt: string,
-        options: {
-          onPromptDispatching(): void;
-          onPromptDispatched(): void;
-        },
-      ) => {
-        options.onPromptDispatching();
-        options.onPromptDispatched();
-        return new Promise<void>((resolve) => {
-          finishPrompt = () => {
-            useChatStore.getState().addMessage(sessionId, {
-              id: "master-final-after-realtime-start",
-              role: "assistant",
-              created: Date.now(),
-              content: [{ type: "text", text: "The Expert finished." }],
-              metadata: {
-                agentVisible: true,
-                userVisible: true,
-                completionStatus: "completed",
-              },
-            });
-            resolve();
-          };
-        });
-      },
-    );
-
-    const prompt = dispatchPrompt("session-1", "Already running", {});
-    await vi.waitFor(() => expect(finishPrompt).toBeTypeOf("function"));
-
-    setVoiceConversationMode("openai-realtime");
-    const completeMasterTurn = vi.fn();
-    const release = registerRealtimeEmissary({
-      sessionId: "session-1",
-      sendMasterMessage: vi.fn(),
-      dismissHandoffs: vi.fn(),
-      completeMasterTurn,
-    });
-    finishPrompt?.();
-    await prompt;
-
-    expect(completeMasterTurn).toHaveBeenCalledWith({
-      reminderHandoffIds: [],
-    });
-    release();
-  });
-
-  it("keeps a new-session Master turn owned until hydration publishes its final text", async () => {
-    const release = registerRealtimeEmissary({
-      sessionId: "session-1",
-      sendMasterMessage: vi.fn(),
-      dismissHandoffs: vi.fn(),
-      completeMasterTurn: vi.fn(),
-    });
+  it("keeps a new-session turn owned until hydration publishes its final text", async () => {
     useChatStore.getState().setSessionLoading("session-1", true);
     mocks.acpSendMessage.mockImplementationOnce(
       (
@@ -562,7 +363,7 @@ describe("dispatchPrompt realtime Master transcript recovery", () => {
         options.onPromptDispatched();
         window.setTimeout(() => {
           useChatStore.getState().addMessage(sessionId, {
-            id: "hydrating-master-final",
+            id: "hydrating-final",
             role: "assistant",
             created: Date.now(),
             content: [{ type: "text", text: "The hydrated final answer." }],
@@ -583,108 +384,9 @@ describe("dispatchPrompt realtime Master transcript recovery", () => {
     expect(
       useChatStore.getState().messagesBySession["session-1"]?.at(-1),
     ).toMatchObject({
-      id: "hydrating-master-final",
+      id: "hydrating-final",
       content: [{ type: "text", text: "The hydrated final answer." }],
     });
-    release();
-  });
-
-  it("recovers missed Master thinking, tools, and final text from the durable turn", async () => {
-    const release = registerRealtimeEmissary({
-      sessionId: "session-1",
-      sendMasterMessage: vi.fn(),
-      dismissHandoffs: vi.fn(),
-      completeMasterTurn: vi.fn(),
-    });
-    mocks.acpExportSession.mockResolvedValue(
-      JSON.stringify({
-        conversation: [
-          {
-            id: "master-user",
-            role: "user",
-            created: 1_788_111_502,
-            content: [{ type: "text", text: "Count repositories" }],
-          },
-          {
-            id: "master-work",
-            role: "assistant",
-            created: 1_788_111_505,
-            content: [
-              { type: "thinking", thinking: "I should inspect the disk." },
-              {
-                type: "toolRequest",
-                id: "tool-1",
-                toolCall: {
-                  status: "success",
-                  value: { name: "shell", arguments: { command: "find" } },
-                },
-              },
-            ],
-          },
-          {
-            id: "master-tool-result",
-            role: "user",
-            created: 1_788_111_505,
-            content: [
-              {
-                type: "toolResponse",
-                id: "tool-1",
-                toolResult: {
-                  status: "success",
-                  value: {
-                    content: [{ type: "text", text: "21" }],
-                    isError: false,
-                  },
-                },
-              },
-            ],
-          },
-          {
-            id: "master-final",
-            role: "assistant",
-            created: 1_788_111_506,
-            content: [{ type: "text", text: "There are 21 repositories." }],
-          },
-        ],
-      }),
-    );
-    mocks.acpSendMessage.mockImplementationOnce(
-      (
-        _sessionId: string,
-        _prompt: string,
-        options: {
-          onPromptDispatching(): void;
-          onPromptDispatched(): void;
-        },
-      ) => {
-        options.onPromptDispatching();
-        options.onPromptDispatched();
-        return Promise.resolve();
-      },
-    );
-
-    await dispatchPrompt("session-1", "Count repositories", {});
-
-    const recovered = useChatStore
-      .getState()
-      .messagesBySession["session-1"]?.filter(
-        (message) => message.role === "assistant",
-      );
-    expect(recovered).toMatchObject([
-      {
-        id: "master-work",
-        content: [
-          { type: "thinking", text: "I should inspect the disk." },
-          { type: "toolRequest", id: "tool-1", status: "completed" },
-          { type: "toolResponse", id: "tool-1", result: "21" },
-        ],
-      },
-      {
-        id: "master-final",
-        content: [{ type: "text", text: "There are 21 repositories." }],
-      },
-    ]);
-    release();
   });
 });
 

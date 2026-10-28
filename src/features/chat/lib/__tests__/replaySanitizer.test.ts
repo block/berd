@@ -63,65 +63,14 @@ describe("sanitizeReplayMessages", () => {
     ]);
   });
 
-  it("restores batched realtime transcripts to user and spoken Spokesperson bubbles", () => {
-    const message = createTextMessage(
-      "voice-batch",
-      "user",
-      "[Voice transcript] Spokesperson said: Let me check.\n" +
-        "[Voice transcript] Spokesperson said (interrupted; best-effort transcript): One moment.\n" +
-        "[Voice transcript] User said: What did you find?",
-    );
-    message.metadata = {
-      ...message.metadata,
-      origin: "voice_conversation",
-    };
-
-    expect(sanitizeReplayMessages([message])).toMatchObject([
-      {
-        id: "voice-batch",
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "Let me check.",
-            speech: { status: "spoken" },
-          },
-        ],
-        metadata: {
-          userVisible: true,
-          agentVisible: false,
-          voiceConversationDebugEvent: "emissarySpeech",
-        },
-      },
-      {
-        id: "voice-batch:voice:1",
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "One moment.",
-            speech: { status: "interrupted", confidence: "low" },
-          },
-        ],
-        metadata: { voiceConversationDebugEvent: "emissarySpeech" },
-      },
-      {
-        id: "voice-batch:voice:2",
-        role: "user",
-        content: [{ type: "text", text: "What did you find?" }],
-        metadata: { userVisible: true, agentVisible: false },
-      },
-    ]);
-  });
-
-  it("restores a current Expert wake batch with cursors and a handoff", () => {
-    const handoffId = "handoff-123e4567-e89b-12d3-a456-426614174000-6";
+  it("restores the user and spoken bubbles of a hidden legacy Expert wake batch", () => {
     const message = createTextMessage(
       "expert-wake",
       "user",
       "[Voice transcript; cursor 4] User said: Check my Development folder.\n" +
         "[Voice transcript; cursor 5] Spokesperson said: Let me check that.\n" +
-        `[Handoff ${handoffId} from spokesperson; cursor 6] Count the repositories.`,
+        "[Voice transcript; cursor 6] Spokesperson said (interrupted; best effort): One mo\n" +
+        "[Handoff handoff-123e4567-e89b-12d3-a456-426614174000-6 from spokesperson; cursor 7] Count the repositories.",
     );
     message.metadata = {
       ...message.metadata,
@@ -131,10 +80,13 @@ describe("sanitizeReplayMessages", () => {
 
     expect(sanitizeReplayMessages([message])).toMatchObject([
       {
+        id: "expert-wake",
         role: "user",
         content: [{ type: "text", text: "Check my Development folder." }],
+        metadata: { userVisible: true, agentVisible: false },
       },
       {
+        id: "expert-wake:voice:1",
         role: "assistant",
         content: [
           {
@@ -143,43 +95,40 @@ describe("sanitizeReplayMessages", () => {
             speech: { status: "spoken" },
           },
         ],
+        metadata: { userVisible: true, agentVisible: false },
       },
       {
+        id: "expert-wake:voice:2",
         role: "assistant",
-        content: [{ type: "text", text: "Count the repositories." }],
-        metadata: {
-          personaName: "Spokesperson → Expert",
-          voiceConversationDebugEvent: "emissaryToMaster",
-        },
+        content: [
+          {
+            type: "text",
+            text: "One mo",
+            speech: { status: "interrupted" },
+          },
+        ],
+        metadata: { userVisible: true },
       },
     ]);
   });
 
-  it("restores persisted Spokesperson handoffs as coordination bubbles", () => {
-    const handoffId = "handoff-123e4567-e89b-12d3-a456-426614174000-1";
-    const message = createTextMessage(
-      "direct-message",
+  it("keeps voice-origin messages that are not legacy transcripts", () => {
+    const message = createTextMessage("voice-1", "user", "Open the settings");
+    message.metadata = { ...message.metadata, origin: "voice_conversation" };
+    const handoff = createTextMessage(
+      "handoff-1",
       "user",
-      `[Handoff ${handoffId} from spokesperson; cursor 1] Check the transcript storage.`,
+      "[Handoff handoff-123e4567-e89b-12d3-a456-426614174000-1 from spokesperson; cursor 1] Check it.",
     );
-    message.metadata = {
-      ...message.metadata,
+    handoff.metadata = {
+      ...handoff.metadata,
       origin: "voice_conversation",
       userVisible: false,
     };
 
-    expect(sanitizeReplayMessages([message])).toMatchObject([
-      {
-        id: "direct-message",
-        role: "assistant",
-        content: [{ type: "text", text: "Check the transcript storage." }],
-        metadata: {
-          personaName: "Spokesperson → Expert",
-          userVisible: true,
-          agentVisible: false,
-          voiceConversationDebugEvent: "emissaryToMaster",
-        },
-      },
+    expect(sanitizeReplayMessages([message, handoff])).toEqual([
+      message,
+      handoff,
     ]);
   });
 

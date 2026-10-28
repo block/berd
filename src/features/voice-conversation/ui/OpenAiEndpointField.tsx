@@ -10,7 +10,6 @@ import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 
 const DEFAULT_URLS: Record<OpenAiVoiceEndpointKind, string> = {
-  realtime: "wss://api.openai.com/v1/realtime",
   stt: "wss://api.openai.com/v1/realtime?intent=transcription",
   tts: "https://api.openai.com/v1/audio/speech",
 };

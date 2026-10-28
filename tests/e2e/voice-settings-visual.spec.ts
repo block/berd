@@ -27,7 +27,6 @@ test("captures consistent voice controls for each backend", async ({
   settings: page,
 }, testInfo) => {
   await page.addInitScript(() => {
-    localStorage.setItem("goose:voice-conversation-mode", "chained");
     localStorage.setItem("goose:voice-input-backend", "macos");
     localStorage.setItem("goose:voice-output-backend", "siri");
   });
@@ -62,16 +61,6 @@ test("captures consistent voice controls for each backend", async ({
     page.getByRole("button", { name: "Choose a voice: Marin (default)" }),
   ).toBeVisible();
   await testInfo.attach("voice-settings-openai-tts", {
-    body: await page.screenshot({ fullPage: true }),
-    contentType: "image/png",
-  });
-
-  await page
-    .getByRole("radio", { name: "Talk through a voice assistant Cloud" })
-    .click();
-  await expect(page.getByText("OpenAI API key", { exact: true })).toBeVisible();
-  await expect(page.getByText("Realtime model")).toBeHidden();
-  await testInfo.attach("voice-settings-voice-assistant", {
     body: await page.screenshot({ fullPage: true }),
     contentType: "image/png",
   });

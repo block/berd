@@ -162,7 +162,7 @@ export function buildInitScript(options?: {
       const ACP_SOCKETS = new Set();
       const VOICE_ENDPOINTS = JSON.parse(
         localStorage.getItem("goose:e2e:voice-endpoints") ??
-          '{"realtime":null,"stt":null,"tts":null}',
+          '{"stt":null,"tts":null}',
       );
       const LAYOUT_CONSTRAINTS = {
         minCenter: -1000000,

@@ -10,7 +10,7 @@ export type BerdVoiceConversationBackend =
   | "pocket"
   | "siri"
   | "openai";
-export type BerdVoiceConversationMode = "chained" | "openai-realtime";
+export type BerdVoiceConversationMode = "chained";
 export type BerdVoiceConversationEndReason =
   | "user"
   | "replacement"

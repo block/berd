@@ -125,7 +125,6 @@ enum OpenAiStreamCommand {
 pub struct OpenAiVoiceStatus {
     stt_configured: bool,
     tts_configured: bool,
-    realtime_configured: bool,
     stt_configuration_source: OpenAiVoiceConfigurationSource,
     tts_configuration_source: OpenAiVoiceConfigurationSource,
     stt_unavailable_reason: Option<String>,
@@ -317,26 +316,23 @@ pub async fn get_openai_voice_status(
         (
             openai_voice_credentials::is_present(OpenAiVoiceCredential::SpeechToText),
             openai_voice_credentials::is_present(OpenAiVoiceCredential::TextToSpeech),
-            openai_voice_credentials::is_present(OpenAiVoiceCredential::SelectedRealtimeAssistant),
         )
     })
     .await
     .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))?;
-    let (stt_result, tts_result, realtime_result) = credential_result;
+    let (stt_result, tts_result) = credential_result;
     let stt_error = stt_result.as_ref().err().cloned();
     let tts_error = tts_available
         .then(|| tts_result.as_ref().err().cloned())
         .flatten();
     let stt_configured = stt_result.unwrap_or(false);
     let tts_configured = tts_available && tts_result.unwrap_or(false);
-    let realtime_configured = realtime_result?;
     if state.credential_revision.load(Ordering::Acquire) == credential_revision {
         state.configured.store(stt_configured, Ordering::Release);
     }
     Ok(OpenAiVoiceStatus {
         stt_configured,
         tts_configured,
-        realtime_configured,
         stt_configuration_source: stt_configuration_source(),
         tts_configuration_source: tts_configuration_source(),
         stt_unavailable_reason: stt_error,

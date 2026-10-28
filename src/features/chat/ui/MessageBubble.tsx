@@ -850,7 +850,6 @@ export const MessageBubble = memo(function MessageBubble({
   }, [isCopyConfirmed, updateRowState]);
 
   const isUser = role === "user";
-  const voiceDebugEvent = message.metadata?.voiceConversationDebugEvent;
   const messageAttachments =
     message.metadata?.attachments ?? EMPTY_MESSAGE_ATTACHMENTS;
   const attachmentPreviewItems = useMemo(
@@ -1018,7 +1017,6 @@ export const MessageBubble = memo(function MessageBubble({
             ? "user-message"
             : "assistant-message"
       }
-      data-realtime-voice-debug-event={voiceDebugEvent}
       data-message-fragment-role={fragmentRole}
       {...rowRootAttributes}
     >
@@ -1060,9 +1058,7 @@ export const MessageBubble = memo(function MessageBubble({
           shouldReserveMessageActionSpace && !isBerdctlNotification && "pb-9",
           isUserAuthored
             ? "max-w-[var(--chat-user-message-max-width)] items-end"
-            : voiceDebugEvent && voiceDebugEvent !== "emissarySpeech"
-              ? "w-full max-w-3xl items-start"
-              : "w-full items-start",
+            : "w-full items-start",
         )}
       >
         {showAssistantIdentity ? (
@@ -1107,9 +1103,6 @@ export const MessageBubble = memo(function MessageBubble({
                     : "w-full",
                 hasVoiceSpeech &&
                   "rounded-lg border border-border/80 px-4 py-3 shadow-sm",
-                voiceDebugEvent &&
-                  voiceDebugEvent !== "emissarySpeech" &&
-                  "rounded-lg border px-4 py-3 shadow-sm",
               )}
               onClick={handleContentClick}
             >

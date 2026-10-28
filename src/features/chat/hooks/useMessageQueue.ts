@@ -1,13 +1,7 @@
 import { useEffect, useCallback, useMemo, useRef } from "react";
-import { toast } from "sonner";
-import { i18n } from "@/shared/i18n";
 import type { ChatState } from "@/shared/types/chat";
 import { isPromiseLike } from "@/shared/lib/isPromiseLike";
-import {
-  type ChatAttachmentDraft,
-  createSystemNotificationMessage,
-} from "@/shared/types/messages";
-import { stopOpenAiRealtimeConversationForSession } from "@/features/voice-conversation/hooks/useOpenAiRealtimeConversation";
+import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import {
   assertQueuedMessageAttemptOwned,
   becameQueuedMessageTargetAttemptable,
@@ -298,10 +292,7 @@ export function useMessageQueue(
 
         if (accepted === false) {
           let retryPayload = latestQueuedMessage.payload;
-          if (
-            retryPayload.showInComposer === false &&
-            retryPayload.sendOptions?.userMessageMetadata?.userVisible !== false
-          ) {
+          if (retryPayload.showInComposer === false) {
             retryPayload = {
               ...retryPayload,
               showInComposer: true,
@@ -336,32 +327,8 @@ export function useMessageQueue(
               clearTimeout(retryTimerRef.current);
               retryTimerRef.current = null;
             }
-            if (
-              retryPayload.sendOptions?.userMessageMetadata?.userVisible ===
-              false
-            ) {
-              const failureMessage = i18n.t(
-                "chat:queue.voiceCoordinationFailed",
-              );
-              useChatStore
-                .getState()
-                .addMessage(
-                  sessionId,
-                  createSystemNotificationMessage(failureMessage, "error"),
-                );
-              toast.error(i18n.t("chat:queue.voiceCoordinationFailedTitle"), {
-                description: failureMessage,
-              });
-              useChatStore
-                .getState()
-                .dismissQueuedMessage(sessionId, latestQueuedMessage.recordId);
-              void stopOpenAiRealtimeConversationForSession(sessionId).catch(
-                () => undefined,
-              );
-            }
-            // Visible records remain queued so the user can edit, resend, or
-            // dismiss them. Hidden transport records are removed above so an
-            // exhausted internal retry cannot block the rest of the queue.
+            // Records remain queued so the user can edit, resend, or dismiss
+            // them.
             return;
           }
           const scheduleAutoRetry = () => {
@@ -624,13 +591,6 @@ export function useMessageQueue(
           personaName,
           attachments,
           sendOptions,
-          // Transport-only messages (including Emissary → Master
-          // coordination) may briefly use the reliable queue at a run
-          // boundary, but they must never leak into the user's composer.
-          showInComposer:
-            sendOptions?.userMessageMetadata?.userVisible === false
-              ? false
-              : undefined,
         }),
       );
     },

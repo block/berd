@@ -1451,12 +1451,6 @@ pub async fn start_native_voice_conversation(
     if session_id.is_empty() || session_id.len() > 256 {
         return Err("session id must be between 1 and 256 bytes".to_string());
     }
-    if app
-        .try_state::<super::voice_buddy::RealtimeVoiceControlsState>()
-        .is_some_and(|state| state.active_target().is_some())
-    {
-        return Err("An OpenAI Realtime voice conversation is already active.".to_string());
-    }
     state.ensure_voice_input_not_quarantined()?;
     if input_backend == VoiceInputBackend::Macos
         && !mac_speech::status_async().await?.model_installed
@@ -2570,7 +2564,6 @@ impl NativeVoiceState {
 }
 
 pub fn handle_voice_owner_window_destroyed(app: &AppHandle, window_label: &str) {
-    super::openai_realtime::handle_owner_window_destroyed(app, window_label);
     app.state::<VoiceCaptureState>()
         .release_window(window_label);
     let destroyed_lifecycle = app
