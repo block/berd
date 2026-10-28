@@ -37,5 +37,11 @@ hdiutil verify "$OUTPUT_DIR/$DMG_NAME"
   --platform "$PLATFORM" \
   --output-dir "$OUTPUT_DIR"
 
+"$REPO_ROOT/scripts/release/package-berd-call.sh" \
+  --app-zip "$APP_ZIP" \
+  --version "$VERSION" \
+  --platform "$PLATFORM" \
+  --output-dir "$OUTPUT_DIR"
+
 printf 'asset_dir=%s\napp_zip_name=%s\ndmg_name=%s\n' \
   "$OUTPUT_DIR" "$APP_ZIP_NAME" "$DMG_NAME" >> "$GITHUB_ENV_FILE"
