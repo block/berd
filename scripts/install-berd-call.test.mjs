@@ -39,7 +39,8 @@ function fixture(t) {
   );
   command(
     "curl",
-    `if [[ "$*" == *url_effective* ]]; then echo "https://github.com/block/berd/releases/tag/$(cat "$ASSETS/latest")"; exit; fi
+    `if [[ "$*" == *url_effective* ]]; then echo "https://github.com/block/berd/releases/tag/$(cat "$ASSETS/staged")"; exit; fi
+if [[ "$*" == */berd-desktop-latest/latest.json* ]]; then printf '{"version":"%s"}\n' "$(sed 's/^v//' "$ASSETS/latest")"; exit; fi
 url=''; output=''
 while [[ $# -gt 0 ]]; do case "$1" in https:*) url="$1"; shift;; -o) output="$2"; shift 2;; *) shift;; esac; done
 cp "$ASSETS/$(basename "$url")" "$output"`,
@@ -120,6 +121,17 @@ test("installs, updates in place, refuses rollback and retains channel", {
   r = f.run("--channel", "internal");
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /different channel/);
+});
+test("installs the promoted release, not GitHub's latest staged release", {
+  skip: !mac,
+}, (t) => {
+  const f = fixture(t);
+  f.release("0.6.6");
+  f.release("0.6.5");
+  writeFileSync(join(f.assets, "staged"), "v0.6.6\n");
+  const r = f.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(f.version(), "0.6.5");
 });
 test("checksum, signature and missing releases preserve the installed executable", {
   skip: !mac,

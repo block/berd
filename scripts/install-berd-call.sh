@@ -38,10 +38,12 @@ update() {
   elif [[ "$channel" == internal ]]; then
     tag="$(gh release view --repo squareup/berd-internal --json tagName --jq .tagName)"
   else
-    tag="$(curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-      --connect-timeout 10 --max-time 30 -o /dev/null -w '%{url_effective}' \
-      https://github.com/block/berd/releases/latest)"
-    tag="${tag##*/}"
+    # GitHub marks a stable release latest when it is staged; the updater
+    # manifest changes only after promotion is approved.
+    tag="v$(curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+      --connect-timeout 10 --max-time 30 --max-filesize 1048576 \
+      https://github.com/block/berd/releases/download/berd-desktop-latest/latest.json |
+      /usr/bin/plutil -extract version raw -o - -)"
   fi
   [[ "$tag" == v* ]] && valid_version "${tag#v}" || fail "invalid stable release tag: $tag"
   version="${tag#v}"

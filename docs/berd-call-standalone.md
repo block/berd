@@ -22,7 +22,7 @@ Use `--bin-dir DIR` to choose a separate directory for another channel or to kee
 
 ## Updates
 
-Starting a call checks for a newer stable release in the background. Downloads happen while the call continues; the helper waits for every running call to release the native shared lock before atomically replacing the executable. A new call takes the same lock, so it cannot start during replacement. Repeated starts share a single update check. Download or verification failures keep the installed executable intact. Later calls retry the check. Automatic checks do not downgrade versions.
+Starting a call checks for a newer stable release in the background. Public installs follow Berd's promoted updater manifest, so a staged release isn't installed until its promotion is approved; internal installs follow `squareup/berd-internal`'s latest release. Downloads happen while the call continues; the helper waits for every running call to release the native shared lock before atomically replacing the executable. A new call takes the same lock, so it cannot start during replacement. Repeated starts share a single update check. Download or verification failures keep the installed executable intact. Later calls retry the check. Automatic checks do not downgrade versions.
 
 Set `BERD_CALL_AUTO_UPDATE=0` in the environment that launches Berd Call to disable automatic checks. Rerunning the installer checks for an update manually. The installed helper is `~/.local/bin/.berd-call/update`; it contains the installer logic and channel, with no download of additional shell code. Rerun the installer to refresh that helper. Background diagnostics go to macOS system logging under `berd-call-update`.
 
@@ -34,4 +34,4 @@ The CLI inside Buzz stays pinned to the Buzz build. Repinning and releasing Buzz
 node --test scripts/install-berd-call.test.mjs
 ```
 
-These macOS tests exercise the installer in temporary directories, with fixture release downloads and signatures. They cover installation, update, rollback prevention, channel retention, failed verification, missing assets, unsupported platforms, symlink rejection and waiting for an active call lock. They do not replace a live call or verify production release publication.
+These macOS tests exercise the installer in temporary directories, with fixture release downloads and signatures. They cover installation, update, following the promoted release, rollback prevention, channel retention, failed verification, missing assets, unsupported platforms, symlink rejection and waiting for an active call lock. They do not replace a live call or verify production release publication.
