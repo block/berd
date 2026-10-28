@@ -1257,6 +1257,97 @@ set -euo pipefail
   });
 });
 
+describe("package-berd-call", () => {
+  async function signedApp({ call = true } = {}) {
+    const dir = await tempDir();
+    const macos = join(dir, "Berd.app", "Contents", "MacOS");
+    const zip = join(dir, "Berd.app.zip");
+    await mkdir(macos, { recursive: true });
+    await writeFile(join(macos, "berd"), "app");
+    if (call) await writeFile(join(macos, "berd-call"), "signed call");
+    const zipped = run("ditto", [
+      "-c",
+      "-k",
+      "--keepParent",
+      join(dir, "Berd.app"),
+      zip,
+    ]);
+    expect(zipped.status, zipped.stderr).toBe(0);
+    return { dir, zip };
+  }
+
+  function packageCall(zip, output, platform = "darwin-aarch64") {
+    return run(
+      "scripts/release/package-berd-call.sh",
+      [
+        "--app-zip",
+        zip,
+        "--version",
+        "1.2.3",
+        "--platform",
+        platform,
+        "--output-dir",
+        output,
+      ],
+      { SKIP_MACOS_SECURITY_CHECKS: "1", CI: "", ...releaseRepositoryEnv },
+    );
+  }
+
+  it("archives the signed CLI alone at the root, reproducibly", async () => {
+    const { dir, zip } = await signedApp();
+    const name = "berd-call_1.2.3_darwin-aarch64.tar.gz";
+    const archives = [];
+    for (const output of ["one", "two"].map((name) => join(dir, name))) {
+      const result = packageCall(zip, output);
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      archives.push(await readFile(join(output, name)));
+    }
+    expect(archives[0].equals(archives[1])).toBe(true);
+    const archive = join(dir, "one", name);
+    const listing = run("tar", ["-tvzf", archive]);
+    expect(listing.status, listing.stderr).toBe(0);
+    expect(listing.stdout.trim()).toMatch(/^-rwxr-xr-x .* berd-call$/);
+    const extracted = join(dir, "bin");
+    await mkdir(extracted);
+    expect(run("tar", ["-xzf", archive, "-C", extracted]).status).toBe(0);
+    expect(await readFile(join(extracted, "berd-call"), "utf8")).toBe(
+      "signed call",
+    );
+    expect(await readFile(`${archive}.sha256`, "utf8")).toBe(
+      `${createHash("sha256").update(archives[0]).digest("hex")}  ${name}\n`,
+    );
+  });
+
+  it("rejects apps without the CLI and non-macOS platforms", async () => {
+    const missing = await signedApp({ call: false });
+    const result = packageCall(missing.zip, join(missing.dir, "out"));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("no berd-call executable");
+
+    const app = await signedApp();
+    const linux = packageCall(app.zip, join(app.dir, "out"), "linux-x86_64");
+    expect(linux.status).not.toBe(0);
+    expect(linux.stderr).toContain("no standalone berd-call archive");
+  });
+
+  it("is staged, attested and verified with the macOS payload", async () => {
+    const workflow = await readFile(
+      join(repo, ".github/workflows/release.yml"),
+      "utf8",
+    );
+    const prepare = await readFile(
+      join(repo, "scripts/release/github/prepare-release-assets.sh"),
+      "utf8",
+    );
+    expect(prepare).toContain("scripts/release/package-berd-call.sh");
+    expect(
+      workflow.match(/"\$CALL_ARCHIVE_NAME" "\$CALL_ARCHIVE_NAME\.sha256"/g),
+    ).toHaveLength(1);
+    expect(workflow).toContain('"$asset_dir/$CALL_ARCHIVE_NAME" \\');
+    expect(workflow).toContain('"$asset_dir/$CALL_ARCHIVE_NAME.sha256" \\');
+  });
+});
+
 describe("validate-manifest-promotion", () => {
   async function manifests(
     candidateVersion,
@@ -1590,6 +1681,8 @@ describe("reconcile-staged-assets", () => {
     macos_ready: [
       "Berd_1.2.3_darwin-aarch64.app.zip",
       "Berd_1.2.3_darwin-aarch64.dmg",
+      "berd-call_1.2.3_darwin-aarch64.tar.gz",
+      "berd-call_1.2.3_darwin-aarch64.tar.gz.sha256",
       "Berd_1.2.3_darwin-aarch64.app.tar.gz",
       "Berd_1.2.3_darwin-aarch64.app.tar.gz.sig",
       "Berd_1.2.3_darwin-aarch64.app.tar.gz.sha256",
@@ -1840,6 +1933,8 @@ describe("verify-versioned-release", () => {
     const names = [
       "Berd_1.2.3_darwin-aarch64.app.zip",
       "Berd_1.2.3_darwin-aarch64.dmg",
+      "berd-call_1.2.3_darwin-aarch64.tar.gz",
+      "berd-call_1.2.3_darwin-aarch64.tar.gz.sha256",
       "Berd_1.2.3_darwin-aarch64.app.tar.gz",
       "Berd_1.2.3_darwin-aarch64.app.tar.gz.sig",
       "Berd_1.2.3_darwin-aarch64.app.tar.gz.sha256",
@@ -1955,6 +2050,16 @@ fi
     );
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("exactly one non-empty asset");
+  });
+
+  it("requires the standalone berd-call archive", async () => {
+    const result = verify(
+      await fixture({ missing: "berd-call_1.2.3_darwin-aarch64.tar.gz" }),
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "asset named berd-call_1.2.3_darwin-aarch64.tar.gz",
+    );
   });
 
   it("rejects old release bytes renamed under the requested version", async () => {
