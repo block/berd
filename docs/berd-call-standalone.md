@@ -1,8 +1,8 @@
 # Standalone Berd Call
 
-The standalone CLI is for Apple Silicon Macs. It installs without Berd.app or administrator privileges. Its releases use the same source and versioned release pipelines as Berd. Public downloads come from `block/berd`; internal downloads require access to `squareup/berd-internal` and an authenticated GitHub CLI (`gh`).
+The standalone CLI is for Apple Silicon Macs. It installs without Berd.app or administrator privileges. It installs public `block/berd` releases, built from the same source and versioned release pipeline as Berd.
 
-The release must contain the standalone archive and checksum produced by the CLI packaging pipeline, and the native standalone update guard. Releases without these assets cannot be installed with this script. Public `block/berd` releases get the assets from `release.yml`. Internal `squareup/berd-internal` releases do not publish them yet (v0.5.37 has only the app zip and DMG), so `--channel internal` fails with a missing-asset error until its pipeline runs `scripts/release/package-berd-call.sh` and uploads the result.
+The release must contain the standalone archive and checksum that `release.yml` publishes, and the native standalone update guard. Releases without these assets cannot be installed with this script.
 
 ## Install
 
@@ -12,19 +12,13 @@ curl -fsSL https://raw.githubusercontent.com/block/berd/main/scripts/install-ber
 
 The default location is `~/.local/bin/berd-call`. Add `~/.local/bin` to PATH if the installer tells you to. The executable keeps its Developer ID signature. The installer verifies the download against the release's SHA-256 checksum, checks that the archive contains one regular executable, and verifies its code signature, Block's Developer ID team and signing identifier before replacing an installation.
 
-To install an internal release:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/block/berd/main/scripts/install-berd-call.sh | bash -s -- --channel internal
-```
-
-Use `--bin-dir DIR` to choose a separate directory for another channel or to keep an existing Berd.app/development symlink. The installer refuses to overwrite symlinks or unmanaged executables, install inside an application bundle, or change an existing installation's channel. `--version X.Y.Z` selects a particular stable version for an explicit install or rollback.
+Use `--bin-dir DIR` to choose another directory, for example to keep an existing Berd.app/development symlink. The installer refuses to overwrite symlinks or unmanaged executables or install inside an application bundle. `--version X.Y.Z` selects a particular stable version for an explicit install or rollback.
 
 ## Updates
 
-Starting a call checks for a newer stable release in the background. Public installs follow Berd's promoted updater manifest, so a staged release isn't installed until its promotion is approved; internal installs follow `squareup/berd-internal`'s latest release. Downloads happen while the call continues; the helper waits for every running call to release the native shared lock before atomically replacing the executable. A new call takes the same lock, so it cannot start during replacement. Repeated starts share a single update check. Download or verification failures keep the installed executable intact. Later calls retry the check. Automatic checks do not downgrade versions.
+Starting a call checks for a newer stable release in the background. It follows Berd's promoted updater manifest, so a staged release isn't installed until its promotion is approved. Downloads happen while the call continues; the helper waits for every running call to release the native shared lock before atomically replacing the executable. A new call takes the same lock, so it cannot start during replacement. Repeated starts share a single update check. Download or verification failures keep the installed executable intact. Later calls retry the check. Automatic checks do not downgrade versions.
 
-Set `BERD_CALL_AUTO_UPDATE=0` in the environment that launches Berd Call to disable automatic checks. Rerunning the installer checks for an update manually. The installed helper is `~/.local/bin/.berd-call/update`; it contains the installer logic and channel, with no download of additional shell code. Rerun the installer to refresh that helper. Background diagnostics go to macOS system logging under `berd-call-update`.
+Set `BERD_CALL_AUTO_UPDATE=0` in the environment that launches Berd Call to disable automatic checks. Rerunning the installer checks for an update manually. The installed helper is `~/.local/bin/.berd-call/update`; it contains the installer logic, with no download of additional shell code. Rerun the installer to refresh that helper. Background diagnostics go to macOS system logging under `berd-call-update`.
 
 The CLI inside Buzz stays pinned to the Buzz build. Repinning and releasing Buzz updates that copy. The CLI inside Berd.app uses Berd's existing app updater. Neither app bundle runs the standalone update helper.
 
@@ -34,4 +28,4 @@ The CLI inside Buzz stays pinned to the Buzz build. Repinning and releasing Buzz
 node --test scripts/install-berd-call.test.mjs
 ```
 
-These macOS tests exercise the installer in temporary directories, with fixture release downloads and signatures. They cover installation, update, following the promoted release, rollback prevention, channel retention, failed verification, missing assets, unsupported platforms, symlink rejection and waiting for an active call lock. They do not replace a live call or verify production release publication.
+These macOS tests exercise the installer in temporary directories, with fixture release downloads and signatures. They cover installation, update, following the promoted release, rollback prevention, failed verification, missing assets, unsupported platforms, symlink rejection and waiting for an active call lock. They do not replace a live call or verify production release publication.

@@ -45,13 +45,6 @@ url=''; output=''
 while [[ $# -gt 0 ]]; do case "$1" in https:*) url="$1"; shift;; -o) output="$2"; shift 2;; *) shift;; esac; done
 cp "$ASSETS/$(basename "$url")" "$output"`,
   );
-  command(
-    "gh",
-    `if [[ "$1 $2" == 'release view' ]]; then cat "$ASSETS/latest"; exit; fi
-asset=''; dest=''
-while [[ $# -gt 0 ]]; do case "$1" in --pattern) asset="$2"; shift 2;; --dir) dest="$2"; shift 2;; *) shift;; esac; done
-cp "$ASSETS/$asset" "$dest/$asset"`,
-  );
   const env = {
     ...process.env,
     HOME: home,
@@ -95,7 +88,7 @@ cp "$ASSETS/$asset" "$dest/$asset"`,
     readFileSync(join(bin, ".berd-call/installed"), "utf8").trim();
   return { dir, bin, assets, env, run, release, version };
 }
-test("installs, updates in place, refuses rollback and retains channel", {
+test("installs, updates in place and refuses rollback", {
   skip: !mac,
 }, (t) => {
   const f = fixture(t);
@@ -118,9 +111,6 @@ test("installs, updates in place, refuses rollback and retains channel", {
   r = f.run();
   assert.equal(r.status, 0, r.stderr);
   assert.equal(f.version(), "0.6.6");
-  r = f.run("--channel", "internal");
-  assert.notEqual(r.status, 0);
-  assert.match(r.stderr, /different channel/);
 });
 test("installs the promoted release, not GitHub's latest staged release", {
   skip: !mac,
@@ -172,16 +162,13 @@ test("rejects symlinks in archives and preserves existing app links", {
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /symlink/);
 });
-test("supports authenticated internal downloads and rejects unsupported platforms", {
+test("rejects unsupported platforms", {
   skip: !mac,
 }, (t) => {
   const f = fixture(t);
-  f.release("0.5.36");
-  let r = f.run("--channel", "internal");
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(f.version(), "0.5.36");
+  f.release("0.6.5");
   f.env.TEST_OS = "Linux";
-  r = f.run("--channel", "internal");
+  const r = f.run();
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /Apple Silicon/);
 });

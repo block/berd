@@ -4,13 +4,9 @@ set -euo pipefail
 
 fail() { echo "berd-call: $*" >&2; exit 1; }
 fetch() {
-  if [[ "$channel" == internal ]]; then
-    gh release download "$tag" --repo squareup/berd-internal --pattern "$1" --dir "$work"
-  else
-    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-      --connect-timeout 10 --max-time 120 --max-filesize 104857600 \
-      "https://github.com/block/berd/releases/download/$tag/$1" -o "$work/$1"
-  fi
+  curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+    --connect-timeout 10 --max-time 120 --max-filesize 104857600 \
+    "https://github.com/block/berd/releases/download/$tag/$1" -o "$work/$1"
 }
 valid_version() { [[ "$1" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; }
 newer() {
@@ -35,8 +31,6 @@ update() {
   local requested="${1:-}" tag version current='' digest archive expected actual listing
   if [[ -n "$requested" ]]; then
     tag="v${requested#v}"
-  elif [[ "$channel" == internal ]]; then
-    tag="$(gh release view --repo squareup/berd-internal --json tagName --jq .tagName)"
   else
     # GitHub marks a stable release latest when it is staged; the updater
     # manifest changes only after promotion is approved.
@@ -75,43 +69,35 @@ update() {
   mkdir -p "$HOME/Library/Caches/Berd"
   /usr/bin/lockf -k "$HOME/Library/Caches/Berd/berd-call-app-update.lock" \
     /bin/bash "$root/update" --commit "$work"
-  echo "Installed Berd Call $version ($channel) in $bin_dir"
+  echo "Installed Berd Call $version in $bin_dir"
 }
 
-channel=public
 bin_dir="$HOME/.local/bin"
 requested=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --channel) channel="${2:?missing channel}"; shift 2 ;;
     --bin-dir) bin_dir="${2:?missing bin directory}"; shift 2 ;;
     --version) requested="${2:?missing version}"; shift 2 ;;
-    -h|--help) echo 'Usage: install-berd-call.sh [--channel public|internal] [--bin-dir DIR] [--version X.Y.Z]'; exit 0 ;;
+    -h|--help) echo 'Usage: install-berd-call.sh [--bin-dir DIR] [--version X.Y.Z]'; exit 0 ;;
     *) fail "unknown option: $1" ;;
   esac
 done
-[[ "$channel" == public || "$channel" == internal ]] || fail 'channel must be public or internal'
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || fail 'standalone releases currently support Apple Silicon macOS only'
 [[ -z "$requested" ]] || valid_version "${requested#v}" || fail 'version must be stable X.Y.Z'
-[[ "$channel" != internal ]] || command -v gh >/dev/null || fail 'internal downloads require an authenticated GitHub CLI (gh)'
 mkdir -p "$bin_dir"
 bin_dir="$(cd "$bin_dir" && pwd -P)"
 case "$bin_dir/" in *.app/*) fail 'cannot install into an application bundle' ;; esac
 root="$bin_dir/.berd-call"
 [[ ! -L "$root" && ! -L "$bin_dir/berd-call" ]] || fail 'refusing to replace a symlink; use a separate --bin-dir'
 [[ ! -e "$bin_dir/berd-call" || -f "$root/installed" ]] || fail 'refusing to replace an unmanaged executable'
-if [[ -f "$root/channel" ]]; then
-  [[ "$(cat "$root/channel")" == "$channel" ]] || fail 'use a separate --bin-dir for a different channel'
-fi
 mkdir -p "$root"
 chmod 700 "$root"
-printf '%s\n' "$channel" > "$root/channel"
 helper="$(mktemp "$root/.update.XXXXXXXX")"
 trap 'rm -f "$helper"' EXIT
 {
   echo '#!/bin/bash'
   echo 'set -euo pipefail'
-  printf 'channel=%q\nbin_dir=%q\nroot=%q\n' "$channel" "$bin_dir" "$root"
+  printf 'bin_dir=%q\nroot=%q\n' "$bin_dir" "$root"
   declare -f fail fetch valid_version newer commit_install update
   cat <<'HELPER'
 case "${1:-}" in
