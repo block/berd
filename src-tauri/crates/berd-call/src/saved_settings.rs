@@ -50,23 +50,25 @@ pub(crate) fn load(path: &Path) -> Result<SavedSettings, String> {
     }
     let mut settings: SavedSettings = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid saved call settings: {error}"))?;
-    // Calls once chose a mode and a Spokesperson voice. Those options fall back
-    // to the defaults, and the next save overwrites them.
+    // Spokesperson calls without agent speech saved the Realtime model and its
+    // speed, which can be slower than speech allows, as their speech settings.
+    let realtime = matches!(&settings.tts, Some(TtsSettings::OpenAi { model, .. }) if model.to_ascii_lowercase().contains("realtime"));
+    if realtime {
+        settings.tts = None;
+    }
+    // Calls once chose a mode and a Spokesperson voice. Those options, and a
+    // Realtime speed, fall back to the defaults, and the next save overwrites them.
     if settings.arguments.len().is_multiple_of(2) {
         settings.arguments = settings
             .arguments
             .chunks_exact(2)
-            .filter(|pair| !REMOVED_FLAGS.contains(&pair[0].as_str()))
+            .filter(|pair| {
+                !REMOVED_FLAGS.contains(&pair[0].as_str()) && !(realtime && pair[0] == "--rate")
+            })
             .flatten()
             .cloned()
             .collect();
     }
-    // Spokesperson calls without agent speech saved the Realtime model as their
-    // speech settings. The speech endpoint rejects it, so fall back to the
-    // startup configuration, and the next save overwrites it.
-    settings.tts = settings.tts.take().filter(|tts| {
-        !matches!(tts, TtsSettings::OpenAi { model, .. } if model.to_ascii_lowercase().contains("realtime"))
-    });
     validate_arguments(&settings.arguments)?;
     Ok(settings)
 }
@@ -334,10 +336,10 @@ mod tests {
         assert_eq!(load(&path).unwrap().arguments, ["--voice", "Aaron"]);
     }
 
-    fn saved_with_tts(model: &str) -> serde_json::Value {
+    fn saved_with_tts(model: &str, rate: f32) -> serde_json::Value {
         serde_json::json!({
-            "arguments": ["--mode", "expert-spokesperson", "--tts-backend", "openai", "--rate", "1.2"],
-            "tts": {"backend": "openai", "model": model, "voice": "cedar", "rate": 1.2},
+            "arguments": ["--mode", "expert-spokesperson", "--tts-backend", "openai", "--rate", rate.to_string()],
+            "tts": {"backend": "openai", "model": model, "voice": "cedar", "rate": rate},
         })
     }
 
@@ -345,13 +347,10 @@ mod tests {
     fn a_realtime_model_saved_as_speech_settings_falls_back_and_is_overwritten() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
-        std::fs::write(&path, saved_with_tts("gpt-realtime-2.1").to_string()).unwrap();
+        std::fs::write(&path, saved_with_tts("gpt-realtime-2.1", 0.5).to_string()).unwrap();
         let restored = load(&path).unwrap();
         assert_eq!(restored.tts, None);
-        assert_eq!(
-            restored.arguments,
-            ["--tts-backend", "openai", "--rate", "1.2"]
-        );
+        assert_eq!(restored.arguments, ["--tts-backend", "openai"]);
         update(&path, |latest| {
             latest.status_sounds = Some(StatusSoundMode::Off)
         })
@@ -365,7 +364,7 @@ mod tests {
     fn speech_settings_for_a_speech_model_survive_reopen() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
-        std::fs::write(&path, saved_with_tts("gpt-4o-mini-tts").to_string()).unwrap();
+        std::fs::write(&path, saved_with_tts("gpt-4o-mini-tts", 1.2).to_string()).unwrap();
         assert_eq!(
             load(&path).unwrap().tts,
             Some(TtsSettings::OpenAi {
