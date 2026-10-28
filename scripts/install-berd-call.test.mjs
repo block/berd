@@ -35,7 +35,7 @@ function fixture(t) {
   );
   command(
     "codesign",
-    '[[ "${BAD_SIGNATURE:-}" != 1 ]] || exit 1\nif [[ "$1" == --display ]]; then echo Identifier=berd-call; for i in {1..2000}; do echo metadata; done; fi',
+    '[[ "${BAD_SIGNATURE:-}" != 1 ]] || exit 1\n[[ "$1" == --display || "$*" == *"leaf[subject.OU] = EYF346PHUG"* ]] || exit 1\nif [[ "$1" == --display ]]; then echo Identifier=berd-call; for i in {1..2000}; do echo metadata; done; fi',
   );
   command(
     "curl",

@@ -64,7 +64,8 @@ update() {
   [[ "$listing" == -* ]] || fail 'archive must contain one regular executable'
   tar -xzf "$work/$archive" -C "$work" berd-call
   [[ -f "$work/berd-call" && ! -L "$work/berd-call" ]] || fail 'missing release executable'
-  codesign --verify --strict "$work/berd-call"
+  # Pin Block's Developer ID team, so a checksum alone cannot vouch for other signers.
+  codesign --verify --strict -R='anchor apple generic and certificate leaf[subject.OU] = EYF346PHUG' "$work/berd-call"
   codesign --display --verbose=4 "$work/berd-call" 2>&1 | /usr/bin/grep -Fx 'Identifier=berd-call' >/dev/null || fail 'wrong executable signing identifier'
   chmod 755 "$work/berd-call"
   printf '%s\n' "$version" > "$work/metadata"

@@ -2,7 +2,7 @@
 
 The standalone CLI is for Apple Silicon Macs. It installs without Berd.app or administrator privileges. Its releases use the same source and versioned release pipelines as Berd. Public downloads come from `block/berd`; internal downloads require access to `squareup/berd-internal` and an authenticated GitHub CLI (`gh`).
 
-The release must contain the standalone archive and checksum produced by the CLI packaging pipeline, and the native standalone update guard. Releases without these assets cannot be installed with this script.
+The release must contain the standalone archive and checksum produced by the CLI packaging pipeline, and the native standalone update guard. Releases without these assets cannot be installed with this script. Public `block/berd` releases get the assets from `release.yml`. Internal `squareup/berd-internal` releases do not publish them yet (v0.5.37 has only the app zip and DMG), so `--channel internal` fails with a missing-asset error until its pipeline runs `scripts/release/package-berd-call.sh` and uploads the result.
 
 ## Install
 
@@ -10,7 +10,7 @@ The release must contain the standalone archive and checksum produced by the CLI
 curl -fsSL https://raw.githubusercontent.com/block/berd/main/scripts/install-berd-call.sh | bash
 ```
 
-The default location is `~/.local/bin/berd-call`. Add `~/.local/bin` to PATH if the installer tells you to. The executable keeps its Developer ID signature. The installer verifies the download against the release's SHA-256 checksum, checks that the archive contains one regular executable, and verifies its code signature and signing identifier before replacing an installation.
+The default location is `~/.local/bin/berd-call`. Add `~/.local/bin` to PATH if the installer tells you to. The executable keeps its Developer ID signature. The installer verifies the download against the release's SHA-256 checksum, checks that the archive contains one regular executable, and verifies its code signature, Block's Developer ID team and signing identifier before replacing an installation.
 
 To install an internal release:
 

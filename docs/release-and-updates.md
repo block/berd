@@ -37,7 +37,7 @@ A version `X.Y.Z` publishes architecture-qualified assets for macOS, Windows, an
 - `Berd_X.Y.Z_linux-x86_64.AppImage.tar.gz.sig`
 - `Berd_X.Y.Z_linux-x86_64.AppImage.tar.gz.sha256`
 
-`berd-call_X.Y.Z_darwin-aarch64.tar.gz` lets hosts such as Buzz ship the call CLI without Berd.app. It holds one file, `berd-call`, at its root: the notarized executable from the signed app, byte for byte, keeping Block's Developer ID signature and hardened runtime. It links only system frameworks and `/usr/lib/swift`, so it needs no other files; extract it wherever the host keeps executables. Both files are listed in the attested provenance receipt.
+`berd-call_X.Y.Z_darwin-aarch64.tar.gz` lets hosts such as Buzz ship the call CLI without Berd.app. It holds one file, `berd-call`, at its root: the notarized executable from the signed app, byte for byte, keeping Block's Developer ID signature and hardened runtime. It links only system frameworks and `/usr/lib/swift`, so it needs no other files; extract it wherever the host keeps executables. Both files are listed in the attested provenance receipt. [Standalone Berd Call](berd-call-standalone.md) installs and updates it from these assets.
 
 The updater manifest currently contains only `darwin-aarch64`. Windows and Linux artifacts are still attached to the versioned release for manual testing, but are not copied to the rolling updater release and do not gate promotion.
 
