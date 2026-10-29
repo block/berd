@@ -224,6 +224,20 @@ describe("client speech text", () => {
     const { spans: resumed } = speechTextSpans(source, source.indexOf("docs"));
     expect(resumed.map((span) => span.text).join("")).toBe("docs now.");
   });
+  it.each([
+    "See [docs](https://example.com\n\nImportant: do not restart the server.",
+    "See [docs](<https://example.com\n \nImportant: do not restart the server.",
+    "See [docs](https://example.com 'Title\n\nImportant: do not restart the server.",
+  ])("retains later paragraphs after an unfinished destination: %s", (source) => {
+    for (let split = 0; split <= source.length; split++) {
+      const spans = streamedSpans(source, split);
+      expect(spans.map((span) => span.text).join("")).toBe(
+        "See docs\nImportant: do not restart the server.",
+      );
+      for (const span of spans)
+        expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
+    }
+  });
   it("preserves plain text", () => {
     expect(
       speechTextSpans("Hello (world). https://example.com")

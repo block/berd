@@ -28,6 +28,7 @@ export function speechTextSpans(
   let angleDestination = false;
   let escaped = false;
   let offset = 0;
+  let lineStart = 0;
   const code: { start: number; end: number }[] = [];
   const inlineBlocks: { start: number; end: number }[] = [];
   const visit = (node: {
@@ -54,6 +55,21 @@ export function speechTextSpans(
   for (const char of source) {
     const start = offset;
     offset += char.length;
+    if (char === "\n") {
+      // Inline links cannot span a blank line. Do not let a malformed
+      // destination swallow unrelated paragraphs, even inside a title.
+      if (
+        destination &&
+        lineStart > 0 &&
+        !source.slice(lineStart, start).trim()
+      ) {
+        destination = 0;
+        quote = null;
+        angleDestination = false;
+        escaped = false;
+      }
+      lineStart = offset;
+    }
     while (code[codeIndex] && code[codeIndex].end <= start) codeIndex++;
     while (inlineBlocks[blockIndex] && inlineBlocks[blockIndex].end <= start)
       blockIndex++;
