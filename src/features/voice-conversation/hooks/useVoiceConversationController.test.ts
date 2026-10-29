@@ -95,14 +95,17 @@ describe("voice transcript delivery coordination", () => {
   it.each([
     "provisional words",
     "Provisional words?",
+    "provisional words after mute",
     "corrected words",
     "corrected words after mute",
     "set the temperature to -10 degrees",
     "calculate 3 + 4",
   ])("reconciles early speech once (%s)", async (finalText) => {
-    const changed = !["provisional words", "Provisional words?"].includes(
-      finalText,
-    );
+    const changed = ![
+      "provisional words",
+      "Provisional words?",
+      "provisional words after mute",
+    ].includes(finalText);
     const onSend = vi.fn(async (text, _persona, _attachments, options) => {
       const state = useChatStore.getState();
       const existing = state.messagesBySession["session-1"]?.find(
@@ -172,16 +175,19 @@ describe("voice transcript delivery coordination", () => {
     const final = {
       ...event,
       type: "user",
-      text: finalText,
+      text:
+        finalText === "provisional words after mute"
+          ? "provisional words"
+          : finalText,
       deliveryAttempts: 0,
     };
-    if (finalText === "corrected words after mute") {
+    if (finalText.endsWith("after mute")) {
       await act(async () => {
         useVoiceConversationStore.setState({ microphoneMuted: true });
       });
       expect(
         useVoiceConversationStore.getState().earlyTranscriptPending,
-      ).toBeNull();
+      ).not.toBeNull();
     }
     if (finalText.startsWith("corrected words")) {
       useChatStore.getState().setActiveRunId("session-1", "speculative-run");

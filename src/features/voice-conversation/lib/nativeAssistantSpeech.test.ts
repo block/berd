@@ -529,6 +529,7 @@ describe("native assistant speech stream", () => {
       ]);
     await new Promise((resolve) => window.setTimeout(resolve, 15));
     expect(mocks.start).not.toHaveBeenCalled();
+    useVoiceConversationStore.setState({ microphoneMuted: true });
     finalizeVoiceTranscript("early");
     await new Promise((resolve) => window.setTimeout(resolve, 15));
     expect(mocks.start).not.toHaveBeenCalled();

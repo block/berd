@@ -299,6 +299,7 @@ base.describe("early voice delivery", () => {
     async ({ page }) => {
       const answer = "The unchanged provisional answer can now be spoken.";
       await assistantOutput(page, answer, "early-run");
+      await nativeEvent(page, { type: "microphoneMute", muted: true });
       await expect
         .poll(() => spoken(page))
         .toEqual(["The reply being interrupted."]);

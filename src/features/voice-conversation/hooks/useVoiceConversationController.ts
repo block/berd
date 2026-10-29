@@ -611,23 +611,6 @@ function ensureVoiceEventDeliveryInitialized() {
       finalTranscriptsSeen.delete(state.earlyTranscriptResolution.finalKey);
     }
     if (
-      state.microphoneMuted &&
-      !previous.microphoneMuted &&
-      state.earlyTranscriptPending
-    ) {
-      const early = earlyDeliveries.get(state.earlyTranscriptPending);
-      useVoiceConversationStore.setState({
-        earlyTranscriptPending: null,
-        earlyTranscriptResolution: early
-          ? {
-              key: early.key,
-              finalKey: state.earlyTranscriptPending,
-              accepted: false,
-            }
-          : null,
-      });
-    }
-    if (
       state.status.revision === previous.status.revision &&
       state.status.sessionId === previous.status.sessionId &&
       state.status.lifecycle === previous.status.lifecycle
