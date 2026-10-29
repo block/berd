@@ -18,11 +18,15 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   projects: [
-    {
-      name: "capacity-errors",
-      testMatch: ["**/capacity-errors.spec.ts"],
-      use: { ...devices["Desktop Chrome"], screenshot: "off" },
-    },
+    ...(process.env.GOOSE_BIN
+      ? [
+          {
+            name: "capacity-errors",
+            testMatch: ["**/capacity-errors.spec.ts"],
+            use: { ...devices["Desktop Chrome"], screenshot: "off" as const },
+          },
+        ]
+      : []),
     {
       name: "smoke",
       testMatch: ["**/smoke.spec.ts"],
