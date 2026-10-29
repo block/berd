@@ -355,6 +355,7 @@ export function buildInitScript(options?: {
         },
         emitTauriEvent,
         pocketVoiceSpokenTexts: () => clone(POCKET_VOICE_SPOKEN_TEXTS),
+        pocketVoiceStreamIds: () => [...VOICE_STREAM_TEXTS.keys()],
       };
 
       function nowIso() {

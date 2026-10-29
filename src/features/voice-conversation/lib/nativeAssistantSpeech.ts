@@ -1804,11 +1804,11 @@ export function startNativeAssistantSpeech(
       inspect();
       return;
     }
-    if (voice.earlyTranscriptPending !== null) {
-      inspect();
-      return;
-    }
-    if (finalizedTranscriptChanged && !pendingUserRecognitionSegment) {
+    if (
+      finalizedTranscriptChanged &&
+      !pendingUserRecognitionSegment &&
+      voice.earlyTranscriptPending === null
+    ) {
       if (heldReleaseTimer !== null) {
         window.clearTimeout(heldReleaseTimer);
         heldReleaseTimer = null;
@@ -1837,6 +1837,12 @@ export function startNativeAssistantSpeech(
       return;
     }
     if (finalizedTranscriptChanged && pendingUserRecognitionSegment) {
+      if (voice.earlyTranscriptPending !== null) {
+        resolvePendingRecognitionSegment(false);
+        discardResumableInterruption();
+        inspect();
+        return;
+      }
       holdAssistantChanges(
         useChatStore.getState().messagesBySession[sessionId] ?? [],
       );

@@ -618,6 +618,75 @@ describe("native assistant speech stream", () => {
     );
   });
 
+  it("resolves interrupted playback recognition while early speech is gated", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Interrupted reply." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    emit("started");
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    emit("interrupted");
+
+    const finalKey = ["session-1", "lifecycle-1", "1", "interrupt"].join("\0");
+    const earlyKey = `${finalKey}:early`;
+    useVoiceConversationStore.setState({ earlyTranscriptPending: finalKey });
+    useVoiceConversationStore.setState({ userSpeaking: false });
+    useChatStore
+      .getState()
+      .addMessage(
+        "session-1",
+        voiceUser("interrupt:early", { userVisible: false }),
+      );
+    useChatStore
+      .getState()
+      .addMessage(
+        "session-1",
+        assistant(
+          [{ type: "text", text: "Reply to the interruption." }],
+          "completed",
+          "interruption-answer",
+        ),
+      );
+    finalizeVoiceTranscript("interrupt");
+    useChatStore.getState().addMessage("session-1", voiceUser("interrupt"));
+    expect(mocks.start).toHaveBeenCalledTimes(1);
+    useVoiceConversationStore.setState({
+      earlyTranscriptPending: null,
+      earlyTranscriptResolution: { key: earlyKey, finalKey, accepted: true },
+    });
+    await vi.waitFor(() =>
+      expect(mocks.append).toHaveBeenCalledWith(
+        expect.any(String),
+        "Reply to the interruption.",
+      ),
+    );
+    mocks.streamHandler?.({
+      streamId: mocks.start.mock.calls[1]?.[0] as string,
+      state: "completed",
+      error: null,
+    });
+    useChatStore
+      .getState()
+      .addMessage(
+        "session-1",
+        assistant(
+          [{ type: "text", text: "Later replies still speak." }],
+          "completed",
+          "later-answer",
+        ),
+      );
+    await vi.waitFor(() =>
+      expect(mocks.append).toHaveBeenCalledWith(
+        expect.any(String),
+        "Later replies still speak.",
+      ),
+    );
+  });
+
   it("pushes raw assistant deltas without frontend sentence segmentation", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore

@@ -130,6 +130,7 @@ type VoiceHarness = {
   acpRequests: () => AcpRequest[];
   completeAcpPrompts: () => void;
   pocketVoiceSpokenTexts: () => string[];
+  pocketVoiceStreamIds: () => string[];
 };
 
 async function nativeEvent(page: Page, payload: object) {
@@ -253,7 +254,35 @@ base.describe("early voice delivery", () => {
       ownerWindowLabel: "main",
       line: "Ready",
     });
+    await assistantOutput(page, "The reply being interrupted.", "prior-run");
+    await expect
+      .poll(() => spoken(page))
+      .toEqual(["The reply being interrupted."]);
+    await nativeEvent(page, { type: "activity", activity: "user-speaking" });
+    await page.evaluate(() => {
+      const harness = (
+        window as typeof window & { __GOOSE_E2E__: VoiceHarness }
+      ).__GOOSE_E2E__;
+      harness.emitTauriEvent("pocket-voice:stream-event", {
+        streamId: harness.pocketVoiceStreamIds()[0],
+        state: "interrupted",
+        error: null,
+        delivery: { segments: [] },
+      });
+    });
+    await page.evaluate((sessionId) => {
+      (
+        window as typeof window & { __GOOSE_E2E__: VoiceHarness }
+      ).__GOOSE_E2E__.emitAcpNotification({
+        sessionId,
+        update: {
+          sessionUpdate: "session_info_update",
+          _meta: { goose: { activeRunId: null } },
+        },
+      });
+    }, SESSION_ID);
     await nativeEvent(page, { type: "interimUser", ...utterance });
+    await nativeEvent(page, { type: "activity", activity: "user-idle" });
     await expect.poll(() => requests(page)).toHaveLength(1);
     const early = (await requests(page))[0];
     expect(early.method).toBe("session/prompt");
@@ -270,7 +299,9 @@ base.describe("early voice delivery", () => {
     async ({ page }) => {
       const answer = "The unchanged provisional answer can now be spoken.";
       await assistantOutput(page, answer, "early-run");
-      await expect.poll(() => spoken(page)).toEqual([]);
+      await expect
+        .poll(() => spoken(page))
+        .toEqual(["The reply being interrupted."]);
       await nativeEvent(page, {
         type: "user",
         ...utterance,
@@ -288,7 +319,9 @@ base.describe("early voice delivery", () => {
       await expect(page.getByText(utterance.text, { exact: true })).toHaveCount(
         1,
       );
-      await expect.poll(() => spoken(page)).toEqual([answer]);
+      await expect
+        .poll(() => spoken(page))
+        .toEqual(["The reply being interrupted.", answer]);
       await nativeEvent(page, {
         type: "user",
         ...utterance,
@@ -299,7 +332,10 @@ base.describe("early voice delivery", () => {
         1,
       );
       expect(await requests(page)).toHaveLength(2);
-      expect(await spoken(page)).toEqual([answer]);
+      expect(await spoken(page)).toEqual([
+        "The reply being interrupted.",
+        answer,
+      ]);
     },
   );
 
@@ -323,7 +359,7 @@ base.describe("early voice delivery", () => {
         "obsolete-run",
       );
       expect(await requests(page)).toHaveLength(1);
-      expect(await spoken(page)).toEqual([]);
+      expect(await spoken(page)).toEqual(["The reply being interrupted."]);
       await completePrompts(page);
       await expect.poll(() => requests(page)).toHaveLength(2);
       expect((await requests(page))[1].method).toBe("session/prompt");
@@ -335,7 +371,9 @@ base.describe("early voice delivery", () => {
         "Only the corrected final answer should be spoken.";
       await assistantOutput(page, correctedAnswer, "corrected-run");
       await completePrompts(page);
-      await expect.poll(() => spoken(page)).toEqual([correctedAnswer]);
+      await expect
+        .poll(() => spoken(page))
+        .toEqual(["The reply being interrupted.", correctedAnswer]);
     },
   );
 
@@ -356,13 +394,13 @@ base.describe("early voice delivery", () => {
         text: "The next utterance.",
       });
       await expect.poll(() => requests(page)).toHaveLength(2);
-      expect(await spoken(page)).toEqual([]);
+      expect(await spoken(page)).toEqual(["The reply being interrupted."]);
       await expect(page.getByText(utterance.text, { exact: true })).toHaveCount(
         0,
       );
       await nativeEvent(page, { type: "cleanShutdown" });
       await completePrompts(page);
-      expect(await spoken(page)).toEqual([]);
+      expect(await spoken(page)).toEqual(["The reply being interrupted."]);
     },
   );
 });
