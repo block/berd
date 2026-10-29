@@ -105,6 +105,33 @@ describe("client speech text", () => {
         expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
     }
   });
+  it.each([
+    "> Code:\n> ```js\n> callbacks[index](result)\n> ```\nDone.",
+    "- Code:\n  ```js\n  callbacks[index](result)\n  ```\nDone.",
+    "> Code:\n>\n>     callbacks[index](result)\nDone.",
+  ])("preserves code in Markdown containers: %s", (source) => {
+    for (let split = 0; split <= source.length; split++) {
+      const spans = [
+        ...speechTextSpans(source.slice(0, split)),
+        ...speechTextSpans(source, split),
+      ];
+      expect(spans.map((span) => span.text).join("")).toBe(source);
+      for (const span of spans)
+        expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
+    }
+  });
+  it("does not mistake an indented paragraph continuation for code", () => {
+    const source = "See the manual:\n    [docs](https://example.com) now.";
+    for (let split = 0; split <= source.length; split++) {
+      const spans = [
+        ...speechTextSpans(source.slice(0, split)),
+        ...speechTextSpans(source, split),
+      ];
+      expect(spans.map((span) => span.text).join("")).toBe(
+        "See the manual:\n    docs now.",
+      );
+    }
+  });
   it("recognizes links again after code ends", () => {
     const source =
       "`callbacks[index](result)` then [the docs](https://example.com).";
@@ -115,8 +142,8 @@ describe("client speech text", () => {
     ).toBe("`callbacks[index](result)` then the docs.");
   });
   it.each([
-    "Run:\n    callbacks[index](result)\nThen continue.",
-    "Run:\n\tcallbacks[index](result)\nThen continue.",
+    "Run:\n\n    callbacks[index](result)\nThen continue.",
+    "Run:\n\n\tcallbacks[index](result)\nThen continue.",
   ])("preserves indented literal code: %s", (source) => {
     for (let split = 0; split <= source.length; split++) {
       const spans = [
@@ -152,6 +179,32 @@ describe("client speech text", () => {
         ...speechTextSpans(source, split),
       ];
       expect(spans.map((span) => span.text).join("")).toBe(expected);
+      for (const span of spans)
+        expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
+    }
+  });
+  it("suppresses indented multiline destinations at every streaming split", () => {
+    const source = "See [docs](\n    https://example.com/private/path\n) now.";
+    for (let split = 0; split <= source.length; split++) {
+      const spans = [
+        ...speechTextSpans(source.slice(0, split)),
+        ...speechTextSpans(source, split),
+      ];
+      expect(spans.map((span) => span.text).join("")).toBe("See docs now.");
+      for (const span of spans)
+        expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
+    }
+  });
+  it("preserves streamed UTF-16 boundaries and source offsets", () => {
+    const source = "See [👋 docs](https://example.com) now 👋.";
+    for (let split = 0; split <= source.length; split++) {
+      const spans = [
+        ...speechTextSpans(source.slice(0, split)),
+        ...speechTextSpans(source, split),
+      ];
+      expect(spans.map((span) => span.text).join("")).toBe(
+        "See 👋 docs now 👋.",
+      );
       for (const span of spans)
         expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
     }

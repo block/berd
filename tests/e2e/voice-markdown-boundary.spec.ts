@@ -16,7 +16,7 @@ const SESSION_ID = "voice-session";
 const ASSISTANT_MESSAGE_ID = "assistant-message";
 const SPOKEN_TEXT =
   String.raw`See [the page](<https://example.com/a(b> 'Read (first') for the next steps. Use \[brackets](not a link) now. Call ` +
-  "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n\n1. Read:\n    [guide](https://example.com/guide)";
+  "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n\n1. Read:\n    [guide](https://example.com/guide)\n\nSee [docs](\n    https://example.com/private/path\n) now.\n\n> Code:\n>\n>     callbacks[index](result)\n\nSee the manual:\n    [manual](https://example.com/manual) now.";
 
 const test = base.extend<{ voice: Page }>({
   voice: async ({ page }, use) => {
@@ -126,7 +126,24 @@ test("build sends link labels to native speech and preserves the rendered link",
         update: {
           sessionUpdate: "agent_message_chunk",
           messageId,
-          content: { type: "text", text: text.slice(text.indexOf(">")) },
+          content: {
+            type: "text",
+            text: text.slice(text.indexOf(">"), text.indexOf("private/path")),
+          },
+        },
+      });
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      harness.emitAcpNotification({
+        sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          messageId,
+          content: {
+            type: "text",
+            text: text.slice(text.indexOf("private/path")),
+          },
         },
       });
       harness.emitAcpNotification({
@@ -160,8 +177,14 @@ test("build sends link labels to native speech and preserves the rendered link",
     )
     .toBe(
       String.raw`See the page for the next steps. Use \[brackets](not a link) now. Call ` +
-        "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n\n1. Read:\n    guide",
+        "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n\n1. Read:\n    guide\n\nSee docs now.\n\n> Code:\n>\n>     callbacks[index](result)\n\nSee the manual:\n    manual now.",
     );
+  await expect(
+    page.getByRole("link", { name: "docs", exact: true }),
+  ).toHaveAttribute("href", "https://example.com/private/path");
+  await expect(
+    page.getByRole("link", { name: "manual", exact: true }),
+  ).toHaveAttribute("href", "https://example.com/manual");
   const prepared = await page.evaluate(
     () => (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.prepared,
   );

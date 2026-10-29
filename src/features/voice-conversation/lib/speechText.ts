@@ -1,3 +1,9 @@
+import remarkParse from "remark-parse";
+import remarkGfm from "remark-gfm";
+import { unified } from "unified";
+
+const parser = unified().use(remarkParse).use(remarkGfm);
+
 export type SpeechTextSpan = {
   text: string;
   sourceStart: number;
@@ -15,69 +21,49 @@ export function speechTextSpans(source: string, from = 0): SpeechTextSpan[] {
   let angleDestination = false;
   let escaped = false;
   let offset = 0;
-  let codeMarker = "";
-  let codeLength = 0;
-  let fenced = false;
-  let markerEnd = 0;
-  const listIndents: number[] = [];
-  let currentLineStart = -1;
-  let indented = false;
+  const code: { start: number; end: number }[] = [];
+  const inlineBlocks: { start: number; end: number }[] = [];
+  const visit = (node: {
+    type: string;
+    position?: { start: { offset?: number }; end: { offset?: number } };
+    children?: (typeof node)[];
+  }) => {
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (start !== undefined && end !== undefined) {
+      if (node.type === "code" || node.type === "inlineCode") {
+        code.push({ start, end });
+        return;
+      }
+      if (["paragraph", "heading", "tableCell"].includes(node.type))
+        inlineBlocks.push({ start, end });
+    }
+    if (node.children) for (const child of node.children) visit(child);
+  };
+  visit(parser.parse(source));
+  let codeIndex = 0;
+  let blockIndex = 0;
+  let incompleteCodeEnd = 0;
   for (const char of source) {
     const start = offset;
     offset += char.length;
-    const lineStart = source.lastIndexOf("\n", start - 1) + 1;
-    if (lineStart !== currentLineStart) {
-      currentLineStart = lineStart;
-      const line = source.slice(lineStart).split("\n", 1)[0];
-      const indentation = (line.match(/^[ \t]*/)?.[0] ?? "").replaceAll(
-        "\t",
-        "    ",
-      ).length;
-      if (line.trim()) {
-        while (listIndents.length && indentation < (listIndents.at(-1) ?? 0))
-          listIndents.pop();
-      }
-      const containerIndent = listIndents.at(-1) ?? 0;
-      indented = indentation >= containerIndent + 4;
-      const marker = line.match(/^ {0,3}(?:[-+*]|\d{1,9}[.)]) +/);
-      const nestedMarker = line
-        .slice(containerIndent)
-        .match(/^ {0,3}(?:[-+*]|\d{1,9}[.)]) +/);
-      const listMarker = nestedMarker ?? marker;
-      if (!indented && listMarker)
-        listIndents.push(containerIndent + listMarker[0].length);
-    }
-    let literalCode = indented || codeMarker !== "" || start < markerEnd;
-    if (
-      !indented &&
-      !destination &&
-      !escaped &&
-      start >= markerEnd &&
-      (char === "`" || char === "~")
-    ) {
-      const run =
-        source.slice(start).match(char === "`" ? /^`+/ : /^~+/)?.[0] ?? char;
-      const atFence = /^ {0,3}$/.test(source.slice(lineStart, start));
-      if (
-        codeMarker === char &&
-        (fenced
-          ? atFence && run.length >= codeLength
-          : run.length === codeLength)
-      ) {
-        codeMarker = "";
-        literalCode = true;
-      } else if (
-        !codeMarker &&
-        (char === "`" || (atFence && run.length >= 3))
-      ) {
-        codeMarker = char;
-        codeLength = run.length;
-        fenced = atFence && run.length >= 3;
+    while (code[codeIndex] && code[codeIndex].end <= start) codeIndex++;
+    while (inlineBlocks[blockIndex] && inlineBlocks[blockIndex].end <= start)
+      blockIndex++;
+    const range = code[codeIndex];
+    let literalCode =
+      (range !== undefined && range.start <= start) ||
+      start < incompleteCodeEnd;
+    // Streamdown can complete unfinished inline code before CommonMark has a
+    // code node. Preserve only the rest of that inline block while streaming.
+    if (!literalCode && !destination && !escaped && char === "`") {
+      const block = inlineBlocks[blockIndex];
+      if (block && block.start <= start) {
+        incompleteCodeEnd = block.end;
         literalCode = true;
       }
-      markerEnd = start + run.length;
     }
-    if (!literalCode) {
+    if (destination || !literalCode) {
       if (destination) {
         if (escaped) escaped = false;
         else if (char === "\\") escaped = true;
@@ -115,12 +101,14 @@ export function speechTextSpans(source: string, from = 0): SpeechTextSpan[] {
         continue;
       }
     }
-    if (start < from) continue;
+    if (offset <= from) continue;
+    const sourceStart = Math.max(start, from);
+    const text = source.slice(sourceStart, offset);
     const last = spans.at(-1);
-    if (last?.sourceEnd === start) {
-      last.text += char;
+    if (last?.sourceEnd === sourceStart) {
+      last.text += text;
       last.sourceEnd = offset;
-    } else spans.push({ text: char, sourceStart: start, sourceEnd: offset });
+    } else spans.push({ text, sourceStart, sourceEnd: offset });
   }
   return spans;
 }
