@@ -8,6 +8,11 @@ edition = "2021"
 [dependencies]
 clap = { version = "4", features = ["derive", "env"] }
 fs2 = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

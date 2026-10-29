@@ -9,6 +9,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "berd-call",
+ "berd-monitor",
  "block2",
  "builderbot-auth",
  "bytes",
@@ -629,6 +630,9 @@ dependencies = [
  "clap",
  "fs2",
  "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
  "windows-sys 0.59.0",
 ]
 

@@ -805,5 +805,9 @@
     "openUnavailable": "This file is on {{host}} and can't be opened from this machine.",
     "viewerUnavailable": "This file lives on {{host}}. Viewing remote files isn't supported yet."
   },
-  "archivedReadOnlyStatus": "This session is archived and read-only."
+  "archivedReadOnlyStatus": "This session is archived and read-only.",
+  "monitorStatus": {
+    "count_one": "1 monitor running",
+    "count_other": "{{count}} monitors running"
+  }
 }

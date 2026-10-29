@@ -19,6 +19,16 @@ export default defineConfig({
   },
   projects: [
     {
+      name: "monitor-status",
+      testMatch: ["**/monitor-status.spec.ts"],
+      use: {
+        ...devices["Desktop Chrome"],
+        screenshot: "off",
+        video: "off",
+        trace: "off",
+      },
+    },
+    {
       name: "smoke",
       testMatch: ["**/smoke.spec.ts"],
       use: {

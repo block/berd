@@ -8,6 +8,25 @@ import {
 } from "./ConversationComposerCapability";
 
 const chatInputSpy = vi.fn();
+const runningMonitorsSpy = vi.fn(
+  (
+    _sessionId: string | null | undefined,
+  ): { data: { sessionId: string; stateKey: string; label: string }[] } => ({
+    data: [],
+  }),
+);
+
+vi.mock("@/features/monitors/MonitorStatus", () => ({
+  useRunningMonitors: (sessionId: string | null | undefined) =>
+    runningMonitorsSpy(sessionId),
+  MonitorStatus: ({
+    sessionId,
+    variant,
+  }: {
+    sessionId: string | null | undefined;
+    variant: string;
+  }) => <span data-testid={`monitor-status-${variant}`}>{sessionId}</span>,
+}));
 
 vi.mock("@/features/chat/ui/ChatInput", () => ({
   ChatInput: (props: ChatInputProps) => {
@@ -149,7 +168,11 @@ function createBinding(
 }
 
 describe("ConversationComposerCapability surface parity", () => {
-  beforeEach(() => chatInputSpy.mockClear());
+  beforeEach(() => {
+    chatInputSpy.mockClear();
+    runningMonitorsSpy.mockReset();
+    runningMonitorsSpy.mockReturnValue({ data: [] });
+  });
 
   it("preserves Home deferred-queue policy while sharing draft and selection behavior", () => {
     const controller = createController();
@@ -237,6 +260,66 @@ describe("ConversationComposerCapability surface parity", () => {
       controller.compactConversation,
     );
     expect(props.agentModelPicker?.providerColumnMode).toBe("gated");
+  });
+
+  it("passes composer monitor accessory only for existing local sessions with monitors", () => {
+    const controller = createController();
+    runningMonitorsSpy.mockReturnValue({
+      data: [
+        { sessionId: "session-1", stateKey: "watch", label: "Build watcher" },
+      ],
+    });
+
+    const { rerender } = render(
+      <ConversationComposerCapability
+        binding={createBinding(controller, {
+          kind: "existingSession",
+          sessionId: "session-1",
+        })}
+        renderingPolicy={{
+          presentation: { surface: "bare", providerColumnMode: "visible" },
+        }}
+      />,
+    );
+
+    expect(runningMonitorsSpy).toHaveBeenLastCalledWith("session-1");
+    expect(latestProps().queuedMessageAccessory).not.toBeNull();
+
+    runningMonitorsSpy.mockClear();
+    runningMonitorsSpy.mockReturnValue({ data: [] });
+    rerender(
+      <ConversationComposerCapability
+        binding={createBinding(controller, {
+          kind: "pendingConversation",
+          sessionId: null,
+        })}
+        renderingPolicy={{
+          presentation: { surface: "bare", providerColumnMode: "visible" },
+        }}
+      />,
+    );
+    expect(runningMonitorsSpy).toHaveBeenLastCalledWith(null);
+    expect(latestProps().queuedMessageAccessory).toBeNull();
+
+    runningMonitorsSpy.mockClear();
+    runningMonitorsSpy.mockReturnValue({ data: [] });
+    const remoteController = {
+      ...createController(),
+      selectedRemoteHost: { id: "host-1" },
+    };
+    rerender(
+      <ConversationComposerCapability
+        binding={createBinding(remoteController as never, {
+          kind: "existingSession",
+          sessionId: "session-1",
+        })}
+        renderingPolicy={{
+          presentation: { surface: "bare", providerColumnMode: "visible" },
+        }}
+      />,
+    );
+    expect(runningMonitorsSpy).toHaveBeenLastCalledWith(null);
+    expect(latestProps().queuedMessageAccessory).toBeNull();
   });
 });
 

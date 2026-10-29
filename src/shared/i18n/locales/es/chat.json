@@ -789,5 +789,9 @@
     "openUnavailable": "Este archivo está en {{host}} y no se puede abrir desde esta máquina.",
     "viewerUnavailable": "Este archivo está en {{host}}. Ver archivos remotos todavía no es compatible."
   },
-  "archivedReadOnlyStatus": "Esta sesión está archivada y es de solo lectura."
+  "archivedReadOnlyStatus": "Esta sesión está archivada y es de solo lectura.",
+  "monitorStatus": {
+    "count_one": "1 monitor en ejecución",
+    "count_other": "{{count}} monitores en ejecución"
+  }
 }

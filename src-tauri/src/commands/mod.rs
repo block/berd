@@ -36,6 +36,7 @@ pub mod message_search;
 pub mod microphone_permission;
 pub mod migration;
 pub mod model_setup;
+pub mod monitors;
 mod native_input_mute;
 pub mod native_voice;
 pub mod notifications;

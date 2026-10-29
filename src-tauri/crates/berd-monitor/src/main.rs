@@ -1,3 +1,4 @@
+use berd_monitor::{RunningMonitorDescriptor, StatePaths};
 use clap::{Parser, Subcommand, ValueEnum};
 use fs2::FileExt;
 use std::env;
@@ -87,13 +88,6 @@ enum MonitorCommand {
     },
 }
 
-struct StatePaths {
-    root: PathBuf,
-    log: PathBuf,
-    pending: PathBuf,
-    owner: PathBuf,
-}
-
 struct PendingState {
     generation: String,
     active_len: usize,
@@ -115,7 +109,7 @@ impl PendingState {
     }
 
     fn delivery_id(&self, paths: &StatePaths) -> String {
-        let state_hash = stable_hash(paths.root.to_string_lossy().as_bytes());
+        let state_hash = berd_monitor::stable_hash(paths.root.to_string_lossy().as_bytes());
         format!("berd-monitor-{state_hash:016x}-{}", self.generation)
     }
 
@@ -132,93 +126,6 @@ fn next_pending_generation() -> String {
         .as_nanos();
     let sequence = PENDING_GENERATION_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("{}-{timestamp}-{sequence}", std::process::id())
-}
-
-impl StatePaths {
-    fn for_key(key: &str, session_id: &str) -> Self {
-        let identity = format!("{session_id}\0{key}");
-        let suffix = stable_hash(identity.as_bytes());
-        let safe = key
-            .chars()
-            .take(80)
-            .map(|character| {
-                if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-') {
-                    character
-                } else {
-                    '-'
-                }
-            })
-            .collect::<String>();
-        let root = state_base_dir().join(format!("{safe}-{suffix:016x}"));
-        Self {
-            log: root.join("watcher.log"),
-            pending: root.join("pending.txt"),
-            owner: root.join("owner.pid"),
-            root,
-        }
-    }
-
-    fn launch_status(&self, token: &str) -> PathBuf {
-        self.root.join(format!("launch-{token}.status"))
-    }
-
-    fn stop_for(&self, owner_token: &str) -> PathBuf {
-        self.root.join(format!(
-            "stop-{:016x}.requested",
-            stable_hash(owner_token.as_bytes())
-        ))
-    }
-}
-
-fn state_base_dir() -> PathBuf {
-    if let Some(explicit) = env::var_os("BERD_MONITOR_STATE_DIR") {
-        return PathBuf::from(explicit);
-    }
-    #[cfg(target_os = "windows")]
-    if let Some(local) = env::var_os("LOCALAPPDATA") {
-        return PathBuf::from(local).join("Berd").join("monitor");
-    }
-    #[cfg(target_os = "macos")]
-    if let Some(home) = env::var_os("HOME") {
-        return PathBuf::from(home)
-            .join("Library")
-            .join("Caches")
-            .join("Berd")
-            .join("monitor");
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        if let Some(runtime) = env::var_os("XDG_RUNTIME_DIR") {
-            return PathBuf::from(runtime).join("berd-monitor");
-        }
-        if let Some(state) = env::var_os("XDG_STATE_HOME") {
-            return PathBuf::from(state).join("berd").join("monitor");
-        }
-        if let Some(home) = env::var_os("HOME") {
-            return PathBuf::from(home)
-                .join(".local")
-                .join("state")
-                .join("berd")
-                .join("monitor");
-        }
-    }
-    env::temp_dir().join(format!("berd-monitor-{}", current_user_suffix()))
-}
-
-#[cfg(unix)]
-fn current_user_suffix() -> u32 {
-    unsafe { libc::geteuid() }
-}
-
-#[cfg(windows)]
-fn current_user_suffix() -> u32 {
-    std::process::id()
-}
-
-fn stable_hash(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf29ce484222325, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
-    })
 }
 
 fn main() -> ExitCode {
@@ -709,6 +616,14 @@ fn run_foreground_after_claim(
     let _owner = claim_owner(&paths, &owner_token).inspect_err(|error| {
         write_launch_status(&paths, launch_token, &format!("error: {error}"));
     })?;
+    atomic_write(
+        &paths.descriptor,
+        &serde_json::to_vec(&RunningMonitorDescriptor {
+            session_id: session_id.to_owned(),
+            state_key: state_key.to_owned(),
+            label: label.to_owned(),
+        })?,
+    )?;
     after_claim();
     if paths.stop_for(&owner_token).exists() {
         log_line(&paths, "stop requested before producer start")?;
