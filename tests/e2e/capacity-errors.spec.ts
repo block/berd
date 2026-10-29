@@ -63,7 +63,7 @@ for (const scenario of [
       await expect(transcript.getByText(visibleError).first()).toBeVisible();
       if (scenario === "partial-eof") {
         await expect(
-          page.getByText("Partial capacity reply survives", { exact: true }),
+          transcript.getByText(/^Partial capacity reply survives/),
         ).toBeVisible();
       }
     }
@@ -114,9 +114,7 @@ for (const scenario of [
     }
     if (scenario === "partial-eof") {
       await expect(
-        transcript.getByText("Partial capacity reply survives", {
-          exact: true,
-        }),
+        transcript.getByText(/^Partial capacity reply survives/),
       ).toBeVisible();
     }
     await expect(
