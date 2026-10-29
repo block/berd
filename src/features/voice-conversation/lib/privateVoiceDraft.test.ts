@@ -102,12 +102,12 @@ it.each([
   );
   if (stage !== "prompt") expect(mocks.prompt).not.toHaveBeenCalled();
 });
-it("bounds best effort setup and cleans a fork created after disposal", async () => {
-  const fork = deferred<{ sessionId: string }>();
-  mocks.newSession.mockReturnValue(fork.promise);
+it("bounds best effort setup and cleans a private session created after disposal", async () => {
+  const creation = deferred<{ sessionId: string }>();
+  mocks.newSession.mockReturnValue(creation.promise);
   startPrivateVoiceDraft("main", "/work", "interim");
   await vi.advanceTimersByTimeAsync(2000);
-  fork.resolve({ sessionId: "late-private" });
+  creation.resolve({ sessionId: "late-private" });
   await vi.advanceTimersByTimeAsync(0);
   expect(mocks.cancelSession).toHaveBeenCalledWith("late-private");
   expect(mocks.hide).toHaveBeenCalledWith("late-private");
