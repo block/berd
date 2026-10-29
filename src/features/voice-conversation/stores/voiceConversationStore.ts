@@ -65,6 +65,7 @@ interface VoiceConversationStore {
     key: string;
     finalKey: string;
     accepted: boolean;
+    terminal?: boolean;
   } | null;
   init: () => Promise<void>;
   refreshStatus: () => Promise<VoiceConversationStatus>;
@@ -245,13 +246,15 @@ async function deliverTranscriptOnce(
           ...(state.latestFinalizedTranscriptKey === finalizedKey
             ? { latestFinalizedTranscriptKey: priorKey }
             : {}),
-          ...(state.earlyTranscriptPending === finalizedKey
+          ...(state.earlyTranscriptPending === finalizedKey ||
+          state.earlyTranscriptResolution?.finalKey === finalizedKey
             ? {
                 earlyTranscriptPending: null,
                 earlyTranscriptResolution: {
                   key: `${finalizedKey}:early`,
                   finalKey: finalizedKey,
                   accepted: false,
+                  terminal: true,
                 },
               }
             : {}),

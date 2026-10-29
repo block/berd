@@ -346,6 +346,7 @@ base.describe("early voice delivery", () => {
         "This obsolete provisional answer must never be spoken.";
       const finalText = "Set the temperature to -10 degrees.";
       await assistantOutput(page, oldAnswer, "obsolete-run");
+      await nativeEvent(page, { type: "microphoneMute", muted: true });
       await nativeEvent(page, {
         type: "user",
         ...utterance,

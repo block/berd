@@ -96,6 +96,7 @@ describe("voice transcript delivery coordination", () => {
     "provisional words",
     "Provisional words?",
     "corrected words",
+    "corrected words after mute",
     "set the temperature to -10 degrees",
     "calculate 3 + 4",
   ])("reconciles early speech once (%s)", async (finalText) => {
@@ -174,7 +175,15 @@ describe("voice transcript delivery coordination", () => {
       text: finalText,
       deliveryAttempts: 0,
     };
-    if (finalText === "corrected words") {
+    if (finalText === "corrected words after mute") {
+      await act(async () => {
+        useVoiceConversationStore.setState({ microphoneMuted: true });
+      });
+      expect(
+        useVoiceConversationStore.getState().earlyTranscriptPending,
+      ).toBeNull();
+    }
+    if (finalText.startsWith("corrected words")) {
       useChatStore.getState().setActiveRunId("session-1", "speculative-run");
       useChatStore.getState().setChatState("session-1", "streaming");
       let finalDelivery: void | Promise<void>;
@@ -222,6 +231,7 @@ describe("voice transcript delivery coordination", () => {
     expect(
       useVoiceConversationStore.getState().earlyTranscriptResolution?.accepted,
     ).toBe(!changed);
+    act(() => useVoiceConversationStore.setState({ microphoneMuted: false }));
     unmount();
   });
 
