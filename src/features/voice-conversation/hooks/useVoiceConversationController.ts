@@ -606,6 +606,14 @@ function ensureVoiceEventDeliveryInitialized() {
   observeChainedVoiceStatus();
   useVoiceConversationStore.subscribe((state, previous) => {
     if (
+      previous.earlyTranscriptPending !== null &&
+      state.earlyTranscriptPending === null &&
+      state.earlyTranscriptResolution?.accepted === false
+    ) {
+      earlyDeliveries.delete(previous.earlyTranscriptPending);
+      finalTranscriptsSeen.delete(previous.earlyTranscriptPending);
+    }
+    if (
       state.microphoneMuted &&
       !previous.microphoneMuted &&
       state.earlyTranscriptPending

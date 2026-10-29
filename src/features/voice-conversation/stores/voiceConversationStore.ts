@@ -241,11 +241,21 @@ async function deliverTranscriptOnce(
             priorFinalizedTranscriptKeys.set(pendingKey, priorKey);
           }
         }
-        useVoiceConversationStore.setState((state) =>
-          state.latestFinalizedTranscriptKey === finalizedKey
+        useVoiceConversationStore.setState((state) => ({
+          ...(state.latestFinalizedTranscriptKey === finalizedKey
             ? { latestFinalizedTranscriptKey: priorKey }
-            : state,
-        );
+            : {}),
+          ...(state.earlyTranscriptPending === finalizedKey
+            ? {
+                earlyTranscriptPending: null,
+                earlyTranscriptResolution: {
+                  key: `${finalizedKey}:early`,
+                  finalKey: finalizedKey,
+                  accepted: false,
+                },
+              }
+            : {}),
+        }));
       }
     }
     return accepted ? "accepted" : deferred ? "deferred" : "rejected";
