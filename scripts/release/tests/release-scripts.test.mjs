@@ -89,6 +89,19 @@ describe("Tauri Cargo target isolation", () => {
 });
 
 describe("managed Goose build profile", () => {
+  it("updates an existing managed checkout remote to the lockfile repository", async () => {
+    const script = await readFile(
+      join(repo, "scripts/ensure-local-goose.sh"),
+      "utf8",
+    );
+
+    expect(script).toContain("reconcile_checkout_remote");
+    expect(script).toContain('remote set-url "$remote" "$clone_url"');
+    expect(script).toMatch(
+      /ensure_checkout_exists\n\nreconcile_checkout_remote\(\) \{[\s\S]*\n\}\n\nreconcile_checkout_remote\n\nbin_path=/,
+    );
+  });
+
   it("defaults development to debug and makes release selection profile-aware", async () => {
     const script = await readFile(
       join(repo, "scripts/ensure-local-goose.sh"),
