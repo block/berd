@@ -1,7 +1,7 @@
 {
   "repo": "https://github.com/johnmatthewtennant/goose.git",
-  "ref": "jtennant/berd-provider-failures",
-  "commit": "2c0847d37fd67c51247dec0056cc3f27b334ba9c",
+  "ref": "jtennant/compaction-provider-integration",
+  "commit": "8d0813619926a4a14d29c0a3e6bd6824e940a5e6",
   "package": "goose-cli",
   "bin": "goose"
 }
