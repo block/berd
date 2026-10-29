@@ -45,6 +45,13 @@ export type TranscriptHarnessOperation =
       expectedAnchor: "bottom" | "row";
     }
   | {
+      kind: "appendMessages";
+      atMs: number;
+      sessionId: string;
+      messages: readonly Message[];
+      streamingMessageId?: string;
+    }
+  | {
       kind: "prependMessages";
       atMs: number;
       sessionId: string;

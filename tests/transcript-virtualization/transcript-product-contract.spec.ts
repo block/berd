@@ -428,6 +428,60 @@ async function setSelectedTextMenuOpen(
 }
 
 test.describe("transcript product contract proof", () => {
+  test("composer submission follows latest when batched with an assistant response", async ({
+    page,
+  }) => {
+    test.skip(
+      !requiresRealRenderer,
+      "requires the production React transcript renderer",
+    );
+    const fixture = buildCompletedHugeAssistantFixture();
+    await loadTranscriptRenderer(page, {
+      rendererUrl,
+      rendererMode: "virtual",
+      fixture,
+    });
+    await page.getByTestId("message-timeline-scroll").hover();
+    await page.mouse.wheel(0, -1200);
+    await expect(
+      page.getByRole("button", { name: "Jump to latest" }),
+    ).toBeVisible();
+    await page.evaluate(async (sessionId) => {
+      await window.__TRANSCRIPT_VIRTUALIZATION_HARNESS__?.applyOperation({
+        kind: "appendMessages",
+        atMs: 0,
+        sessionId,
+        messages: [
+          {
+            id: "composer-follow-up",
+            role: "user",
+            created: Date.now(),
+            content: [{ type: "text", text: "Typed follow-up regression" }],
+            metadata: { userVisible: true },
+          },
+          {
+            id: "assistant-follow-up",
+            role: "assistant",
+            created: Date.now() + 1,
+            content: [{ type: "text", text: "Working on the follow-up" }],
+            metadata: { userVisible: true },
+          },
+        ],
+        streamingMessageId: "assistant-follow-up",
+      });
+    }, fixture.activeSessionId);
+    await expect(
+      page.getByRole("button", { name: "Jump to latest" }),
+    ).toBeHidden();
+    await expect(page.getByText("Typed follow-up regression")).toBeInViewport();
+    await expect
+      .poll(
+        async () =>
+          (await collectTranscriptScrollSnapshot(page)).distanceFromBottom,
+      )
+      .toBeLessThanOrEqual(8);
+  });
+
   test("virtual renderer loads completed transcripts at the bottom", async ({
     page,
   }) => {
