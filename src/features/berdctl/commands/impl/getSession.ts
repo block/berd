@@ -80,8 +80,8 @@ Result:
       import("@/shared/api/sessionSearch"),
       import("../runtime/sessions"),
     ]);
-    await loadSessionForBerdctl(args.session_id);
-    const session = requireSession(args.session_id);
+    const loadedSession = await loadSessionForBerdctl(args.session_id);
+    const session = requireSession(args.session_id, loadedSession);
     const metadata = sessionMetadata(session);
     if (args.messages === 0) {
       return metadata;

@@ -25,12 +25,29 @@ export async function loadAllSessionsForBerdctl(): Promise<void> {
   }
 }
 
-export async function loadSessionForBerdctl(sessionId: string): Promise<void> {
+function isSidebarVisibleAcpSession(session: {
+  sessionType?: string | null;
+}): boolean {
+  return (
+    session.sessionType == null ||
+    session.sessionType === "user" ||
+    session.sessionType === "scheduled" ||
+    session.sessionType === "acp"
+  );
+}
+
+export async function loadSessionForBerdctl(
+  sessionId: string,
+): Promise<ChatSession | null> {
   try {
     const session = await acpGetSessionInfo(sessionId);
-    useChatSessionStore.setState((state) =>
-      mergeAcpSessionInfo(state, session),
-    );
+    const chatSession = acpSessionToChatSession(session);
+    if (isSidebarVisibleAcpSession(session)) {
+      useChatSessionStore.setState((state) =>
+        mergeAcpSessionInfo(state, session),
+      );
+    }
+    return chatSession;
   } catch (error) {
     if (isAcpResourceNotFound(error)) {
       throw new CommandError(
@@ -86,8 +103,12 @@ async function loadSessionsForBerdctlUntil(
   }
 }
 
-export function requireSession(sessionId: string): ChatSession {
-  const session = useChatSessionStore.getState().getSession(sessionId);
+export function requireSession(
+  sessionId: string,
+  fallback?: ChatSession | null,
+): ChatSession {
+  const session =
+    useChatSessionStore.getState().getSession(sessionId) ?? fallback;
   if (!session) {
     throw new CommandError(
       "session_not_found",

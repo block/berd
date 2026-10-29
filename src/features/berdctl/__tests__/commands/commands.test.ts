@@ -2544,6 +2544,31 @@ describe("sessions.get", () => {
     });
   });
 
+  it("does not add delegated subagent targeted reads to the sidebar session store", async () => {
+    mocks.acpGetSessionInfo.mockResolvedValue(
+      makeAcpSession({
+        sessionId: "subagent-1",
+        title: "Delegated task",
+        sessionType: "sub_agent",
+        parentSessionId: "session-1",
+      }),
+    );
+
+    const result = await dispatchCommand(
+      "sessions",
+      { action: "get", session_id: "subagent-1" },
+      ctx,
+    );
+
+    expect(result).toMatchObject({
+      session_id: "subagent-1",
+      title: "Delegated task",
+    });
+    expect(
+      useChatSessionStore.getState().getSession("subagent-1"),
+    ).toBeUndefined();
+  });
+
   it("does not finish full-list hydration after a targeted read", async () => {
     useChatSessionStore.setState({ isLoading: true });
     mocks.acpGetSessionInfo.mockResolvedValue(
