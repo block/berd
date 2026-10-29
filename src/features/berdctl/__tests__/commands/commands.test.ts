@@ -2544,6 +2544,52 @@ describe("sessions.get", () => {
     });
   });
 
+  it("does not add targeted reads without session-type metadata to the sidebar", async () => {
+    mocks.acpGetSessionInfo.mockResolvedValue(
+      makeAcpSession({
+        sessionId: "subagent-1",
+        title: "Delegated task",
+      }),
+    );
+
+    const result = await dispatchCommand(
+      "sessions",
+      { action: "get", session_id: "subagent-1" },
+      ctx,
+    );
+
+    expect(result).toMatchObject({
+      session_id: "subagent-1",
+      title: "Delegated task",
+    });
+    expect(
+      useChatSessionStore.getState().getSession("subagent-1"),
+    ).toBeUndefined();
+  });
+
+  it("returns fresh metadata and messages without changing existing sidebar state", async () => {
+    seedSessions(makeSession({ id: "session-1", title: "Cached title" }));
+    mocks.acpGetSessionInfo.mockResolvedValue(
+      makeAcpSession({ sessionId: "session-1", title: "Fresh title" }),
+    );
+    mocks.lastSessionMessages.mockResolvedValue([
+      { role: "assistant", text: "Delegated result" },
+    ]);
+    const before = useChatSessionStore.getState();
+
+    const result = await dispatchCommand(
+      "sessions",
+      { action: "get", session_id: "session-1", messages: 1 },
+      ctx,
+    );
+
+    expect(result).toMatchObject({
+      title: "Fresh title",
+      messages: [{ role: "assistant", text: "Delegated result" }],
+    });
+    expect(useChatSessionStore.getState()).toBe(before);
+  });
+
   it("does not finish full-list hydration after a targeted read", async () => {
     useChatSessionStore.setState({ isLoading: true });
     mocks.acpGetSessionInfo.mockResolvedValue(
@@ -2560,7 +2606,7 @@ describe("sessions.get", () => {
     );
 
     const state = useChatSessionStore.getState();
-    expect(state.getSession("session-1")?.title).toBe("Loaded Directly");
+    expect(state.getSession("session-1")).toBeUndefined();
     expect(state.hasHydratedSessions).toBe(false);
     expect(state.isLoading).toBe(true);
     expect(state.sessionPageCursor).toBeNull();
