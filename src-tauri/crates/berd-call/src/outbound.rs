@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::speech_text::SpeechTextSanitizer;
 use crate::{PcmAudioOutput, TtsBackend, TtsOutcome, TtsSynthesisEvent};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -275,7 +274,6 @@ pub struct OutboundPlayback<'a> {
     terminal: bool,
     terminal_delivery: Option<DeliveryProgress>,
     ledger: DeliveryLedger,
-    speech_text: SpeechTextSanitizer,
 }
 
 impl<'a> OutboundPlayback<'a> {
@@ -297,7 +295,6 @@ impl<'a> OutboundPlayback<'a> {
             terminal: false,
             terminal_delivery: None,
             ledger: DeliveryLedger::new(sample_rate),
-            speech_text: SpeechTextSanitizer::default(),
         })
     }
 
@@ -338,54 +335,48 @@ impl<'a> OutboundPlayback<'a> {
             return self.interrupt();
         }
         self.ledger.begin_segment(text.to_string());
-        let speak_text = self.speech_text.sanitize_segment(text);
-        if speak_text.trim().is_empty() {
-            self.ledger.complete_segment();
-            return Ok(OutboundOutcome::Completed);
-        }
-        let outcome =
-            backend.synthesize_with_poll(&speak_text, self.active, &mut |event| match event {
-                TtsSynthesisEvent::SynthesisComplete { total_frames } => {
-                    if let Some(segment) = self.ledger.segments.last_mut() {
-                        if total_frames < segment.total_frames {
-                            return Err("synthesis length is shorter than delivered PCM".into());
-                        }
-                        segment.total_frames = total_frames;
-                        segment.synthesis_complete = true;
+        let outcome = backend.synthesize_with_poll(text, self.active, &mut |event| match event {
+            TtsSynthesisEvent::SynthesisComplete { total_frames } => {
+                if let Some(segment) = self.ledger.segments.last_mut() {
+                    if total_frames < segment.total_frames {
+                        return Err("synthesis length is shorter than delivered PCM".into());
                     }
-                    Ok(())
+                    segment.total_frames = total_frames;
+                    segment.synthesis_complete = true;
                 }
-                TtsSynthesisEvent::Frames(samples) => {
-                    if samples.is_empty() {
-                        return Ok(());
-                    }
-                    if !self.active.load(Ordering::SeqCst) {
-                        return Ok(());
-                    }
-                    self.output.check_health()?;
-                    self.ledger.append_frames(samples);
-                    if self.started {
-                        before_write(false)?;
-                        self.output.write(samples)?;
+                Ok(())
+            }
+            TtsSynthesisEvent::Frames(samples) => {
+                if samples.is_empty() {
+                    return Ok(());
+                }
+                if !self.active.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
+                self.output.check_health()?;
+                self.ledger.append_frames(samples);
+                if self.started {
+                    before_write(false)?;
+                    self.output.write(samples)?;
+                    on_progress(&self.snapshot())
+                } else {
+                    self.initial.extend_from_slice(samples);
+                    if self.initial.len() >= self.initial_buffer_frames.max(1) {
+                        self.flush_initial(before_write, on_started)?;
                         on_progress(&self.snapshot())
                     } else {
-                        self.initial.extend_from_slice(samples);
-                        if self.initial.len() >= self.initial_buffer_frames.max(1) {
-                            self.flush_initial(before_write, on_started)?;
-                            on_progress(&self.snapshot())
-                        } else {
-                            Ok(())
-                        }
+                        Ok(())
                     }
                 }
-                TtsSynthesisEvent::Poll => {
-                    if self.active.load(Ordering::SeqCst) {
-                        self.output.check_health()?;
-                        on_progress(&self.snapshot())?;
-                    }
-                    Ok(())
+            }
+            TtsSynthesisEvent::Poll => {
+                if self.active.load(Ordering::SeqCst) {
+                    self.output.check_health()?;
+                    on_progress(&self.snapshot())?;
                 }
-            });
+                Ok(())
+            }
+        });
         let outcome = match outcome {
             Ok(outcome) => outcome,
             Err(_) if !self.active.load(Ordering::SeqCst) => return self.interrupt(),
@@ -641,63 +632,6 @@ mod tests {
         assert_eq!(
             &text[..estimated_spoken_through_utf8(text, &delivery)],
             "One"
-        );
-    }
-
-    #[test]
-    fn markdown_speech_omits_urls_but_delivery_keeps_source() {
-        struct RecordingTts(Mutex<Vec<String>>);
-        impl TtsBackend for RecordingTts {
-            fn pcm_spec(&self) -> TtsPcmSpec {
-                TtsPcmSpec {
-                    sample_rate: 10,
-                    playback_rate: 1.0,
-                }
-            }
-            fn synthesize(
-                &self,
-                text: &str,
-                _: &AtomicBool,
-                on_frames: &mut dyn FnMut(&[f32]) -> Result<(), String>,
-            ) -> Result<TtsOutcome, String> {
-                assert!(!text.trim().is_empty());
-                self.0.lock().unwrap().push(text.into());
-                on_frames(&[0.1])?;
-                Ok(TtsOutcome::Completed)
-            }
-        }
-        let source = ["See [the docs](https://exa", "mple.com/a_(b)", ") now."];
-        let backend = RecordingTts(Mutex::new(Vec::new()));
-        let output = FakeOutput::new(0);
-        let active = AtomicBool::new(true);
-        let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
-        for text in source {
-            playback
-                .synthesize_segment(&backend, text, &mut |_| Ok(()), &mut || Ok(()), &mut |_| {
-                    Ok(())
-                })
-                .unwrap();
-        }
-        assert_eq!(backend.0.lock().unwrap().concat(), "See the docs now.");
-        assert_eq!(
-            playback
-                .snapshot()
-                .segments
-                .iter()
-                .map(|segment| segment.text.as_str())
-                .collect::<String>(),
-            source.concat()
-        );
-        assert!(playback
-            .snapshot()
-            .segments
-            .iter()
-            .all(|segment| segment.synthesis_complete));
-        assert_eq!(
-            playback
-                .finish(DrainPolicy::default(), &mut |_| Ok(()))
-                .unwrap(),
-            OutboundOutcome::Completed
         );
     }
 
