@@ -345,6 +345,33 @@ describe("native assistant speech stream", () => {
     );
   });
 
+  it("keeps later text blocks behind a pending suffix through completion", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    const content = [
+      { type: "text" as const, text: "Use ` when needed." },
+      {
+        type: "toolRequest" as const,
+        id: "tool-1",
+        name: "Read",
+        arguments: {},
+        status: "completed" as const,
+      },
+      { type: "text" as const, text: "Then continue." },
+    ];
+    useChatStore.getState().setMessages("session-1", [assistant(content)]);
+    await vi.waitFor(() => expect(mocks.flush).toHaveBeenCalled());
+    expect(mocks.append.mock.calls.map((call) => call[1]).join("")).toBe(
+      "Use ",
+    );
+    useChatStore
+      .getState()
+      .setMessages("session-1", [assistant(content, "completed")]);
+    await vi.waitFor(() => expect(mocks.finish).toHaveBeenCalled());
+    expect(mocks.append.mock.calls.map((call) => call[1]).join("")).toBe(
+      "Use ` when needed.Then continue.",
+    );
+  });
+
   it("keeps ambiguous code pending across a tool flush until its closing chunk", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
     const prefix = "Call `callbacks[index](result)";

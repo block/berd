@@ -1493,6 +1493,7 @@ export function startNativeAssistantSpeech(
         message.metadata?.completionStatus === "completed" &&
         !handledCompletionMessages.has(message.id);
       let textOrdinal = 0;
+      let pendingText = false;
       for (const content of message.content) {
         if (content.type !== "text") continue;
         const target = { messageId: message.id, textOrdinal };
@@ -1610,6 +1611,7 @@ export function startNativeAssistantSpeech(
           slot,
           content.text.slice(0, speechText.consumedThrough),
         );
+        pendingText = speechText.consumedThrough < content.text.length;
         let speechDelta = "";
         for (const span of speechText.spans) {
           const spanStart = utterance.text.length;
@@ -1634,8 +1636,10 @@ export function startNativeAssistantSpeech(
             });
           }
         }
-        if (utterance.text.trim().length === 0 || speechDelta.length === 0)
+        if (utterance.text.trim().length === 0 || speechDelta.length === 0) {
+          if (pendingText) break;
           continue;
+        }
         queueNativeStart(utterance);
         queueStreamCommand(
           utterance,
@@ -1649,6 +1653,7 @@ export function startNativeAssistantSpeech(
             heldReleaseReady = false;
           }
         }
+        if (pendingText) break;
       }
 
       const utterance = activeUtterance;
@@ -1712,6 +1717,7 @@ export function startNativeAssistantSpeech(
           trackVoiceAssistantResponse();
         }
       }
+      if (pendingText) break;
     }
   };
 

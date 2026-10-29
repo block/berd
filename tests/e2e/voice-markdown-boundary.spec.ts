@@ -216,6 +216,14 @@ test("build sends link labels to native speech and preserves the rendered link",
           rawInput: { path: "/tmp/voice-e2e.txt" },
         },
       });
+      harness.emitAcpNotification({
+        sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          messageId,
+          content: { type: "text", text: " Then continue." },
+        },
+      });
     },
     {
       sessionId: SESSION_ID,
@@ -237,6 +245,11 @@ test("build sends link labels to native speech and preserves the rendered link",
       (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.appended.join(""),
     ),
   ).not.toContain("when needed");
+  expect(
+    await page.evaluate(() =>
+      (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.appended.join(""),
+    ),
+  ).not.toContain("Then continue.");
   await page.evaluate(() => {
     (window as SpeechBoundaryWindow).__FINISH_VOICE_PROMPT__();
   });
@@ -255,7 +268,7 @@ test("build sends link labels to native speech and preserves the rendered link",
     )
     .toBe(
       String.raw`See the page for the next steps. Use \[brackets](not a link) now. Call ` +
-        "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n\n1. Read:\n    guide\n\nSee docs now.\n\n> Code:\n>\n>     callbacks[index](result)\n\nSee the manual:\n    manual now.\n\nSee broken\nImportant: do not restart the server.\n\nUse ` when needed, then see help.",
+        "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n\n1. Read:\n    guide\n\nSee docs now.\n\n> Code:\n>\n>     callbacks[index](result)\n\nSee the manual:\n    manual now.\n\nSee broken\nImportant: do not restart the server.\n\nUse ` when needed, then see help. Then continue.",
     );
   await expect(
     page.getByRole("link", { name: "docs", exact: true }),
