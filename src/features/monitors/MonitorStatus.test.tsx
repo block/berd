@@ -35,7 +35,7 @@ describe("MonitorStatus", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("get_running_monitors"),
     );
-    expect(screen.queryByText(/monitor running/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Inspect/ })).toBeNull();
   });
 
   it("deduplicates multiple session consumers onto one fetch and filters per session", async () => {
@@ -50,20 +50,22 @@ describe("MonitorStatus", () => {
         <MonitorStatus sessionId="session-2" variant="composer" />
       </>,
     );
-    expect(await screen.findByText("2 monitors running")).toBeInTheDocument();
-    expect(screen.getByText("1 monitor running")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Inspect 2 running monitors" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Inspect 1 running monitor" }),
+    ).toBeInTheDocument();
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the count and monitor labels in a tooltip", async () => {
+  it("shows the sidebar count and monitor labels in a tooltip", async () => {
     const user = userEvent.setup();
     invoke.mockResolvedValue([
       { sessionId: "session-1", stateKey: "a", label: "Monitor A" },
       { sessionId: "session-1", stateKey: "b", label: "Monitor B" },
     ]);
-    renderWithClient(
-      <MonitorStatus sessionId="session-1" variant="composer" />,
-    );
+    renderWithClient(<MonitorStatus sessionId="session-1" variant="sidebar" />);
     const status = await screen.findByRole("img", {
       name: "2 monitors running",
     });
@@ -91,10 +93,14 @@ describe("MonitorStatus", () => {
         </QueryClientProvider>
       </I18nProvider>,
     );
-    expect(await screen.findByText("1 monitor running")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Inspect 1 running monitor" }),
+    ).toBeInTheDocument();
     await client.invalidateQueries({ queryKey: ["running-monitors"] });
     await waitFor(() =>
-      expect(screen.queryByText("1 monitor running")).not.toBeInTheDocument(),
+      expect(
+        screen.queryByRole("button", { name: "Inspect 1 running monitor" }),
+      ).not.toBeInTheDocument(),
     );
   });
 
@@ -107,12 +113,132 @@ describe("MonitorStatus", () => {
     renderWithClient(
       <MonitorStatus sessionId="session-1" variant="composer" />,
     );
-    expect(await screen.findByText("1 monitor running")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Inspect 1 running monitor" }),
+    ).toBeInTheDocument();
     await waitFor(() => expect(invoke).toHaveBeenCalledTimes(2), {
       timeout: 2_500,
     });
     await waitFor(() =>
-      expect(screen.queryByText("1 monitor running")).not.toBeInTheDocument(),
+      expect(
+        screen.queryByRole("button", { name: "Inspect 1 running monitor" }),
+      ).not.toBeInTheDocument(),
     );
   }, 4_000);
+});
+
+const buildMonitor = {
+  sessionId: "session-1",
+  stateKey: "build",
+  instanceId: "build-instance",
+  label: "Build watcher",
+  command: ["cargo", "test", "--workspace"],
+  startedAt: 1793286000000,
+  stopping: false,
+};
+
+async function inspectBuild() {
+  const user = userEvent.setup();
+  renderWithClient(<MonitorStatus sessionId="session-1" variant="composer" />);
+  await user.click(
+    await screen.findByRole("button", { name: "Inspect 1 running monitor" }),
+  );
+  return user;
+}
+
+describe("monitor inspector", () => {
+  beforeEach(() => invoke.mockReset());
+
+  it("shows command, start time and running status; cancel leaves it running", async () => {
+    invoke.mockResolvedValue([buildMonitor]);
+    const user = await inspectBuild();
+    const panel = screen.getByRole("dialog", { name: "Running monitors" });
+    expect(
+      within(panel).getByText('"cargo" "test" "--workspace"'),
+    ).toBeInTheDocument();
+    expect(within(panel).getByText("Started")).toBeInTheDocument();
+    expect(within(panel).getByText("Running")).toBeInTheDocument();
+    await user.click(within(panel).getByRole("button", { name: "Stop" }));
+    expect(
+      within(panel).getByText(/agent session will keep running/),
+    ).toBeInTheDocument();
+    await user.click(within(panel).getByRole("button", { name: "Cancel" }));
+    expect(
+      invoke.mock.calls.every(
+        ([command]) => command !== "stop_running_monitor",
+      ),
+    ).toBe(true);
+  });
+
+  it("stops the displayed instance only after confirmation and keeps stopping until observed gone", async () => {
+    let monitors = [buildMonitor];
+    invoke.mockImplementation((command: string) =>
+      command === "get_running_monitors"
+        ? Promise.resolve(monitors)
+        : Promise.resolve(),
+    );
+    const user = await inspectBuild();
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    expect(
+      invoke.mock.calls.some(([command]) => command === "stop_running_monitor"),
+    ).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Stop monitor" }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("stop_running_monitor", {
+        sessionId: "session-1",
+        stateKey: "build",
+        instanceId: "build-instance",
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Stopping…" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Inspect 1 running monitor" }),
+    ).toBeInTheDocument();
+    monitors = [];
+    await waitFor(
+      () =>
+        expect(
+          screen.queryByRole("button", { name: "Inspect 1 running monitor" }),
+        ).not.toBeInTheDocument(),
+      { timeout: 2500 },
+    );
+  });
+
+  it("shows a stop failure without hiding the monitor and permits retry", async () => {
+    invoke.mockImplementation((command: string) =>
+      command === "get_running_monitors"
+        ? Promise.resolve([buildMonitor])
+        : command === "stop_running_monitor"
+          ? Promise.reject(new Error("replaced"))
+          : Promise.resolve(),
+    );
+    const user = await inspectBuild();
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    await user.click(screen.getByRole("button", { name: "Stop monitor" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not stop",
+    );
+    expect(screen.getByRole("button", { name: "Stop monitor" })).toBeEnabled();
+  });
+
+  it("supports older descriptors without command or time and disables duplicate stop requests", async () => {
+    invoke.mockResolvedValue([
+      {
+        sessionId: "session-1",
+        stateKey: "build",
+        instanceId: "old-instance",
+        label: "Old watcher",
+        stopping: true,
+      },
+    ]);
+    const user = await inspectBuild();
+    expect(screen.getAllByText("Unavailable for this monitor")).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: "Stopping…" }));
+    expect(screen.getByRole("button", { name: "Stopping…" })).toBeDisabled();
+    expect(
+      invoke.mock.calls.every(
+        ([command]) => command !== "stop_running_monitor",
+      ),
+    ).toBe(true);
+  });
 });

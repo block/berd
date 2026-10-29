@@ -1,6 +1,5 @@
-use berd_monitor::{RunningMonitorDescriptor, StatePaths};
+use berd_monitor::{try_claim_owner, RunningMonitorDescriptor, StatePaths};
 use clap::{Parser, Subcommand, ValueEnum};
-use fs2::FileExt;
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
@@ -497,7 +496,7 @@ fn claim_owner(paths: &StatePaths, owner_token: &str) -> io::Result<File> {
         .read(true)
         .write(true)
         .open(&paths.owner)?;
-    owner.try_lock_exclusive().map_err(|error| {
+    try_claim_owner(&owner).map_err(|error| {
         io::Error::new(
             error.kind(),
             format!("a monitor already owns {}: {error}", paths.root.display()),
@@ -510,7 +509,11 @@ fn claim_owner(paths: &StatePaths, owner_token: &str) -> io::Result<File> {
 }
 
 fn owner_token(paths: &StatePaths) -> io::Result<String> {
-    let token = fs::read_to_string(&paths.owner)?.trim().to_owned();
+    let mut token = String::new();
+    File::open(&paths.owner)?
+        .take(4096)
+        .read_to_string(&mut token)?;
+    let token = token.trim().to_owned();
     if token.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -550,30 +553,11 @@ fn configure_detached(command: &mut Command) {
 }
 
 fn request_stop(state_key: &str, session_id: &str) -> io::Result<()> {
-    let paths = StatePaths::for_key(state_key, session_id);
-    let owner = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&paths.owner)
-        .map_err(|error| {
-            if error.kind() == io::ErrorKind::NotFound {
-                io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("no monitor found for state key {state_key:?}"),
-                )
-            } else {
-                error
-            }
-        })?;
-    if owner.try_lock_exclusive().is_ok() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("no monitor found for state key {state_key:?}"),
-        ));
-    }
-    let token = owner_token(&paths)?;
-    fs::write(paths.stop_for(&token), b"stop\n")?;
-    println!("stop requested for {}", paths.root.display());
+    berd_monitor::request_stop(state_key, session_id, None)?;
+    println!(
+        "stop requested for {}",
+        StatePaths::for_key(state_key, session_id).root.display()
+    );
     Ok(())
 }
 
@@ -622,6 +606,20 @@ fn run_foreground_after_claim(
             session_id: session_id.to_owned(),
             state_key: state_key.to_owned(),
             label: label.to_owned(),
+            instance_id: owner_token.clone(),
+            command: producer_command
+                .iter()
+                .map(|arg| arg.to_str().map(str::to_owned))
+                .collect(),
+            started_at: Some(
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map_err(io::Error::other)?
+                    .as_millis()
+                    .try_into()
+                    .map_err(io::Error::other)?,
+            ),
+            stopping: false,
         })?,
     )?;
     after_claim();

@@ -808,6 +808,20 @@
   "archivedReadOnlyStatus": "This session is archived and read-only.",
   "monitorStatus": {
     "count_one": "1 monitor running",
-    "count_other": "{{count}} monitors running"
+    "count_other": "{{count}} monitors running",
+    "watching": "Watching: {{label}}",
+    "more": "+{{count}}",
+    "inspect_one": "Inspect 1 running monitor",
+    "inspect_other": "Inspect {{count}} running monitors",
+    "title": "Running monitors",
+    "running": "Running",
+    "stopping": "Stopping…",
+    "command": "Command",
+    "started": "Started",
+    "detailsUnavailable": "Unavailable for this monitor",
+    "stop": "Stop",
+    "confirmStop": "Stop monitor",
+    "stopDescription": "Stop this monitor and its background command? The agent session will keep running.",
+    "stopFailed": "Could not stop this monitor. It may have ended or been replaced. Refresh the details and try again."
   }
 }
