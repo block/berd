@@ -27,6 +27,7 @@ pub mod pocket_assets;
 pub mod protocol;
 pub mod session;
 pub mod siri;
+mod speech_text;
 mod status_sounds;
 mod synthesis;
 mod tts;
