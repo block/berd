@@ -1075,6 +1075,8 @@
     "useVoice": "Use {{voice}}",
     "voice": "Voice",
     "voiceLabel": "Pocket TTS voice",
+    "earlyDelivery": "Early delivery (experimental)",
+    "earlyDeliveryDescription": "Prepare a private draft while you speak to reduce response time. Your final transcript remains authoritative.",
     "statusSounds": "Status sounds",
     "statusSoundModes": {
       "off": "Off",

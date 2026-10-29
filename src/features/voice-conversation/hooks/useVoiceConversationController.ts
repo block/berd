@@ -11,6 +11,10 @@ import {
   startPrivateVoiceDraft,
   type PrivateVoiceDraft,
 } from "../lib/privateVoiceDraft";
+import {
+  getVoiceEarlyDeliveryPreference,
+  subscribeToVoiceEarlyDeliveryPreference,
+} from "../lib/voiceEarlyDeliveryPreference";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
 import { createSystemNotificationMessage } from "@/shared/types/messages";
@@ -559,6 +563,12 @@ function ensureVoiceEventDeliveryInitialized() {
   if (deliveryInitialized) return;
   deliveryInitialized = true;
   observeChainedVoiceStatus();
+  subscribeToVoiceEarlyDeliveryPreference(() => {
+    if (getVoiceEarlyDeliveryPreference().enabled) return;
+    for (const draft of earlyDeliveries.values()) draft.dispose();
+    earlyDeliveries.clear();
+    finalTranscriptsSeen.clear();
+  });
   useVoiceConversationStore.subscribe((state, previous) => {
     if (
       state.status.revision === previous.status.revision &&
@@ -617,6 +627,7 @@ function ensureVoiceEventDeliveryInitialized() {
     const shouldNotifyFailure = event.deliveryAttempts === 0;
     if (isEarly) {
       if (
+        !getVoiceEarlyDeliveryPreference().enabled ||
         !earlyEventIsCurrent(event) ||
         earlyDeliveries.has(eventKey) ||
         activeRouteIsBlocked(event.sessionId) ||
@@ -696,7 +707,7 @@ function ensureVoiceEventDeliveryInitialized() {
           ...sendOptions,
           assistantPrompt: [
             playbackNotice,
-            draft
+            draft && getVoiceEarlyDeliveryPreference().enabled
               ? `Private provisional DRAFT (not spoken, not executed, may be wrong):\n${draft}\n\nThe user transcript in this turn is authoritative. Answer it and perform any requested actions normally. Use the draft only if it is relevant to the final transcript.`
               : null,
           ]

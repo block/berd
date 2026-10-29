@@ -3,7 +3,16 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 import { VoiceMicrophoneCaptureError } from "../api/voiceConversation";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import { setVoiceEarlyDeliveryPreference } from "../lib/voiceEarlyDeliveryPreference";
 import { setStatusSoundPreference } from "../lib/statusSoundPreference";
+
+const privateDraftMocks = vi.hoisted(() => ({
+  start: vi.fn(),
+}));
+vi.mock("../lib/privateVoiceDraft", () => ({
+  startPrivateVoiceDraft: privateDraftMocks.start,
+}));
 
 const nativeAssistantSpeechMocks = vi.hoisted(() => ({
   capture: vi.fn(() => []),
@@ -317,6 +326,78 @@ describe("voice transcript delivery coordination", () => {
     microphonePermissionMocks.getStatus.mockReset();
     microphonePermissionMocks.getStatus.mockResolvedValue("authorized");
     useChatStore.setState({ messagesBySession: {}, sessionStateById: {} });
+  });
+
+  it("gates preparation, disposes outstanding drafts on disable, and still delivers finals", async () => {
+    const dispose = vi.fn();
+    const take = vi.fn().mockResolvedValue("private draft");
+    privateDraftMocks.start.mockReset();
+    privateDraftMocks.start.mockReturnValue({ dispose, take });
+    const onSend = vi.fn().mockResolvedValue(true);
+    useChatSessionStore.setState({
+      sessions: [{ id: "session-1", workingDir: "/project" }] as never,
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 42,
+      },
+      microphoneMuted: false,
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+    const control = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-1",
+        onSend,
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+    const event = {
+      sessionId: "session-1",
+      lifecycleId: "early-toggle",
+      id: "toggle-utterance",
+      text: "partial",
+      revision: 42,
+      deliveryAttempts: 0,
+    };
+    await voiceStoreMocks.subscriber?.({ ...event, type: "interimUser" });
+    expect(privateDraftMocks.start).toHaveBeenCalledOnce();
+    act(() => setVoiceEarlyDeliveryPreference({ enabled: false }));
+    expect(dispose).toHaveBeenCalledOnce();
+    await voiceStoreMocks.subscriber?.({
+      ...event,
+      id: "disabled-utterance",
+      type: "interimUser",
+    });
+    expect(privateDraftMocks.start).toHaveBeenCalledOnce();
+    await act(async () => {
+      await voiceStoreMocks.subscriber?.({
+        ...event,
+        text: "authoritative final",
+        type: "user",
+      });
+    });
+    expect(take).not.toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledWith(
+      "authoritative final",
+      undefined,
+      undefined,
+      expect.objectContaining({
+        displayText: "authoritative final",
+        assistantPrompt: "",
+      }),
+    );
+    control.unmount();
   });
 
   it("applies settings changes to an active chained runtime", async () => {

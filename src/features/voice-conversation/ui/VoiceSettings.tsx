@@ -7,6 +7,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
+import { Switch } from "@/shared/ui/switch";
+import { useVoiceEarlyDeliveryPreference } from "../lib/voiceEarlyDeliveryPreference";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import {
   Select,
@@ -161,6 +163,7 @@ export function VoiceSettings() {
       setOpenAiVoice(openAiStatus.speechVoice);
     }
   }, [openAiStatus]);
+  const earlyDelivery = useVoiceEarlyDeliveryPreference();
   const interruption = useVoiceInterruptionPreference();
   const statusSounds = useStatusSoundPreference();
   const siriSetup = useSiriVoiceSetup(output.backend === "siri");
@@ -234,6 +237,7 @@ export function VoiceSettings() {
       output.setBackend(getDefaultVoiceOutputBackend());
       interruption.setMode(getDefaultVoiceInterruptionPreference().mode);
       statusSounds.update(getDefaultStatusSoundPreference());
+      earlyDelivery.setEnabled(true);
       setResetDialogOpen(false);
     } finally {
       setResetting(false);
@@ -588,6 +592,22 @@ export function VoiceSettings() {
                 ))}
               </SelectContent>
             </Select>
+          )}
+        />
+      </section>
+      <section className="space-y-2 overflow-hidden">
+        <SettingsRow
+          className="py-2"
+          label={t("voice.earlyDelivery")}
+          description={t("voice.earlyDeliveryDescription")}
+          layout="responsive"
+          action={({ labelId, descriptionId }) => (
+            <Switch
+              aria-labelledby={labelId}
+              aria-describedby={descriptionId}
+              checked={earlyDelivery.enabled}
+              onCheckedChange={earlyDelivery.setEnabled}
+            />
           )}
         />
       </section>

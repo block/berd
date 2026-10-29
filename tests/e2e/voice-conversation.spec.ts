@@ -261,6 +261,124 @@ for (const scenario of ["complete", "stalled", "mode-rejected"] as const) {
       });
     });
 
+    if (scenario === "complete")
+      base(
+        "early delivery toggle persists and gates only private preparation",
+        async ({ page }) => {
+          const openSettings = async () => {
+            await page.locator("[data-sidebar-nav-id=settings]").click();
+            await page.locator("[data-sidebar-nav-id=settings-voice]").click();
+          };
+          const openChat = async () => {
+            await page
+              .getByTestId("sidebar-primary-nav-panel")
+              .getByRole("button", { name: "Back", exact: true })
+              .click();
+            await page
+              .getByRole("button", { name: "Early voice", exact: true })
+              .click();
+            await expect(page.getByRole("textbox").first()).toBeVisible();
+          };
+          const toggle = page.getByRole("switch", {
+            name: "Early delivery (experimental)",
+            exact: true,
+          });
+          const allRequests = () =>
+            page.evaluate(() =>
+              (
+                window as typeof window & { __GOOSE_E2E__: VoiceHarness }
+              ).__GOOSE_E2E__.acpRequests(),
+            );
+          const forks = async () =>
+            (await allRequests()).filter((r) => r.method === "session/fork");
+
+          await openSettings();
+          await expect(toggle).toBeChecked();
+          await toggle.uncheck();
+          await expect(toggle).not.toBeChecked();
+          await openChat();
+          await page.goto("/");
+          await page.reload();
+          await openSettings();
+          await expect(toggle).not.toBeChecked();
+          await openChat();
+          await nativeEvent(page, {
+            type: "startup",
+            ownerWindowLabel: "main",
+            line: "Ready",
+          });
+          await nativeEvent(page, { type: "interimUser", ...utterance });
+          // Drain renderer work before asserting that the disabled interim was ignored.
+          await page.evaluate(
+            () =>
+              new Promise<void>((resolve) =>
+                requestAnimationFrame(() =>
+                  requestAnimationFrame(() => resolve()),
+                ),
+              ),
+          );
+          expect(await forks()).toHaveLength(0);
+          expect(await requests(page)).toHaveLength(0);
+          await nativeEvent(page, {
+            type: "user",
+            ...utterance,
+            deliveryAttempts: 0,
+          });
+          await expect.poll(() => requests(page)).toHaveLength(1);
+          const final = (await requests(page))[0];
+          expect(final.method).toBe("session/prompt");
+          expect(final.params?.sessionId).toBe(SESSION_ID);
+          expect(final.params?.prompt).toContainEqual({
+            type: "text",
+            text: utterance.text,
+          });
+          expect(await forks()).toHaveLength(0);
+          await expect(
+            page.getByText(utterance.text, { exact: true }),
+          ).toHaveCount(1);
+          await completePrompts(page);
+
+          await openSettings();
+          await toggle.check();
+          await expect(toggle).toBeChecked();
+          await openChat();
+          await nativeEvent(page, {
+            type: "interimUser",
+            ...utterance,
+            id: "utterance-reenabled",
+          });
+          await expect.poll(forks).toHaveLength(1);
+          await expect
+            .poll(async () =>
+              (await allRequests()).filter(
+                (r) => r.method === "session/set_mode",
+              ),
+            )
+            .toHaveLength(1);
+          const mode = (await allRequests()).find(
+            (r) => r.method === "session/set_mode",
+          );
+          expect(mode?.params?.sessionId).not.toBe(SESSION_ID);
+          expect(mode?.params?.modeId).toBe("chat");
+          await expect
+            .poll(async () =>
+              (await requests(page)).filter(
+                (r) => r.params?.sessionId === mode?.params?.sessionId,
+              ),
+            )
+            .toHaveLength(1);
+          expect(
+            (await requests(page)).filter(
+              (r) => r.params?.sessionId === SESSION_ID,
+            ),
+          ).toHaveLength(1);
+          await nativeEvent(page, {
+            type: "recognitionPending",
+            pending: false,
+          });
+        },
+      );
+
     for (const busy of [false, true])
       base(
         `final has sole tool authority, bounded delivery and later utterance (busy: ${busy})`,

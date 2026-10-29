@@ -1074,6 +1074,8 @@
     "useVoice": "Usar {{voice}}",
     "voice": "Voz",
     "voiceLabel": "Voz de Pocket TTS",
+    "earlyDelivery": "Entrega anticipada (experimental)",
+    "earlyDeliveryDescription": "Prepara un borrador privado mientras hablas para reducir el tiempo de respuesta. La transcripción final sigue siendo la definitiva.",
     "statusSounds": "Sonidos de estado",
     "statusSoundModes": {
       "off": "Desactivados",
