@@ -4339,7 +4339,7 @@ fn handle_voice_input_event(
             )?;
             update_provisional_suspension(core, active)?;
         }
-        VoiceInputEvent::InterimTranscript(text) => write_message(
+        VoiceInputEvent::InterimTranscript { text, .. } => write_message(
             writer,
             &SessionMessage::UserInterim {
                 token: *next_token,
@@ -4349,6 +4349,7 @@ fn handle_voice_input_event(
         VoiceInputEvent::FinalTranscript {
             text,
             storage_receipt,
+            ..
         } => store_and_publish_voice_final(
             text,
             || storage_receipt.stored(),
@@ -8182,7 +8183,10 @@ mod tests {
         let mut output = Vec::new();
         let mut next_token = 7;
         handle_voice_input_event(
-            VoiceInputEvent::InterimTranscript("you sh".into()),
+            VoiceInputEvent::InterimTranscript {
+                recognition_id: "recognition".into(),
+                text: "you sh".into(),
+            },
             &mut core,
             &mut active,
             &mut next_token,

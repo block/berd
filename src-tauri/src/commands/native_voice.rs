@@ -1451,22 +1451,12 @@ fn reject_pending_transcript(
     Ok(TranscriptRejection { attempts, terminal })
 }
 
+#[derive(Default)]
 struct EarlyVoiceTranscript {
     utterance_id: String,
     interim_text: String,
     user_speaking: bool,
     early_emitted: bool,
-}
-
-impl Default for EarlyVoiceTranscript {
-    fn default() -> Self {
-        Self {
-            utterance_id: uuid::Uuid::new_v4().to_string(),
-            interim_text: String::new(),
-            user_speaking: false,
-            early_emitted: false,
-        }
-    }
 }
 
 impl EarlyVoiceTranscript {
@@ -1478,8 +1468,22 @@ impl EarlyVoiceTranscript {
         true
     }
 
+    fn set_interim(&mut self, recognition_id: String, text: String) {
+        if self.utterance_id != recognition_id {
+            self.reset();
+            self.utterance_id = recognition_id;
+        }
+        self.interim_text = text.trim().to_string();
+    }
+
+    fn finish(&mut self, recognition_id: &str) {
+        if self.utterance_id == recognition_id {
+            self.reset();
+        }
+    }
+
     fn reset(&mut self) {
-        self.utterance_id = uuid::Uuid::new_v4().to_string();
+        self.utterance_id.clear();
         self.interim_text.clear();
         self.early_emitted = false;
     }
@@ -1846,8 +1850,11 @@ pub async fn start_native_voice_conversation(
                         },
                     );
                 }
-                berd_call::input::VoiceInputEvent::InterimTranscript(text) => {
-                    early.interim_text = text.trim().to_string();
+                berd_call::input::VoiceInputEvent::InterimTranscript {
+                    recognition_id,
+                    text,
+                } => {
+                    early.set_interim(recognition_id, text);
                     if early.take_ready() {
                         let _ = event_window.emit(
                             EVENT_NAME,
@@ -1862,18 +1869,19 @@ pub async fn start_native_voice_conversation(
                     }
                 }
                 berd_call::input::VoiceInputEvent::FinalTranscript {
+                    recognition_id,
                     text,
                     storage_receipt,
                 } => {
                     let transcript = PendingTranscript {
                         session_id: session_id.clone(),
                         lifecycle_id: lifecycle_id.clone(),
-                        id: early.utterance_id.clone(),
+                        id: recognition_id.clone(),
                         text,
                         revision,
                         delivery_attempts: 0,
                     };
-                    early.reset();
+                    early.finish(&recognition_id);
                     let Ok(disposition) = store_final_if_active(
                         &runtime,
                         &pending,
@@ -2823,10 +2831,36 @@ mod tests {
     use std::{thread, time::Instant};
 
     #[test]
+    fn late_final_keeps_identity_after_hold_expires_and_new_provisional() {
+        let mut early = EarlyVoiceTranscript::default();
+        early.set_interim("old-recognition".into(), "old words".into());
+        assert!(early.take_ready());
+        let old_provisional = early.utterance_id.clone();
+        // RecognitionPendingChanged(false) expires the hold, not recognition.
+        early.reset();
+        early.set_interim("new-recognition".into(), "new words".into());
+        assert!(early.take_ready());
+        let new_provisional = early.utterance_id.clone();
+        assert_ne!(old_provisional, new_provisional);
+        // The old final arrives while the newer provisional is active.
+        let old_final = "old-recognition";
+        early.finish(old_final);
+        assert_eq!(old_final, old_provisional);
+        assert_eq!(early.utterance_id, new_provisional);
+        assert!(
+            !early.take_ready(),
+            "old final must not re-emit the new provisional"
+        );
+        let new_final = "new-recognition";
+        early.finish(new_final);
+        assert_eq!(new_final, new_provisional);
+    }
+
+    #[test]
     fn recognition_resolution_allows_early_delivery_after_no_final_or_mute() {
         let mut early = EarlyVoiceTranscript::default();
         early.user_speaking = true;
-        early.interim_text = "first words".into();
+        early.set_interim("first-recognition".into(), "first words".into());
         assert!(!early.take_ready());
         early.user_speaking = false;
         assert!(early.take_ready());
@@ -2835,7 +2869,7 @@ mod tests {
         early.reset();
         assert_ne!(early.utterance_id, previous_id);
         assert!(!early.take_ready());
-        early.interim_text = "next words".into();
+        early.set_interim("next-recognition".into(), "next words".into());
         assert!(early.take_ready());
     }
 
@@ -3596,6 +3630,7 @@ mod tests {
                         VoiceInputEvent::FinalTranscript {
                             text,
                             storage_receipt,
+                            ..
                         } => {
                             storage_receipt.stored();
                             if text == "marker" {

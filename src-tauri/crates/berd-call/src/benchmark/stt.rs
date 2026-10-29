@@ -563,7 +563,7 @@ fn observe_event(
                 tracker.speaking_ended = Some(now);
             }
         }
-        Some(VoiceInputEvent::InterimTranscript(_)) => {}
+        Some(VoiceInputEvent::InterimTranscript { .. }) => {}
         Some(VoiceInputEvent::RecognitionPendingChanged(active)) => {
             tracker.pending = active;
             if active {
@@ -576,6 +576,7 @@ fn observe_event(
         Some(VoiceInputEvent::FinalTranscript {
             text,
             storage_receipt,
+            ..
         }) => {
             if tracker.final_text.is_some() {
                 tracker.error =
@@ -1044,6 +1045,7 @@ mod tests {
         let (first_receipt, first_ack) = crate::input::FinalTranscriptStorageReceipt::test_pair();
         observe_event(
             Some(VoiceInputEvent::FinalTranscript {
+                recognition_id: "recognition".into(),
                 text: "stored words".into(),
                 storage_receipt: first_receipt,
             }),
@@ -1058,6 +1060,7 @@ mod tests {
             crate::input::FinalTranscriptStorageReceipt::test_pair();
         assert!(observe_event(
             Some(VoiceInputEvent::FinalTranscript {
+                recognition_id: "recognition".into(),
                 text: "duplicate words".into(),
                 storage_receipt: duplicate_receipt,
             }),
@@ -1076,6 +1079,7 @@ mod tests {
     fn late_final_is_a_shutdown_failure_and_is_not_acknowledged() {
         let (receipt, acknowledgement) = crate::input::FinalTranscriptStorageReceipt::test_pair();
         let error = observe_shutdown_event(VoiceInputEvent::FinalTranscript {
+            recognition_id: "recognition".into(),
             text: "late words".into(),
             storage_receipt: receipt,
         })
