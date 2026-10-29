@@ -28,6 +28,34 @@ describe("client speech text", () => {
         expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
     }
   });
+  it.each([
+    [
+      "See [docs](https://example.com 'Read (first') Important instructions.",
+      "See docs Important instructions.",
+    ],
+    [
+      'See [docs](https://example.com "Read (first") Important instructions.',
+      "See docs Important instructions.",
+    ],
+    [
+      "See [docs](https://example.com/it's) Important instructions.",
+      "See docs Important instructions.",
+    ],
+    [
+      "See [docs](<https://example.com/a(b> 'Read (first') Important instructions.",
+      "See docs Important instructions.",
+    ],
+  ])("retains prose after titled links: %s", (source, expected) => {
+    for (let split = 0; split <= source.length; split++) {
+      const spans = [
+        ...speechTextSpans(source.slice(0, split)),
+        ...speechTextSpans(source, split),
+      ];
+      expect(spans.map((span) => span.text).join("")).toBe(expected);
+      for (const span of spans)
+        expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
+    }
+  });
   it("maps spoken characters back to the literal source", () => {
     const source = "See [the docs](https://example.com) now.";
     const spans = speechTextSpans(source);

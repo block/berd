@@ -15,7 +15,7 @@ type SpeechBoundaryWindow = Window & {
 const SESSION_ID = "voice-session";
 const ASSISTANT_MESSAGE_ID = "assistant-message";
 const SPOKEN_TEXT =
-  "See [the page](<https://example.com/a(b>) for the next steps.";
+  "See [the page](<https://example.com/a(b> 'Read (first') for the next steps.";
 
 const test = base.extend<{ voice: Page }>({
   voice: async ({ page }, use) => {
