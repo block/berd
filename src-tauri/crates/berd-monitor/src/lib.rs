@@ -7,6 +7,17 @@ use std::{
     path::{Path, PathBuf},
 };
 
+// Receiver budgets, not producer launch limits. Mirror the producer's label policy.
+const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
+const MAX_RUNNING_MONITORS: usize = 256;
+const MAX_ID_BYTES: usize = 1024;
+const MAX_LABEL_CODE_UNITS: usize = 120;
+const MAX_COMMAND_ARGS: usize = 64;
+const MAX_COMMAND_ARG_BYTES: usize = 4096;
+const MAX_COMMAND_BYTES: usize = 16 * 1024;
+// ECMAScript Date's inclusive millisecond range. Larger values cannot be displayed.
+const MAX_STARTED_AT: u64 = 8_640_000_000_000_000;
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunningMonitorDescriptor {
@@ -34,6 +45,10 @@ pub struct StatePaths {
 
 impl StatePaths {
     pub fn for_key(key: &str, session_id: &str) -> Self {
+        Self::in_base(&state_base_dir(), key, session_id)
+    }
+
+    fn in_base(base: &Path, key: &str, session_id: &str) -> Self {
         let suffix = stable_hash(format!("{session_id}\0{key}").as_bytes());
         let safe = key
             .chars()
@@ -46,7 +61,7 @@ impl StatePaths {
                 }
             })
             .collect::<String>();
-        let root = state_base_dir().join(format!("{safe}-{suffix:016x}"));
+        let root = base.join(format!("{safe}-{suffix:016x}"));
         Self {
             log: root.join("watcher.log"),
             pending: root.join("pending.txt"),
@@ -208,6 +223,49 @@ pub fn get_running_monitors() -> io::Result<Vec<RunningMonitorDescriptor>> {
     running_monitors_in(&state_base_dir())
 }
 
+fn valid_single_line(value: &str) -> bool {
+    !value.trim().is_empty() && !value.contains(['\r', '\n'])
+}
+
+fn read_descriptor(root: &Path, base: &Path) -> Option<RunningMonitorDescriptor> {
+    let file = fs::File::open(root.join("descriptor.json")).ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take((MAX_DESCRIPTOR_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() > MAX_DESCRIPTOR_BYTES {
+        return None;
+    }
+    let mut descriptor: RunningMonitorDescriptor = serde_json::from_slice(&bytes).ok()?;
+    if [&descriptor.session_id, &descriptor.state_key]
+        .iter()
+        .any(|value| value.len() > MAX_ID_BYTES || !valid_single_line(value))
+        || !valid_single_line(&descriptor.label)
+        || descriptor.label.encode_utf16().count() > MAX_LABEL_CODE_UNITS
+        || StatePaths::in_base(base, &descriptor.state_key, &descriptor.session_id).root != root
+    {
+        return None;
+    }
+    // Optional display details must not hide an otherwise valid live monitor.
+    if descriptor.command.as_ref().is_some_and(|args| {
+        args.len() > MAX_COMMAND_ARGS
+            || args.iter().any(|arg| arg.len() > MAX_COMMAND_ARG_BYTES)
+            || args.iter().map(String::len).sum::<usize>() > MAX_COMMAND_BYTES
+    }) {
+        descriptor.command = None;
+    }
+    if descriptor
+        .started_at
+        .is_some_and(|time| time > MAX_STARTED_AT)
+    {
+        descriptor.started_at = None;
+    }
+    Some(descriptor)
+}
+
 fn running_monitors_in(base: &Path) -> io::Result<Vec<RunningMonitorDescriptor>> {
     let entries = match fs::read_dir(base) {
         Ok(e) => e,
@@ -241,26 +299,27 @@ fn running_monitors_in(base: &Path) -> io::Result<Vec<RunningMonitorDescriptor>>
             }
             Err(_) => continue,
         };
-        if let Ok(bytes) = fs::read(root.join("descriptor.json")) {
-            if let Ok(mut descriptor) = serde_json::from_slice::<RunningMonitorDescriptor>(&bytes) {
-                if let Some(token) = token {
-                    if !descriptor.instance_id.is_empty() && descriptor.instance_id != token {
-                        continue;
-                    }
-                    descriptor.instance_id = token.clone();
-                    descriptor.stopping = root
-                        .join(format!(
-                            "stop-{:016x}.requested",
-                            stable_hash(token.as_bytes())
-                        ))
-                        .exists();
-                } else {
-                    if !descriptor.instance_id.is_empty() {
-                        continue;
-                    }
-                    descriptor.stopping = false;
+        if let Some(mut descriptor) = read_descriptor(&root, base) {
+            if let Some(token) = token {
+                if !descriptor.instance_id.is_empty() && descriptor.instance_id != token {
+                    continue;
                 }
-                monitors.push(descriptor);
+                descriptor.instance_id = token.clone();
+                descriptor.stopping = root
+                    .join(format!(
+                        "stop-{:016x}.requested",
+                        stable_hash(token.as_bytes())
+                    ))
+                    .exists();
+            } else {
+                if !descriptor.instance_id.is_empty() {
+                    continue;
+                }
+                descriptor.stopping = false;
+            }
+            monitors.push(descriptor);
+            if monitors.len() == MAX_RUNNING_MONITORS {
+                break;
             }
         }
     }
@@ -272,8 +331,12 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn descriptor_root(base: &Path, session_id: &str, key: &str) -> PathBuf {
+        StatePaths::in_base(base, key, session_id).root
+    }
+
     fn descriptor(root: &Path, session_id: &str, key: &str) -> std::fs::File {
-        let root = root.join(key);
+        let root = descriptor_root(root, session_id, key);
         fs::create_dir_all(&root).unwrap();
         let owner = OpenOptions::new()
             .create(true)
@@ -299,6 +362,145 @@ mod tests {
         )
         .unwrap();
         owner
+    }
+
+    fn rewrite_descriptor(root: &Path, update: impl FnOnce(&mut RunningMonitorDescriptor)) {
+        let path = root.join("descriptor.json");
+        let mut metadata = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        update(&mut metadata);
+        fs::write(path, serde_json::to_vec(&metadata).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn receiver_rejects_invalid_routing_and_labels() {
+        for field in ["session", "key", "label"] {
+            for invalid in [
+                "".into(),
+                " \t".into(),
+                "two\nlines".into(),
+                "two\rlines".into(),
+                "x".repeat(1025),
+            ] {
+                let state = TempDir::new().unwrap();
+                let (session, key) = match field {
+                    "session" => (invalid.as_str(), "key"),
+                    "key" => ("session", invalid.as_str()),
+                    _ => ("session", "key"),
+                };
+                let _owner = descriptor(state.path(), session, key);
+                let root = descriptor_root(state.path(), session, key);
+                rewrite_descriptor(&root, |d| {
+                    d.label = if field == "label" {
+                        invalid.clone()
+                    } else {
+                        "Valid label".into()
+                    };
+                });
+                assert!(
+                    running_monitors_in(state.path()).unwrap().is_empty(),
+                    "{field}: {invalid:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn receiver_enforces_producer_utf16_label_bound() {
+        let state = TempDir::new().unwrap();
+        let _owner = descriptor(state.path(), "session", "key");
+        let root = descriptor_root(state.path(), "session", "key");
+        rewrite_descriptor(&root, |d| d.label = "😀".repeat(60));
+        assert_eq!(running_monitors_in(state.path()).unwrap().len(), 1);
+        rewrite_descriptor(&root, |d| d.label.push('x'));
+        assert!(running_monitors_in(state.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn receiver_rejects_identity_from_another_state_directory() {
+        let state = TempDir::new().unwrap();
+        let _owner = descriptor(state.path(), "session", "key");
+        let root = descriptor_root(state.path(), "session", "key");
+        for (session, key) in [("other-session", "key"), ("session", "other-key")] {
+            rewrite_descriptor(&root, |d| {
+                d.session_id = session.into();
+                d.state_key = key.into();
+            });
+            assert!(running_monitors_in(state.path()).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn receiver_bounds_descriptor_bytes() {
+        let state = TempDir::new().unwrap();
+        let _owner = descriptor(state.path(), "session", "key");
+        let root = descriptor_root(state.path(), "session", "key");
+        let mut bytes = fs::read(root.join("descriptor.json")).unwrap();
+        bytes.resize(64 * 1024, b' ');
+        fs::write(root.join("descriptor.json"), &bytes).unwrap();
+        assert_eq!(running_monitors_in(state.path()).unwrap().len(), 1);
+        bytes.push(b' ');
+        fs::write(root.join("descriptor.json"), bytes).unwrap();
+        assert!(running_monitors_in(state.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn receiver_omits_excessive_optional_details() {
+        let state = TempDir::new().unwrap();
+        let _owner = descriptor(state.path(), "session", "key");
+        let root = descriptor_root(state.path(), "session", "key");
+        for command in [
+            vec!["x".repeat(4097)],
+            vec!["x".into(); 65],
+            vec!["x".repeat(4096); 5],
+        ] {
+            rewrite_descriptor(&root, |d| {
+                d.command = Some(command);
+                d.started_at = Some(u64::MAX);
+            });
+            let monitors = running_monitors_in(state.path()).unwrap();
+            assert_eq!(monitors.len(), 1);
+            assert_eq!(monitors[0].command, None);
+            assert_eq!(monitors[0].started_at, None);
+        }
+    }
+
+    #[test]
+    fn receiver_accepts_bounded_details_and_routing() {
+        let state = TempDir::new().unwrap();
+        let session = "s".repeat(1024);
+        let key = "k".repeat(1024);
+        let _owner = descriptor(state.path(), &session, &key);
+        let root = descriptor_root(state.path(), &session, &key);
+        rewrite_descriptor(&root, |d| {
+            d.label = "Valid label".into();
+            d.command = Some(vec!["x".repeat(4096); 4]);
+            d.started_at = Some(8_640_000_000_000_000);
+        });
+        let monitors = running_monitors_in(state.path()).unwrap();
+        assert_eq!(monitors.len(), 1);
+        assert_eq!(monitors[0].command.as_ref().unwrap().len(), 4);
+        assert_eq!(monitors[0].started_at, Some(8_640_000_000_000_000));
+        rewrite_descriptor(&root, |d| {
+            d.command = Some(vec!["x".into(); 64]);
+            d.started_at = Some(8_640_000_000_000_001);
+        });
+        let monitors = running_monitors_in(state.path()).unwrap();
+        assert_eq!(monitors[0].command.as_ref().unwrap().len(), 64);
+        assert_eq!(monitors[0].started_at, None);
+    }
+
+    #[test]
+    fn receiver_bounds_returned_collection() {
+        let state = TempDir::new().unwrap();
+        let owners: Vec<_> = (0..257)
+            .map(|i| descriptor(state.path(), "session", &format!("key-{i:03}")))
+            .collect();
+        let monitors = running_monitors_in(state.path()).unwrap();
+        assert_eq!(monitors.len(), 256);
+        assert!(monitors
+            .windows(2)
+            .all(|pair| pair[0].state_key < pair[1].state_key));
+        drop(owners);
     }
 
     // Windows must allow token reads from a second handle while ownership is live.
@@ -330,7 +532,7 @@ mod tests {
         let state = TempDir::new().unwrap();
         let owner = descriptor(state.path(), "session", "legacy");
         drop(owner);
-        let root = state.path().join("legacy");
+        let root = descriptor_root(state.path(), "session", "legacy");
         fs::write(
             root.join("descriptor.json"),
             br#"{"sessionId":"session","stateKey":"legacy","label":"Legacy"}"#,
@@ -384,7 +586,11 @@ mod tests {
         let stale = descriptor(state.path(), "session-c", "stale");
         drop(stale);
         let _corrupt = descriptor(state.path(), "session-c", "corrupt");
-        fs::write(state.path().join("corrupt/descriptor.json"), b"bad json").unwrap();
+        fs::write(
+            descriptor_root(state.path(), "session-c", "corrupt").join("descriptor.json"),
+            b"bad json",
+        )
+        .unwrap();
         let monitors = running_monitors_in(state.path()).unwrap();
         assert_eq!(
             monitors
@@ -411,7 +617,7 @@ mod tests {
     fn legacy_metadata_gets_current_instance_and_stop_status() {
         let state = TempDir::new().unwrap();
         let _owner = descriptor(state.path(), "session", "legacy");
-        let root = state.path().join("legacy");
+        let root = descriptor_root(state.path(), "session", "legacy");
         fs::write(
             root.join("descriptor.json"),
             br#"{"sessionId":"session","stateKey":"legacy","label":"Legacy"}"#,
@@ -435,7 +641,7 @@ mod tests {
         let state = TempDir::new().unwrap();
         let owner = descriptor(state.path(), "session", "replace");
         drop(owner);
-        let root = state.path().join("replace");
+        let root = descriptor_root(state.path(), "session", "replace");
         fs::write(root.join("owner.pid"), "replacement\n").unwrap();
         let owner = OpenOptions::new()
             .read(true)
