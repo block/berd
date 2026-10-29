@@ -88,6 +88,32 @@ describe("client speech text", () => {
         expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
     }
   });
+  it.each([
+    "Call `callbacks[index](result)` next.",
+    "Call ``callbacks[index](result)`` next.",
+    "Code:\n```js\ncallbacks[index](result)\n```\nDone.",
+    "Code:\n~~~js\ncallbacks[index](result)\n~~~\nDone.",
+    "Code:\n````js\n```\ncallbacks[index](result)\n````\nDone.",
+  ])("preserves literal link-like syntax inside code: %s", (source) => {
+    for (let split = 0; split <= source.length; split++) {
+      const spans = [
+        ...speechTextSpans(source.slice(0, split)),
+        ...speechTextSpans(source, split),
+      ];
+      expect(spans.map((span) => span.text).join("")).toBe(source);
+      for (const span of spans)
+        expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
+    }
+  });
+  it("recognizes links again after code ends", () => {
+    const source =
+      "`callbacks[index](result)` then [the docs](https://example.com).";
+    expect(
+      speechTextSpans(source)
+        .map((span) => span.text)
+        .join(""),
+    ).toBe("`callbacks[index](result)` then the docs.");
+  });
   it("maps spoken characters back to the literal source", () => {
     const source = "See [the docs](https://example.com) now.";
     const spans = speechTextSpans(source);
