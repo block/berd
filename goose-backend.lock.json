@@ -1,7 +1,7 @@
 {
   "repo": "https://github.com/johnmatthewtennant/goose.git",
-  "ref": "jtennant/subagent-action-limit-current-pin",
-  "commit": "42fcc5518d4c6f875e920e4f6ac9d64abd459b1f",
+  "ref": "jtennant/berd-provider-failures",
+  "commit": "7c615ba6d4c5d6f72f086e11deecd0faed48055b",
   "package": "goose-cli",
   "bin": "goose"
 }
