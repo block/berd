@@ -96,8 +96,12 @@ describe("voice transcript delivery coordination", () => {
     "provisional words",
     "Provisional words?",
     "corrected words",
+    "set the temperature to -10 degrees",
+    "calculate 3 + 4",
   ])("reconciles early speech once (%s)", async (finalText) => {
-    const changed = finalText === "corrected words";
+    const changed = !["provisional words", "Provisional words?"].includes(
+      finalText,
+    );
     const onSend = vi.fn(async (text, _persona, _attachments, options) => {
       const state = useChatStore.getState();
       const existing = state.messagesBySession["session-1"]?.find(
@@ -145,9 +149,13 @@ describe("voice transcript delivery coordination", () => {
     const event = {
       sessionId: "session-1",
       lifecycleId: "lifecycle-1",
-      id: "early-test",
+      id: `early-test-${finalText}`,
       revision: 1,
-      text: "provisional words",
+      text: finalText.includes("temperature")
+        ? "set the temperature to 10 degrees"
+        : finalText.includes("calculate")
+          ? "calculate 3 - 4"
+          : "provisional words",
     };
     await act(async () => {
       await voiceStoreMocks.subscriber?.({ ...event, type: "interimUser" });
@@ -166,7 +174,7 @@ describe("voice transcript delivery coordination", () => {
       text: finalText,
       deliveryAttempts: 0,
     };
-    if (changed) {
+    if (finalText === "corrected words") {
       useChatStore.getState().setActiveRunId("session-1", "speculative-run");
       useChatStore.getState().setChatState("session-1", "streaming");
       let finalDelivery: void | Promise<void>;

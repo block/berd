@@ -572,8 +572,9 @@ function sameVoiceWords(first: string, second: string): boolean {
   const words = (text: string) =>
     text
       .toLowerCase()
-      .match(/[\p{L}\p{N}]+/gu)
-      ?.join(" ") ?? "";
+      .trim()
+      .replace(/[.!?]+$/u, "")
+      .replace(/\s+/gu, " ");
   return words(first) === words(second);
 }
 

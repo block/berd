@@ -212,7 +212,7 @@ async function assistantOutput(page: Page, text: string, runId: string) {
 const utterance = {
   lifecycleId: "early-delivery-lifecycle",
   id: "utterance-1",
-  text: "Please explain the pause delivery behavior.",
+  text: "Set the temperature to 10 degrees.",
 };
 
 base.describe("early voice delivery", () => {
@@ -344,8 +344,7 @@ base.describe("early voice delivery", () => {
     async ({ page }) => {
       const oldAnswer =
         "This obsolete provisional answer must never be spoken.";
-      const finalText =
-        "Actually explain the corrected final delivery behavior.";
+      const finalText = "Set the temperature to -10 degrees.";
       await assistantOutput(page, oldAnswer, "obsolete-run");
       await nativeEvent(page, {
         type: "user",
