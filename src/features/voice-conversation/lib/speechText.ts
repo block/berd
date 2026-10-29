@@ -19,11 +19,34 @@ export function speechTextSpans(source: string, from = 0): SpeechTextSpan[] {
   let codeLength = 0;
   let fenced = false;
   let markerEnd = 0;
+  const listIndents: number[] = [];
+  let currentLineStart = -1;
+  let indented = false;
   for (const char of source) {
     const start = offset;
     offset += char.length;
     const lineStart = source.lastIndexOf("\n", start - 1) + 1;
-    const indented = /^( {4}|\t)/.test(source.slice(lineStart));
+    if (lineStart !== currentLineStart) {
+      currentLineStart = lineStart;
+      const line = source.slice(lineStart).split("\n", 1)[0];
+      const indentation = (line.match(/^[ \t]*/)?.[0] ?? "").replaceAll(
+        "\t",
+        "    ",
+      ).length;
+      if (line.trim()) {
+        while (listIndents.length && indentation < (listIndents.at(-1) ?? 0))
+          listIndents.pop();
+      }
+      const containerIndent = listIndents.at(-1) ?? 0;
+      indented = indentation >= containerIndent + 4;
+      const marker = line.match(/^ {0,3}(?:[-+*]|\d{1,9}[.)]) +/);
+      const nestedMarker = line
+        .slice(containerIndent)
+        .match(/^ {0,3}(?:[-+*]|\d{1,9}[.)]) +/);
+      const listMarker = nestedMarker ?? marker;
+      if (!indented && listMarker)
+        listIndents.push(containerIndent + listMarker[0].length);
+    }
     let literalCode = indented || codeMarker !== "" || start < markerEnd;
     if (
       !indented &&

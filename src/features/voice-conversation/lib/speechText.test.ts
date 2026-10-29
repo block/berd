@@ -128,6 +128,34 @@ describe("client speech text", () => {
         expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
     }
   });
+  it.each([
+    [
+      "1. Read the manual:\n    [the docs](https://example.com/path) then continue.",
+      "1. Read the manual:\n    the docs then continue.",
+    ],
+    [
+      "- Read the manual:\n    [the docs](https://example.com/path) then continue.",
+      "- Read the manual:\n    the docs then continue.",
+    ],
+    [
+      "1. Read:\n    - [the docs](https://example.com/path) then continue.",
+      "1. Read:\n    - the docs then continue.",
+    ],
+    [
+      "1. Read:\n\n       callbacks[index](result)\n",
+      "1. Read:\n\n       callbacks[index](result)\n",
+    ],
+  ])("distinguishes list continuation from indented code: %s", (source, expected) => {
+    for (let split = 0; split <= source.length; split++) {
+      const spans = [
+        ...speechTextSpans(source.slice(0, split)),
+        ...speechTextSpans(source, split),
+      ];
+      expect(spans.map((span) => span.text).join("")).toBe(expected);
+      for (const span of spans)
+        expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
+    }
+  });
   it("maps spoken characters back to the literal source", () => {
     const source = "See [the docs](https://example.com) now.";
     const spans = speechTextSpans(source);

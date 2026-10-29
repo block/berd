@@ -16,7 +16,7 @@ const SESSION_ID = "voice-session";
 const ASSISTANT_MESSAGE_ID = "assistant-message";
 const SPOKEN_TEXT =
   String.raw`See [the page](<https://example.com/a(b> 'Read (first') for the next steps. Use \[brackets](not a link) now. Call ` +
-  "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n";
+  "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n\n1. Read:\n    [guide](https://example.com/guide)";
 
 const test = base.extend<{ voice: Page }>({
   voice: async ({ page }, use) => {
@@ -160,7 +160,7 @@ test("build sends link labels to native speech and preserves the rendered link",
     )
     .toBe(
       String.raw`See the page for the next steps. Use \[brackets](not a link) now. Call ` +
-        "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n",
+        "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n\n1. Read:\n    guide",
     );
   const prepared = await page.evaluate(
     () => (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.prepared,
