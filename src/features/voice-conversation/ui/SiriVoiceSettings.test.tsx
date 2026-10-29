@@ -25,6 +25,7 @@ function setup(overrides: Partial<SiriVoiceSetup> = {}): SiriVoiceSetup {
       voices: [
         {
           name: "Quinn",
+          displayName: "Quinn",
           language: "en-US",
           sizeBytes: 310_500_000,
           installed: false,
@@ -102,30 +103,35 @@ describe("SiriVoiceSettings", () => {
       const voices = [
         {
           name: "Voz española",
+          displayName: "Voz española",
           language: "es-ES",
           sizeBytes: 1,
           installed: true,
         },
         {
           name: "Voz francesa",
+          displayName: "Voz francesa",
           language: "fr-FR",
           sizeBytes: 1,
           installed: true,
         },
         {
           name: "Voz inglesa",
+          displayName: "Voz inglesa",
           language: "en-US",
           sizeBytes: 1,
           installed: true,
         },
         {
           name: "Nza",
+          displayName: "Nza",
           language: "en-US",
           sizeBytes: 1,
           installed: true,
         },
         {
           name: "Ña",
+          displayName: "Ña",
           language: "en-US",
           sizeBytes: 1,
           installed: true,
@@ -207,12 +213,14 @@ describe("SiriVoiceSettings", () => {
         voices: [
           {
             name: "Aaron",
+            displayName: "Aaron",
             language: "en-US",
             sizeBytes: 0,
             installed: true,
           },
           {
             name: "Quinn",
+            displayName: "Quinn",
             language: "en-US",
             sizeBytes: 310_500_000,
             installed: false,
@@ -262,4 +270,53 @@ describe("SiriVoiceSettings", () => {
       screen.getByRole("button", { name: "Downloading Quinn" }),
     ).toBeInTheDocument();
   });
+});
+
+it("uses catalog display names while retaining playback identities", async () => {
+  const value = setup();
+  if (!value.status) throw new Error("Expected Siri status");
+  value.status.voices = [
+    {
+      name: "en-US-F",
+      displayName: "Zack",
+      language: "en-US",
+      sizeBytes: 1,
+      installed: true,
+    },
+    {
+      name: "en-US-G",
+      displayName: "Evan",
+      language: "en-US",
+      sizeBytes: 1,
+      installed: false,
+    },
+  ];
+  value.status.selectedVoice = { name: "en-US-F", language: "en-US" };
+  renderWithProviders(<SiriVoiceSettings setup={value} />);
+  await userEvent.click(
+    screen.getByRole("button", { name: "Choose a voice: Zack" }),
+  );
+  expect(
+    screen
+      .getByTestId("siri-voice-en-us-g|en-us")
+      .compareDocumentPosition(
+        screen.getByRole("button", { name: "Selected voice: Zack" }),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "Preview Zack" }));
+  expect(value.previewVoice).toHaveBeenCalledWith(
+    expect.objectContaining({ name: "en-US-F", displayName: "Zack" }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Download Evan" }));
+  expect(value.downloadVoice).toHaveBeenCalledWith(
+    expect.objectContaining({ name: "en-US-G", displayName: "Evan" }),
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Selected voice: Zack" }),
+  );
+  expect(value.selectVoice).toHaveBeenCalledWith(
+    expect.objectContaining({ name: "en-US-F" }),
+  );
+  expect(screen.queryByText("en-US-F")).not.toBeInTheDocument();
+  expect(screen.queryByText("en-US-G")).not.toBeInTheDocument();
 });

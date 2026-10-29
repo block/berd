@@ -8,6 +8,7 @@ import type {
 
 export interface SiriVoice {
   name: string;
+  displayName: string;
   language: string;
   sizeBytes: number;
   installed: boolean;

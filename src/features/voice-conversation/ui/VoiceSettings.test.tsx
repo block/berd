@@ -252,6 +252,7 @@ function siriSetup(): SiriVoiceSetup {
       voices: [
         {
           name: "Nora",
+          displayName: "Nora",
           language: "en-US",
           sizeBytes: 0,
           installed: true,
