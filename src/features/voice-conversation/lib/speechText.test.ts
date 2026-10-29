@@ -56,6 +56,38 @@ describe("client speech text", () => {
         expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
     }
   });
+  it.each([
+    [
+      String.raw`Use \[brackets](not a link) now`,
+      String.raw`Use \[brackets](not a link) now`,
+    ],
+    [
+      String.raw`Use \[brackets\](not a link) now`,
+      String.raw`Use \[brackets\](not a link) now`,
+    ],
+    [
+      String.raw`Use [brackets\](not a link) now`,
+      "Use brackets](not a link) now",
+    ],
+    [
+      String.raw`See [escaped \] label](https://example.com) now`,
+      "See escaped ] label now",
+    ],
+    [
+      String.raw`See \\[docs](https://example.com) now`,
+      String.raw`See \\docs now`,
+    ],
+  ])("preserves escaped brackets across streaming splits: %s", (source, expected) => {
+    for (let split = 0; split <= source.length; split++) {
+      const spans = [
+        ...speechTextSpans(source.slice(0, split)),
+        ...speechTextSpans(source, split),
+      ];
+      expect(spans.map((span) => span.text).join("")).toBe(expected);
+      for (const span of spans)
+        expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
+    }
+  });
   it("maps spoken characters back to the literal source", () => {
     const source = "See [the docs](https://example.com) now.";
     const spans = speechTextSpans(source);

@@ -43,9 +43,9 @@ export function speechTextSpans(source: string, from = 0): SpeechTextSpan[] {
       }
     }
     if (escaped) escaped = false;
-    else if (char === "\\" && labels) {
+    else if (char === "\\") {
       escaped = true;
-      continue;
+      if (labels) continue;
     } else if (char === "[") {
       labels++;
       continue;

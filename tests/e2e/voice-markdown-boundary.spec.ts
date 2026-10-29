@@ -14,8 +14,7 @@ type SpeechBoundaryWindow = Window & {
 
 const SESSION_ID = "voice-session";
 const ASSISTANT_MESSAGE_ID = "assistant-message";
-const SPOKEN_TEXT =
-  "See [the page](<https://example.com/a(b> 'Read (first') for the next steps.";
+const SPOKEN_TEXT = String.raw`See [the page](<https://example.com/a(b> 'Read (first') for the next steps. Use \[brackets](not a link) now.`;
 
 const test = base.extend<{ voice: Page }>({
   voice: async ({ page }, use) => {
@@ -157,10 +156,16 @@ test("build sends link labels to native speech and preserves the rendered link",
         (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.appended.join(""),
       ),
     )
-    .toBe("See the page for the next steps.");
+    .toBe(
+      String.raw`See the page for the next steps. Use \[brackets](not a link) now.`,
+    );
   const prepared = await page.evaluate(
     () => (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.prepared,
   );
   expect(prepared.length).toBe(1);
-  expect(prepared[0]).toMatch(/^See the page(?: for the next steps\.)?$/);
+  expect(prepared[0]).toMatch(/^See the page/);
+  expect(prepared[0]).not.toContain("https://");
+  await expect(
+    page.getByText("Use [brackets](not a link) now.", { exact: false }),
+  ).toBeVisible();
 });

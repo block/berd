@@ -341,6 +341,31 @@ describe("native assistant speech stream", () => {
     );
   });
 
+  it("preserves escaped opening brackets and following parentheses in speech", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    const prefix = "Use \\";
+    const source = String.raw`Use \[brackets](not a link) now`;
+    useChatStore
+      .getState()
+      .setMessages("session-1", [assistant([{ type: "text", text: prefix }])]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    useChatStore
+      .getState()
+      .appendStreamingText(
+        "session-1",
+        "assistant-1",
+        "[brackets](not a link) now",
+      );
+    await vi.waitFor(() =>
+      expect(mocks.append.mock.calls.map((call) => call[1]).join("")).toBe(
+        source,
+      ),
+    );
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({ text: source });
+  });
+
   it("pushes raw assistant deltas without frontend sentence segmentation", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore
