@@ -25,7 +25,6 @@ use super::{
 pub(crate) const EVENT_NAME: &str = "voice-conversation:event";
 const MAX_PENDING_TRANSCRIPTS: usize = 64;
 const MAX_TRANSCRIPT_DELIVERY_ATTEMPTS: u8 = 3;
-const VAD_THRESHOLD: f32 = 0.5;
 const INPUT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[cfg(any(test, target_os = "macos"))]
@@ -145,16 +144,6 @@ pub enum InterruptionSensitivity {
     Less,
     Balanced,
     More,
-}
-
-impl InterruptionSensitivity {
-    pub(crate) fn vad_threshold(self) -> f32 {
-        match self {
-            Self::Less => 0.8,
-            Self::Balanced => 0.65,
-            Self::More => VAD_THRESHOLD,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize)]
@@ -786,12 +775,12 @@ impl NativeVoiceState {
 
     pub(crate) fn begin_assistant_speech(
         &self,
-        sensitivity: InterruptionSensitivity,
+        _sensitivity: InterruptionSensitivity,
         input_during_tts: berd_call::input::InputDuringTtsPolicy,
     ) -> AssistantSpeechGuard {
         let activity = self
             .input_controls
-            .begin_assistant_activity(sensitivity.vad_threshold(), input_during_tts)
+            .begin_assistant_activity(input_during_tts)
             .ok();
         let status_sound_activity = self.runtime.lock().ok().and_then(|runtime| {
             runtime.status_sounds.as_ref().and_then(|status_sounds| {
@@ -1540,7 +1529,7 @@ pub async fn start_native_voice_conversation(
     };
     let pipeline = berd_call::input::VoiceInputRuntime::start(berd_call::input::VoiceInputConfig {
         engine,
-        speech_vad_threshold: VAD_THRESHOLD,
+        speech_vad_threshold: berd_call::DEFAULT_VAD_THRESHOLD,
         controls: state.input_controls.clone(),
     });
     let (pipeline, mut events) = match pipeline {
@@ -3354,6 +3343,24 @@ mod tests {
             true,
         ));
         assert!(!caller_owns_target("voice-buddy", None, true,));
+    }
+
+    #[test]
+    fn interruption_sensitivity_modes_all_use_the_shared_vad_threshold() {
+        let state = NativeVoiceState::default();
+
+        for sensitivity in [
+            InterruptionSensitivity::Less,
+            InterruptionSensitivity::Balanced,
+            InterruptionSensitivity::More,
+        ] {
+            let guard = state.begin_assistant_speech(
+                sensitivity,
+                berd_call::input::InputDuringTtsPolicy::AllowBargeIn,
+            );
+            assert_eq!(berd_call::DEFAULT_VAD_THRESHOLD, 0.9);
+            drop(guard);
+        }
     }
 
     #[test]
