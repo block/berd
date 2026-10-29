@@ -2445,6 +2445,24 @@ describe("sessions.get", () => {
       is_open_in_window: false,
       chat_state: "idle",
       message_count: 2,
+      session_type: null,
+      parent_session_id: null,
+    });
+    expect(mocks.lastSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it("preserves task identity and parent metadata without loading the chat", async () => {
+    mockSessionFound({ sessionType: "sub_agent", parentSessionId: "parent-1" });
+
+    const result = await dispatchCommand(
+      "sessions",
+      { action: "get", session_id: "session-1" },
+      ctx,
+    );
+
+    expect(result).toMatchObject({
+      session_type: "sub_agent",
+      parent_session_id: "parent-1",
     });
     expect(mocks.lastSessionMessages).not.toHaveBeenCalled();
   });
