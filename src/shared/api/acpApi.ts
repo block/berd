@@ -60,8 +60,6 @@ export interface AcpSessionInfo {
   modelId: string | null;
   personaId: string | null;
   activeRunId?: string | null;
-  sessionType?: string | null;
-  parentSessionId?: string | null;
 }
 
 export interface AcpSessionsPage {
@@ -146,8 +144,6 @@ function mapSessionInfo(info: SessionInfo): AcpSessionInfo {
     modelId: metaString(info._meta, "modelId"),
     personaId: metaString(info._meta, "personaId"),
     ...(activeRunId !== undefined ? { activeRunId } : {}),
-    sessionType: metaString(info._meta, "sessionType"),
-    parentSessionId: metaString(info._meta, "parentSessionId"),
   };
 }
 

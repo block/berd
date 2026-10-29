@@ -25,29 +25,21 @@ export async function loadAllSessionsForBerdctl(): Promise<void> {
   }
 }
 
-function isSidebarVisibleAcpSession(session: {
-  sessionType?: string | null;
-}): boolean {
-  return (
-    session.sessionType == null ||
-    session.sessionType === "user" ||
-    session.sessionType === "scheduled" ||
-    session.sessionType === "acp"
-  );
-}
-
 export async function loadSessionForBerdctl(
   sessionId: string,
-): Promise<ChatSession | null> {
+  { updateStore = true }: { updateStore?: boolean } = {},
+): Promise<ChatSession> {
   try {
     const session = await acpGetSessionInfo(sessionId);
-    const chatSession = acpSessionToChatSession(session);
-    if (isSidebarVisibleAcpSession(session)) {
-      useChatSessionStore.setState((state) =>
-        mergeAcpSessionInfo(state, session),
-      );
+    // Reconcile local UI intent without making a targeted read sidebar discovery.
+    const merged = mergeAcpSessionInfo(useChatSessionStore.getState(), session);
+    if (updateStore) {
+      useChatSessionStore.setState(merged);
     }
-    return chatSession;
+    return (
+      merged.sessions.find((candidate) => candidate.id === sessionId) ??
+      acpSessionToChatSession(session)
+    );
   } catch (error) {
     if (isAcpResourceNotFound(error)) {
       throw new CommandError(
@@ -103,12 +95,8 @@ async function loadSessionsForBerdctlUntil(
   }
 }
 
-export function requireSession(
-  sessionId: string,
-  fallback?: ChatSession | null,
-): ChatSession {
-  const session =
-    useChatSessionStore.getState().getSession(sessionId) ?? fallback;
+export function requireSession(sessionId: string): ChatSession {
+  const session = useChatSessionStore.getState().getSession(sessionId);
   if (!session) {
     throw new CommandError(
       "session_not_found",

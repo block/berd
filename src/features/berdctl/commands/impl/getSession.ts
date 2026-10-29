@@ -75,13 +75,14 @@ Result:
   execute: async (args): Promise<GetSessionResult> => {
     const [
       { lastSessionMessages },
-      { loadSessionForBerdctl, requireSession, sessionMetadata },
+      { loadSessionForBerdctl, sessionMetadata },
     ] = await Promise.all([
       import("@/shared/api/sessionSearch"),
       import("../runtime/sessions"),
     ]);
-    const loadedSession = await loadSessionForBerdctl(args.session_id);
-    const session = requireSession(args.session_id, loadedSession);
+    const session = await loadSessionForBerdctl(args.session_id, {
+      updateStore: false,
+    });
     const metadata = sessionMetadata(session);
     if (args.messages === 0) {
       return metadata;
