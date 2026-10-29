@@ -203,6 +203,89 @@ describe("dispatchPrompt pre-commit rejection", () => {
   });
 });
 
+describe("dispatchPrompt ACP provider capacity errors", () => {
+  const capacityError = "server_is_overloaded: Please try again later";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useChatStore.setState({
+      messagesBySession: {},
+      sessionStateById: {},
+      queuedMessageBySession: {},
+      draftsBySession: {},
+      activeSessionId: null,
+      isConnected: false,
+    });
+    useChatSessionStore.setState({ sessions: [], activeSessionId: null });
+  });
+
+  it.each([
+    {
+      source: "data",
+      error: { code: -32603, message: "Internal error", data: capacityError },
+    },
+    { source: "message", error: { code: -32603, message: capacityError } },
+  ])("surfaces a committed prompt rejection with capacity detail in $source", async ({
+    error,
+  }) => {
+    mocks.acpSendMessage.mockImplementationOnce(
+      (
+        sessionId: string,
+        _prompt: string,
+        options: { onPromptDispatching(): void },
+      ) => {
+        options.onPromptDispatching();
+        const store = useChatStore.getState();
+        store.addMessage(sessionId, {
+          id: "partial-assistant",
+          role: "assistant",
+          created: Date.now(),
+          content: [{ type: "text", text: "Here is the beginning" }],
+          metadata: { completionStatus: "inProgress" },
+        });
+        store.setStreamingMessageId(sessionId, "partial-assistant");
+        return Promise.reject(error);
+      },
+    );
+
+    await expect(
+      dispatchPrompt("session-1", "Continue the story", {}),
+    ).rejects.toBe(error);
+
+    const messages = useChatStore.getState().messagesBySession["session-1"];
+    expect(messages).toHaveLength(3);
+    expect(messages[0]).toMatchObject({
+      role: "user",
+      content: [{ type: "text", text: "Continue the story" }],
+    });
+    expect(messages[1]).toMatchObject({
+      id: "partial-assistant",
+      role: "assistant",
+      content: [{ type: "text", text: "Here is the beginning" }],
+      metadata: { completionStatus: "error" },
+    });
+    expect(messages[2]).toMatchObject({
+      role: "system",
+      content: [
+        {
+          type: "systemNotification",
+          notificationType: "error",
+          text: capacityError,
+        },
+      ],
+      metadata: { userVisible: true },
+    });
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1"),
+    ).toMatchObject({
+      chatState: "idle",
+      error: capacityError,
+      streamingMessageId: null,
+      pendingAssistantProviderId: null,
+    });
+  });
+});
+
 describe("dispatchPrompt voice conversation no-op", () => {
   const emptyResponseError =
     "The model returned an empty response. Please resend your message to continue.";

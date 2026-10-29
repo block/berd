@@ -19,6 +19,11 @@ export default defineConfig({
   },
   projects: [
     {
+      name: "capacity-errors",
+      testMatch: ["**/capacity-errors.spec.ts"],
+      use: { ...devices["Desktop Chrome"], screenshot: "off" },
+    },
+    {
       name: "smoke",
       testMatch: ["**/smoke.spec.ts"],
       use: {
