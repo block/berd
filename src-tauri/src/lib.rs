@@ -153,6 +153,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
+                // Call controls own their fixed geometry, not persisted window state.
+                .with_denylist(&[commands::voice_buddy::WINDOW_LABEL])
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
                 .build(),
         );
