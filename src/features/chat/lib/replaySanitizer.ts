@@ -11,15 +11,6 @@ const TTS_DELIVERY_FAILURE_OUTCOMES = new Set([
   "TTS delivery was blocked because the user was speaking; the assistant reply was not spoken.",
   "Native TTS could not deliver the assistant reply.",
 ]);
-const VOICE_TRANSCRIPT_BOUNDARY =
-  /\n(?=\[(?:Voice transcript(?:; cursor \d+)?|Handoff handoff-[A-Za-z0-9-]+ from spokesperson; cursor \d+)\] )/;
-const USER_TRANSCRIPT =
-  /^\[Voice transcript(?:; cursor \d+)?\] User said: ([\s\S]*)$/;
-const SPOKESPERSON_TRANSCRIPT =
-  /^\[Voice transcript(?:; cursor \d+)?\] Spokesperson said( \(interrupted; best-effort transcript\))?: ([\s\S]*)$/;
-const SPOKESPERSON_DIRECT_MESSAGE =
-  /^\[Handoff handoff-[A-Za-z0-9-]+ from spokesperson; cursor \d+\] ([\s\S]*)$/;
-
 function visibleTextAfterTtsDeliveryNotices(text: string): string | null {
   if (!text.startsWith(TTS_DELIVERY_FAILURE_PREFIX)) {
     return null;
@@ -90,7 +81,15 @@ function sanitizeTtsDeliveryReplayArtifact(message: Message): Message | null {
   };
 }
 
-function restoreRealtimeVoiceMessages(message: Message): Message[] | null {
+// Calls made before the Spokesperson was removed saved their transcripts as
+// hidden batches. Replay shows the spoken lines and drops the handoffs.
+const LEGACY_VOICE_BOUNDARY =
+  /\n(?=\[(?:Voice transcript(?:; cursor \d+)?|Handoff handoff-[A-Za-z0-9-]+ from spokesperson; cursor \d+)\] )/;
+const LEGACY_VOICE_LINE =
+  /^\[Voice transcript(?:; cursor \d+)?\] (User|Spokesperson) said( \(interrupted; best[- ]effort(?: transcript)?\))?: ([\s\S]*)$/;
+const LEGACY_HANDOFF = /^\[Handoff handoff-[A-Za-z0-9-]+ from spokesperson; /;
+
+function restoreLegacyVoiceMessages(message: Message): Message[] | null {
   if (
     message.role !== "user" ||
     message.metadata?.origin !== "voice_conversation" ||
@@ -99,73 +98,41 @@ function restoreRealtimeVoiceMessages(message: Message): Message[] | null {
     return null;
   }
 
-  const segments = getTextContent(message).split(VOICE_TRANSCRIPT_BOUNDARY);
   const restored: Message[] = [];
-  for (const [index, segment] of segments.entries()) {
-    const user = USER_TRANSCRIPT.exec(segment);
-    const spokesperson = SPOKESPERSON_TRANSCRIPT.exec(segment);
-    const direct = SPOKESPERSON_DIRECT_MESSAGE.exec(segment);
-    if (!user && !spokesperson && !direct) return null;
-
-    const id = index === 0 ? message.id : `${message.id}:voice:${index}`;
-    if (user) {
-      restored.push({
-        ...message,
-        id,
-        role: "user",
-        content: [{ type: "text", text: user[1] }],
-        metadata: {
-          ...message.metadata,
-          userVisible: true,
-          agentVisible: false,
-          completionStatus: "completed",
-        },
-      });
-      continue;
-    }
-
-    if (spokesperson) {
-      const interrupted = Boolean(spokesperson[1]);
-      restored.push({
-        ...message,
-        id,
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: spokesperson[2],
-            speech: interrupted
-              ? { status: "interrupted", confidence: "low" }
-              : { status: "spoken", spokenThrough: spokesperson[2].length },
-          },
-        ],
-        metadata: {
-          ...message.metadata,
-          userVisible: true,
-          agentVisible: false,
-          voiceConversationDebugEvent: "emissarySpeech",
-          completionStatus: "completed",
-        },
-      });
-      continue;
-    }
-
+  for (const [index, segment] of getTextContent(message)
+    .split(LEGACY_VOICE_BOUNDARY)
+    .entries()) {
+    if (LEGACY_HANDOFF.test(segment)) continue;
+    const line = LEGACY_VOICE_LINE.exec(segment);
+    if (!line) return null;
+    const [, speaker, interrupted, text] = line;
+    const user = speaker === "User";
     restored.push({
       ...message,
-      id,
-      role: "assistant",
-      content: [{ type: "text", text: direct?.[1] ?? "" }],
+      id: index ? `${message.id}:voice:${index}` : message.id,
+      role: user ? "user" : "assistant",
+      content: [
+        {
+          type: "text",
+          text,
+          ...(user
+            ? {}
+            : {
+                speech: interrupted
+                  ? { status: "interrupted", confidence: "low" }
+                  : { status: "spoken", spokenThrough: text.length },
+              }),
+        },
+      ],
       metadata: {
         ...message.metadata,
         userVisible: true,
         agentVisible: false,
-        personaName: "Spokesperson → Expert",
-        voiceConversationDebugEvent: "emissaryToMaster",
         completionStatus: "completed",
       },
     });
   }
-  return restored;
+  return restored.length ? restored : null;
 }
 
 export function isManualCompactReplayArtifact(message: Message): boolean {
@@ -194,6 +161,6 @@ export function sanitizeReplayMessages(messages: Message[]): Message[] {
   return messages.flatMap((message) => {
     const sanitized = sanitizeTtsDeliveryReplayArtifact(message);
     if (!sanitized || isManualCompactReplayArtifact(sanitized)) return [];
-    return restoreRealtimeVoiceMessages(sanitized) ?? [sanitized];
+    return restoreLegacyVoiceMessages(sanitized) ?? [sanitized];
   });
 }

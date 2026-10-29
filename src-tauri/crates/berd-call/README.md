@@ -70,15 +70,8 @@ without changing the call's voice, so agents sharing a call can sound distinct.
 server listens only on `127.0.0.1:5222` by default; all four commands accept
 `--port` when more than one local call must be addressed. `--stream` writes one
 TSV row per delivered transcript event after the `cursor`, `role`, and `text`
-header. In Expert-Spokesperson mode the stream hears the call as Berd's Expert
-does: a batch of every row since the last one after each Spokesperson reply,
-and at each handoff, ending with the `handoff` row. `--stream live` instead shows the conversation as it happens: a
-`user` row as soon as the words are transcribed, and a `spokesperson_generated`
-row with cursor `0` as soon as a reply is generated, before it is spoken. The
-`spokesperson` or `spokesperson_interrupted` row after playback carries the
-reply's cursor and what was heard. A conventional call has no handoffs, so it
-always streams each row. A `--codex` task gets the same batches as `--stream`. The standalone host intentionally uses only the default devices. It
-suppresses recognition during playback when the default output
+header. A `--codex` task gets the same rows as `--stream`. The standalone host
+intentionally uses only the default devices. It suppresses recognition during playback when the default output
 identifies itself as built-in speakers, preventing the call from transcribing
 its own speech; headphone-like outputs retain barge-in.
 
@@ -113,16 +106,11 @@ stays silent. `berd-call settings --status-sounds off|working|working-and-waitin
 or Status Sounds in the menu bar, changes the mode and saves it for later calls.
 `status` shows `statusSounds` and `conversationStatus`, and both survive a restart.
 
-Settings the runtime cannot change live, such as STT backend or call mode, use
+Settings the runtime cannot change live, such as the STT backend, use
 `berd-call settings --restart [session options]`. The replacement options are
 complete `berd-call session` options. The call keeps its control port, stream,
 blocking policy, mute state, and input-during-TTS policy; the stream emits a lifecycle row because
 transcript cursors restart with the new session.
-
-`berd-call settings --spokesperson true|false`, or Spokesperson in the menu bar,
-restarts the call the same way in the other mode. Agents keep their current
-voice, options only the other mode takes are left out, and in a `--stream live`
-call the Spokesperson comes back with `--allow-direct-agent-speech`.
 
 This crate owns the neutral PCM output contract and backend-neutral TTS stream
 used by Berd, plus the April ONNX runtime and text chunking used by Berd's native
@@ -158,15 +146,11 @@ berd-call session --tts-backend openai --rate 1.0
 berd-call session --tts-backend pocket --model-dir /path/to/native-voice-v2 --voice george --rate 1.0
 berd-call session --stt-backend parakeet --stt-model-dir /path/to/parakeet
 berd-call session --stt-backend openai
-berd-call session --tts-backend openai --mode expert-spokesperson --realtime-url ws://127.0.0.1:18870/v1/realtime
-berd-call session --voice Aaron --language en-US --mode expert-spokesperson --allow-direct-agent-speech
 berd-call session --tts-backend openai --tts-url https://proxy.example/v1/audio/speech
 berd-call session --stt-backend openai --stt-url wss://proxy.example/v1/realtime?intent=transcription
 ```
 
-In an Expert–Spokesperson call, the Expert reaches you through the Spokesperson: `berd-call message-spokesperson --re CURSOR [--resolves HANDOFF_ID]... TEXT` has it tell you in its own voice. Like the directives of Berd's Expert, the message must acknowledge the latest input (the Spokesperson's own speech doesn't count), or it comes back `spoke:false` with what was missed, and a handoff it names settles once the Spokesperson has said it. `speak` is refused unless the call was started with `--allow-direct-agent-speech`. With it, the Expert can also speak for itself: berd-call plays each `speak` reply through the configured TTS backend, taking turns with the Spokesperson's audio, and your speech interrupts either of them. Afterwards the Spokesperson gets a silent note of what you heard, so it can follow up without repeating it. A reply has to acknowledge everything you've said, as `speak --re` always does. Such a call holds no handoff open: each still reaches the Expert as a `handoff` row, but nothing waits for an answer, reminds the Expert, or holds back renewing or recovering the Spokesperson's session, and there is nothing for `--resolves` to name. `--voice`, `--rate`, `status` and `settings --tts` describe and change the Expert's voice. The Spokesperson keeps its own voice, shown as `session.spokesperson`: choose it with `--spokesperson-voice NAME`, at `start` or live with `settings`, and the menu bar offers both voices. It speaks as close to the agents' `--rate` as it can (0.25–1.5×), so the menu bar's one Speech Rate sets both; `--spokesperson-rate` gives it a speed of its own. Saved settings keep the Spokesperson's voice for the next call whose replies have their own, but not `--allow-direct-agent-speech`, so pass that on each `start`. `--spokesperson-options JSON` sets the rest of the Spokesperson's realtime session, the options Berd keeps under Advanced: for example `{"turnDetection":"semantic_vad","eagerness":"low","noiseReduction":"near_field"}`. It takes Berd's names and ranges, applies when the Spokesperson's session starts, and isn't saved, so pass it on each `start`.
-
-The three URL flags take full endpoints and override only their matching service for that call. Expert–Spokesperson uses `--realtime-url` for both input and output; `--stt-url` applies only to conventional mode, and `--tts-url` also applies to the Expert's own voice. Without an override, each service uses its OpenAI endpoint (or its existing environment override). Each service reads its own key, `OPENAI_REALTIME_API_KEY` (`--realtime-url`), `OPENAI_STT_API_KEY` (`--stt-url`) or `OPENAI_TTS_API_KEY` (`--tts-url`), and falls back to `OPENAI_API_KEY` when it is unset or blank; the desktop app stores keys separately by endpoint URL in Keychain.
+The two URL flags take full endpoints and override only their matching service for that call. Without an override, each service uses its OpenAI endpoint (or its existing environment override). Each service reads its own key, `OPENAI_STT_API_KEY` (`--stt-url`) or `OPENAI_TTS_API_KEY` (`--tts-url`), and falls back to `OPENAI_API_KEY` when it is unset or blank; the desktop app stores keys separately by endpoint URL in Keychain.
 
 The default Siri backend still requires an exact installed voice name and
 language. Missing or unavailable Siri voice configuration and an unavailable
@@ -461,6 +445,6 @@ Auto is the default input-during-speech preference. It mutes microphone input du
 
 ### Input activity in stdout streams
 
-`start --stream` (including `--stream live`) emits ephemeral `0\tinput_activity\t{"speaking":true,"recognizing":false}` rows when input speech or recognition state changes. Both booleans are snapshots; show activity while either is true. These rows have cursor zero, are not utterances, and must never advance a speech cursor, trigger an agent turn, or enter transcript history. They are not delivered to Codex tasks. Clear client activity on session restart, stream end, or failure. Older CLIs omit these rows.
+`start --stream` emits ephemeral `0\tinput_activity\t{"speaking":true,"recognizing":false}` rows when input speech or recognition state changes. Both booleans are snapshots; show activity while either is true. These rows have cursor zero, are not utterances, and must never advance a speech cursor, trigger an agent turn, or enter transcript history. They are not delivered to Codex tasks. Clear client activity on session restart, stream end, or failure. Older CLIs omit these rows.
 
 On macOS, conventional sessions with `--stream` also emit ephemeral `0\tuser_interim\t{"cursor":12,"text":"you should"}` rows while your words are still being transcribed. Each row replaces the previous one; empty text clears it, as do mute, input reset and session restart. `cursor` is the cursor the next `user` row will carry, so a client can show the words as a caption or let an agent start on them and keep its reply current when the final arrives. The final `user` row stays authoritative. Like `input_activity`, these rows never advance a speech cursor or enter transcript history, and older CLIs omit them.
