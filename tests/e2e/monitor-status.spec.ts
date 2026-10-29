@@ -205,6 +205,8 @@ test("inspects and stops one monitor with confirmation, failure recovery and ins
         ) => Promise<unknown>;
       };
       stopCalls: unknown[];
+      failScans: boolean;
+      failedScans: number;
     };
     const original = state.__TAURI_INTERNALS__.invoke.bind(
       state.__TAURI_INTERNALS__,
@@ -231,9 +233,16 @@ test("inspects and stops one monitor with confirmation, failure recovery and ins
       },
     ];
     state.stopCalls = [];
+    state.failScans = false;
+    state.failedScans = 0;
     state.__TAURI_INTERNALS__.invoke = (command, args) => {
-      if (command === "get_running_monitors")
+      if (command === "get_running_monitors") {
+        if (state.failScans) {
+          state.failedScans++;
+          return Promise.reject(new Error("scan failed"));
+        }
         return Promise.resolve(monitors.map((m) => ({ ...m })));
+      }
       if (command === "stop_running_monitor") {
         state.stopCalls.push(args);
         if (failFirst) {
@@ -261,6 +270,18 @@ test("inspects and stops one monitor with confirmation, failure recovery and ins
   });
   await expect(trigger).toContainText("Watching: Build checks");
   await expect(trigger).toContainText("+1");
+  await page.evaluate(() => {
+    (window as unknown as { failScans: boolean }).failScans = true;
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as unknown as { failedScans: number }).failedScans,
+      ),
+    )
+    .toBeGreaterThan(0);
+  await expect(trigger).toBeVisible();
+  await expect(page.locator("[data-monitor-status=sidebar]")).toBeVisible();
   await trigger.click();
   const dialog = page.getByRole("dialog", { name: "Running monitors" });
   const build = dialog.getByRole("region", { name: "Build checks" });
@@ -277,6 +298,9 @@ test("inspects and stops one monitor with confirmation, failure recovery and ins
     .getByRole("button", { name: "Stop monitor", exact: true })
     .click();
   await expect(build.getByRole("alert")).toContainText("Could not stop");
+  await page.evaluate(() => {
+    (window as unknown as { failScans: boolean }).failScans = false;
+  });
   await build
     .getByRole("button", { name: "Stop monitor", exact: true })
     .click();

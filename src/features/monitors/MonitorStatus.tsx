@@ -36,7 +36,7 @@ export function useRunningMonitors(sessionId: string | null | undefined) {
     },
     queryClient ?? fallbackQueryClient,
   );
-  return { ...query, data: query.isError || !sessionId ? [] : query.data };
+  return { ...query, data: !sessionId ? [] : query.data };
 }
 
 interface MonitorStatusProps {

@@ -77,31 +77,63 @@ describe("MonitorStatus", () => {
     expect(within(tooltip).getByText(/Monitor B/)).toBeInTheDocument();
   });
 
-  it("hides stale status on fetch error", async () => {
-    invoke
-      .mockResolvedValueOnce([
-        { sessionId: "session-1", stateKey: "a", label: "Monitor A" },
-      ])
-      .mockRejectedValueOnce(new Error("boom"));
+  it("preserves confirmed monitors and stop controls on refresh failure, then clears on confirmed exit", async () => {
+    let result: "running" | "error" | "empty" = "running";
+    invoke.mockImplementation((command: string) => {
+      if (command !== "get_running_monitors") return Promise.resolve();
+      if (result === "error") return Promise.reject(new Error("scan failed"));
+      return Promise.resolve(result === "empty" ? [] : [buildMonitor]);
+    });
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
+    const user = userEvent.setup();
     render(
       <I18nProvider>
         <QueryClientProvider client={client}>
+          <MonitorStatus sessionId="session-1" variant="sidebar" />
           <MonitorStatus sessionId="session-1" variant="composer" />
         </QueryClientProvider>
       </I18nProvider>,
     );
-    expect(
-      await screen.findByRole("button", { name: "Inspect 1 running monitor" }),
-    ).toBeInTheDocument();
+    const trigger = await screen.findByRole("button", {
+      name: "Inspect 1 running monitor",
+    });
+    const eye = screen.getByRole("img", { name: "1 monitor running" });
+    result = "error";
     await client.invalidateQueries({ queryKey: ["running-monitors"] });
+    expect(client.getQueryState(["running-monitors"])?.status).toBe("error");
+    expect(trigger).toBeInTheDocument();
+    expect(eye).toBeInTheDocument();
+    await user.click(trigger);
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    await user.click(screen.getByRole("button", { name: "Stop monitor" }));
     await waitFor(() =>
-      expect(
-        screen.queryByRole("button", { name: "Inspect 1 running monitor" }),
-      ).not.toBeInTheDocument(),
+      expect(invoke).toHaveBeenCalledWith("stop_running_monitor", {
+        sessionId: buildMonitor.sessionId,
+        stateKey: buildMonitor.stateKey,
+        instanceId: buildMonitor.instanceId,
+      }),
     );
+    result = "empty";
+    await client.invalidateQueries({ queryKey: ["running-monitors"] });
+    await waitFor(() => expect(trigger).not.toBeInTheDocument());
+    expect(eye).not.toBeInTheDocument();
+  });
+
+  it("shows no monitors on failed cold load", async () => {
+    invoke.mockImplementation((command: string) =>
+      command === "get_running_monitors"
+        ? Promise.reject(new Error("scan failed"))
+        : Promise.resolve(),
+    );
+    renderWithClient(
+      <MonitorStatus sessionId="session-1" variant="composer" />,
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("get_running_monitors"),
+    );
+    expect(screen.queryByRole("button", { name: /Inspect/ })).toBeNull();
   });
 
   it("polls and clears when monitors stop", async () => {
