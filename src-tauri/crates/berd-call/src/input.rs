@@ -431,10 +431,6 @@ impl VoiceInputControls {
         self.shared.mute_epoch.load(Ordering::Acquire)
     }
 
-    fn vad_threshold(&self, speech_threshold: f32) -> f32 {
-        speech_threshold
-    }
-
     fn publish_effective_mute(&self, transition: &ControlTransitionState) {
         let assistant_suppressed =
             transition
@@ -1366,8 +1362,7 @@ fn parakeet_coordinator(
             while leftover_16k.len() >= VAD_FRAME_SAMPLES {
                 let frame: Vec<f32> = leftover_16k.drain(..VAD_FRAME_SAMPLES).collect();
                 let clamped = clamp_vad_frame(&frame);
-                let threshold = controls.vad_threshold(speech_vad_threshold);
-                if vad.predict_f32(&clamped) > threshold {
+                if vad.predict_f32(&clamped) > speech_vad_threshold {
                     silence_frames = 0;
                     speech.extend_from_slice(&frame);
                     if !in_speech {
@@ -1736,7 +1731,7 @@ fn mac_speech_worker(
             while leftover_16k.len() >= VAD_FRAME_SAMPLES {
                 let frame: Vec<f32> = leftover_16k.drain(..VAD_FRAME_SAMPLES).collect();
                 let clamped = clamp_vad_frame(&frame);
-                if vad.predict_f32(&clamped) > controls.vad_threshold(speech_vad_threshold) {
+                if vad.predict_f32(&clamped) > speech_vad_threshold {
                     silence_frames = 0;
                     if !in_speech {
                         in_speech = true;
@@ -2185,7 +2180,7 @@ fn openai_worker(
             let mut should_commit = false;
             while vad_16k.len() >= VAD_FRAME_SAMPLES {
                 let frame: Vec<f32> = vad_16k.drain(..VAD_FRAME_SAMPLES).collect();
-                if vad.predict_f32(&frame) > controls.vad_threshold(speech_vad_threshold) {
+                if vad.predict_f32(&frame) > speech_vad_threshold {
                     silence_frames = 0;
                     if !in_speech {
                         in_speech = true;
@@ -2541,12 +2536,9 @@ mod tests {
             .begin_assistant_activity(InputDuringTtsPolicy::AllowBargeIn)
             .unwrap();
         assert!(controls.is_muted());
-        assert_eq!(controls.vad_threshold(0.5), 0.5);
         drop(suppress);
         assert!(!controls.is_muted());
-        assert_eq!(controls.vad_threshold(0.5), 0.5);
         drop(allow);
-        assert_eq!(controls.vad_threshold(0.5), 0.5);
     }
 
     #[test]
@@ -2564,65 +2556,6 @@ mod tests {
         assert_eq!(applied.policy, InputDuringTtsPolicy::SuppressInput);
         assert_eq!(stale, applied);
         assert_eq!(slot.snapshot().unwrap(), applied);
-    }
-
-    #[test]
-    fn assistant_activity_guards_preserve_the_speech_threshold() {
-        let controls = VoiceInputControls::default();
-        let first = controls
-            .begin_assistant_activity(InputDuringTtsPolicy::AllowBargeIn)
-            .unwrap();
-        assert_eq!(controls.vad_threshold(0.5), 0.5);
-        let second = controls
-            .begin_assistant_activity(InputDuringTtsPolicy::AllowBargeIn)
-            .unwrap();
-        assert_eq!(controls.vad_threshold(0.5), 0.5);
-        drop(first);
-        assert_eq!(controls.vad_threshold(0.5), 0.5);
-        drop(second);
-        assert_eq!(controls.vad_threshold(0.5), 0.5);
-    }
-
-    #[test]
-    fn concurrent_assistant_starts_preserve_the_speech_threshold() {
-        let controls = VoiceInputControls::default();
-        let barrier = Arc::new(std::sync::Barrier::new(8));
-        let (result_tx, result_rx) = mpsc::channel();
-        let threads = (1..=8)
-            .map(|_| {
-                let controls = controls.clone();
-                let barrier = Arc::clone(&barrier);
-                let result_tx = result_tx.clone();
-                thread::spawn(move || {
-                    barrier.wait();
-                    let guard = controls
-                        .begin_assistant_activity(InputDuringTtsPolicy::AllowBargeIn)
-                        .unwrap();
-                    result_tx.send((guard.generation, guard)).unwrap();
-                })
-            })
-            .collect::<Vec<_>>();
-        drop(result_tx);
-        let guards = result_rx.into_iter().collect::<Vec<_>>();
-        for thread in threads {
-            thread.join().unwrap();
-        }
-        assert_eq!(controls.vad_threshold(0.5), 0.5);
-        drop(guards);
-        assert_eq!(controls.vad_threshold(0.5), 0.5);
-    }
-
-    #[test]
-    fn cloned_controls_carry_assistant_activity_across_runtime_replacement() {
-        let controls = VoiceInputControls::default();
-        let replacement_controls = controls.clone();
-        let guard = controls
-            .begin_assistant_activity(InputDuringTtsPolicy::AllowBargeIn)
-            .unwrap();
-
-        assert_eq!(replacement_controls.vad_threshold(0.5), 0.5);
-        drop(guard);
-        assert_eq!(replacement_controls.vad_threshold(0.5), 0.5);
     }
 
     #[test]
@@ -4239,19 +4172,5 @@ mod tests {
             .expect_err("panic is reported");
         assert_eq!(error, VoiceInputFinishError::WorkerPanicked);
         assert!(!error.is_quarantined());
-    }
-}
-
-#[cfg(test)]
-mod unified_vad_regression {
-    use super::*;
-    #[test]
-    fn playback_preserves_the_shared_threshold() {
-        let controls = VoiceInputControls::default();
-        assert_eq!(controls.vad_threshold(crate::DEFAULT_VAD_THRESHOLD), 0.9);
-        let _guard = controls
-            .begin_assistant_activity(InputDuringTtsPolicy::AllowBargeIn)
-            .unwrap();
-        assert_eq!(controls.vad_threshold(crate::DEFAULT_VAD_THRESHOLD), 0.9);
     }
 }
