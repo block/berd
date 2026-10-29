@@ -22,8 +22,11 @@ export function speechTextSpans(source: string, from = 0): SpeechTextSpan[] {
   for (const char of source) {
     const start = offset;
     offset += char.length;
-    let literalCode = codeMarker !== "" || start < markerEnd;
+    const lineStart = source.lastIndexOf("\n", start - 1) + 1;
+    const indented = /^( {4}|\t)/.test(source.slice(lineStart));
+    let literalCode = indented || codeMarker !== "" || start < markerEnd;
     if (
+      !indented &&
       !destination &&
       !escaped &&
       start >= markerEnd &&
@@ -31,7 +34,6 @@ export function speechTextSpans(source: string, from = 0): SpeechTextSpan[] {
     ) {
       const run =
         source.slice(start).match(char === "`" ? /^`+/ : /^~+/)?.[0] ?? char;
-      const lineStart = source.lastIndexOf("\n", start - 1) + 1;
       const atFence = /^ {0,3}$/.test(source.slice(lineStart, start));
       if (
         codeMarker === char &&

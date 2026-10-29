@@ -114,6 +114,20 @@ describe("client speech text", () => {
         .join(""),
     ).toBe("`callbacks[index](result)` then the docs.");
   });
+  it.each([
+    "Run:\n    callbacks[index](result)\nThen continue.",
+    "Run:\n\tcallbacks[index](result)\nThen continue.",
+  ])("preserves indented literal code: %s", (source) => {
+    for (let split = 0; split <= source.length; split++) {
+      const spans = [
+        ...speechTextSpans(source.slice(0, split)),
+        ...speechTextSpans(source, split),
+      ];
+      expect(spans.map((span) => span.text).join("")).toBe(source);
+      for (const span of spans)
+        expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
+    }
+  });
   it("maps spoken characters back to the literal source", () => {
     const source = "See [the docs](https://example.com) now.";
     const spans = speechTextSpans(source);
