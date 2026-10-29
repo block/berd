@@ -375,6 +375,7 @@ beforeEach(() => {
     hasHydratedSessions: false,
     sessionPageCursor: null,
     hasMoreSessions: false,
+    hasReachedSessionListEnd: false,
     isRightRailOpen: false,
     activeWorkspaceBySession: {},
   });
@@ -2312,10 +2313,16 @@ describe("sessions.list", () => {
     });
   });
 
-  it("exhausts paginated backend results before filtering", async () => {
+  it("reads later pages until it finds enough matches", async () => {
     mockSessionPages(
       {
-        sessions: [makeAcpSession({ sessionId: "s-1", title: "Build docs" })],
+        sessions: [
+          makeAcpSession({
+            sessionId: "s-1",
+            title: "Build docs",
+            updatedAt: "2026-04-03T00:00:00.000Z",
+          }),
+        ],
         nextCursor: "page-2",
       },
       {
@@ -2338,6 +2345,49 @@ describe("sessions.list", () => {
 
     expect(mocks.acpListSessionsPage).toHaveBeenCalledTimes(2);
     expect(result.sessions.map((s) => s.session_id)).toEqual(["s-2"]);
+  });
+
+  it("stops paging once the first page holds the requested sessions", async () => {
+    mockSessionPages(
+      {
+        sessions: [
+          makeAcpSession({
+            sessionId: "s-new",
+            updatedAt: "2026-04-03T00:00:00.000Z",
+          }),
+          makeAcpSession({
+            sessionId: "s-old",
+            updatedAt: "2026-04-02T00:00:00.000Z",
+          }),
+        ],
+        nextCursor: "page-2",
+      },
+      {
+        sessions: [makeAcpSession({ sessionId: "s-older" })],
+        nextCursor: null,
+      },
+    );
+
+    const result = (await dispatchCommand(
+      "sessions",
+      { action: "list", limit: 1 },
+      ctx,
+    )) as { sessions: Array<{ session_id: string }> };
+
+    expect(result.sessions.map((s) => s.session_id)).toEqual(["s-new"]);
+    expect(mocks.acpListSessionsPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws timed_out without paging once the broker deadline has passed", async () => {
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "list" },
+        { deadlineMs: Date.now() - 1 },
+      ),
+      "timed_out",
+    );
+    expect(mocks.acpListSessionsPage).not.toHaveBeenCalled();
   });
 
   it("excludes archived sessions and filters by project and query", async () => {
@@ -4212,6 +4262,28 @@ describe("projects", () => {
       ],
     });
     expect(mocks.acpListSessionsPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("get stops reading sessions once the broker deadline has passed", async () => {
+    mocks.listProjects.mockResolvedValue([makeProject({ id: "p-1" })]);
+
+    await expectCommandError(
+      dispatchCommand(
+        "projects",
+        { action: "get", project_id: "p-1" },
+        { deadlineMs: Date.now() - 1 },
+      ),
+      "timed_out",
+    );
+    expect(mocks.acpListSessionsPage).not.toHaveBeenCalled();
+  });
+
+  it("get does not read sessions for an unknown project", async () => {
+    await expectCommandError(
+      dispatchCommand("projects", { action: "get", project_id: "nope" }, ctx),
+      "project_not_found",
+    );
+    expect(mocks.acpListSessionsPage).not.toHaveBeenCalled();
   });
 
   it("get returns canonical group session ids still assigned to the project", async () => {

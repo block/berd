@@ -1,29 +1,19 @@
 import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
-import {
-  acpSessionToChatSession,
-  mergeAcpSessionInfo,
-  mergeAcpSessionPage,
-} from "@/features/chat/lib/acpSessionMapping";
+import { mergeAcpSessionInfo } from "@/features/chat/lib/acpSessionMapping";
 import {
   type ChatSession,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
-import { acpGetSessionInfo, acpListSessionsPage } from "@/shared/api/acp";
+import { acpGetSessionInfo } from "@/shared/api/acp";
 import { berdctlErrorDetail, sessionNotFoundMessage } from "../helpers";
 import { CommandError } from "../types";
 
-export async function loadAllSessionsForBerdctl(): Promise<void> {
-  try {
-    await loadSessionsForBerdctlUntil(() => false, { exhaust: true });
-  } catch (error) {
-    throw new CommandError(
-      "backend_read_failed",
-      `Failed to read sessions from the app backend: ${berdctlErrorDetail(error)}`,
-    );
-  }
-}
+export {
+  listSessionsForBerdctl,
+  loadAllSessionsForBerdctl,
+} from "./sessionList";
 
 export async function loadSessionForBerdctl(
   sessionId: string,
@@ -61,38 +51,6 @@ function isAcpResourceNotFound(error: unknown): boolean {
     "code" in error &&
     error.code === -32002
   );
-}
-
-async function loadSessionsForBerdctlUntil(
-  shouldStop: (session: ChatSession) => boolean,
-  options: { exhaust?: boolean } = {},
-): Promise<boolean> {
-  let cursor: string | null = null;
-  let previousCursor: string | null = null;
-
-  for (;;) {
-    const page = await acpListSessionsPage({ cursor });
-    const fetchedTarget = page.sessions
-      .map((session) => acpSessionToChatSession(session))
-      .some(shouldStop);
-    useChatSessionStore.setState((state) => ({
-      ...mergeAcpSessionPage(state, page, previousCursor),
-      hasHydratedSessions: true,
-      isLoading: false,
-    }));
-
-    if (!options.exhaust && fetchedTarget) {
-      return true;
-    }
-
-    const nextCursor = useChatSessionStore.getState().sessionPageCursor;
-    if (!nextCursor) {
-      return false;
-    }
-
-    previousCursor = nextCursor;
-    cursor = nextCursor;
-  }
 }
 
 export function requireSession(sessionId: string): ChatSession {
