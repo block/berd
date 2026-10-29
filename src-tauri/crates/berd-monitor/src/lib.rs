@@ -325,36 +325,20 @@ fn running_monitors_in(base: &Path) -> io::Result<Vec<RunningMonitorDescriptor>>
             Err(_) => continue,
         };
         let token = match locked_owner_token(&mut owner) {
-            Ok(token) => Some(token),
-            // Old Windows owners lock the token bytes too. Keep only legacy
-            // metadata visible, without an actionable instance or stop status.
-            #[cfg(windows)]
-            Err(error)
-                if error.raw_os_error()
-                    == Some(windows_sys::Win32::Foundation::ERROR_LOCK_VIOLATION as i32) =>
-            {
-                None
-            }
+            Ok(token) => token,
             Err(_) => continue,
         };
         if let Some(mut descriptor) = read_descriptor(&root, base) {
-            if let Some(token) = token {
-                if !descriptor.instance_id.is_empty() && descriptor.instance_id != token {
-                    continue;
-                }
-                descriptor.instance_id = token.clone();
-                descriptor.stopping = root
-                    .join(format!(
-                        "stop-{:016x}.requested",
-                        stable_hash(token.as_bytes())
-                    ))
-                    .exists();
-            } else {
-                if !descriptor.instance_id.is_empty() {
-                    continue;
-                }
-                descriptor.stopping = false;
+            if !descriptor.instance_id.is_empty() && descriptor.instance_id != token {
+                continue;
             }
+            descriptor.instance_id = token.clone();
+            descriptor.stopping = root
+                .join(format!(
+                    "stop-{:016x}.requested",
+                    stable_hash(token.as_bytes())
+                ))
+                .exists();
             monitors.push(descriptor);
             if monitors.len() == MAX_RUNNING_MONITORS {
                 break;
@@ -562,58 +546,6 @@ mod tests {
         assert!(try_claim_owner(&reader).is_err());
         drop(owner);
         try_claim_owner(&reader).unwrap();
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn legacy_whole_file_lock_is_visible_but_not_actionable() {
-        let state = TempDir::new().unwrap();
-        let owner = descriptor(state.path(), "session", "legacy");
-        drop(owner);
-        let root = descriptor_root(state.path(), "session", "legacy");
-        fs::write(
-            root.join("descriptor.json"),
-            br#"{"sessionId":"session","stateKey":"legacy","label":"Legacy"}"#,
-        )
-        .unwrap();
-        let owner = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(root.join("owner.pid"))
-            .unwrap();
-        owner.try_lock_exclusive().unwrap();
-        let mut reader = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(root.join("owner.pid"))
-            .unwrap();
-        assert!(try_claim_owner(&reader).is_err());
-        assert_eq!(
-            locked_owner_token(&mut reader).unwrap_err().raw_os_error(),
-            Some(33)
-        );
-        let paths = StatePaths {
-            owner: root.join("owner.pid"),
-            descriptor: root.join("descriptor.json"),
-            log: root.join("watcher.log"),
-            pending: root.join("pending.txt"),
-            root,
-        };
-        assert!(request_stop_for(&paths, None).is_err());
-        assert!(!paths.stop_for("legacy").exists());
-        let monitors = running_monitors_in(state.path()).unwrap();
-        assert_eq!(monitors.len(), 1);
-        assert!(monitors[0].instance_id.is_empty());
-        assert_eq!(monitors[0].command, None);
-        assert_eq!(monitors[0].started_at, None);
-        assert!(!monitors[0].stopping);
-
-        // An unreadable token must never authorize even matching modern metadata.
-        let mut metadata = monitors[0].clone();
-        metadata.instance_id = "legacy".into();
-        fs::write(&paths.descriptor, serde_json::to_vec(&metadata).unwrap()).unwrap();
-        assert!(running_monitors_in(state.path()).unwrap().is_empty());
-        assert!(request_stop_for(&paths, Some("legacy")).is_err());
     }
 
     #[test]
