@@ -1,3 +1,4 @@
+import { speechTextSpans } from "./speechText";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import type {
   Message,
@@ -1488,10 +1489,13 @@ export function startNativeAssistantSpeech(
       ).length;
       const priorToolCount = toolCountByMessage.get(message.id) ?? 0;
       const crossedToolBoundary = toolCount > priorToolCount;
+      const textFinal = ["completed", "stopped", "error"].includes(
+        message.metadata?.completionStatus ?? "",
+      );
       const completionPending =
-        message.metadata?.completionStatus === "completed" &&
-        !handledCompletionMessages.has(message.id);
+        textFinal && !handledCompletionMessages.has(message.id);
       let textOrdinal = 0;
+      let pendingText = false;
       for (const content of message.content) {
         if (content.type !== "text") continue;
         const target = { messageId: message.id, textOrdinal };
@@ -1599,34 +1603,49 @@ export function startNativeAssistantSpeech(
           heldReleaseReady && (heldSpeech?.targets.has(slot) ?? false);
         const utterance = ensureUtterance(target, causalTranscriptKey);
         if (!utterance) break;
-        consumedTextBySlot.set(slot, content.text);
         if (utterance.finishing) continue;
-        const spanStart = utterance.text.length;
-        const targetStart = appendOnly ? previous.length : 0;
-        utterance.text += delta;
-        const previousSpan = utterance.targetSpans.at(-1);
-        if (
-          previousSpan &&
-          targetKey(previousSpan) === targetKey(target) &&
-          previousSpan.end === spanStart &&
-          previousSpan.targetEnd === targetStart
-        ) {
-          previousSpan.end = utterance.text.length;
-          previousSpan.targetEnd = targetStart + delta.length;
-        } else {
-          utterance.targetSpans.push({
-            ...target,
-            start: spanStart,
-            end: utterance.text.length,
-            targetStart,
-            targetEnd: targetStart + delta.length,
-          });
+        const speechText = speechTextSpans(
+          content.text,
+          appendOnly ? previous.length : 0,
+          textFinal,
+        );
+        consumedTextBySlot.set(
+          slot,
+          content.text.slice(0, speechText.consumedThrough),
+        );
+        pendingText = speechText.consumedThrough < content.text.length;
+        let speechDelta = "";
+        for (const span of speechText.spans) {
+          const spanStart = utterance.text.length;
+          utterance.text += span.text;
+          speechDelta += span.text;
+          const previousSpan = utterance.targetSpans.at(-1);
+          if (
+            previousSpan &&
+            targetKey(previousSpan) === targetKey(target) &&
+            previousSpan.end === spanStart &&
+            previousSpan.targetEnd === span.sourceStart
+          ) {
+            previousSpan.end = utterance.text.length;
+            previousSpan.targetEnd = span.sourceEnd;
+          } else {
+            utterance.targetSpans.push({
+              ...target,
+              start: spanStart,
+              end: utterance.text.length,
+              targetStart: span.sourceStart,
+              targetEnd: span.sourceEnd,
+            });
+          }
         }
-        if (utterance.text.trim().length === 0) continue;
+        if (utterance.text.trim().length === 0 || speechDelta.length === 0) {
+          if (pendingText) break;
+          continue;
+        }
         queueNativeStart(utterance);
         queueStreamCommand(
           utterance,
-          () => streamBackend.append(utterance.id, delta),
+          () => streamBackend.append(utterance.id, speechDelta),
           onFailure,
         );
         if (targetWasHeld) {
@@ -1636,6 +1655,7 @@ export function startNativeAssistantSpeech(
             heldReleaseReady = false;
           }
         }
+        if (pendingText) break;
       }
 
       const utterance = activeUtterance;
@@ -1699,6 +1719,7 @@ export function startNativeAssistantSpeech(
           trackVoiceAssistantResponse();
         }
       }
+      if (pendingText) break;
     }
   };
 
