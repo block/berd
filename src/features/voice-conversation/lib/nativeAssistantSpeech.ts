@@ -1432,6 +1432,18 @@ export function startNativeAssistantSpeech(
       return;
     }
     const messages = useChatStore.getState().messagesBySession[sessionId] ?? [];
+    cacheCausalTranscriptKeys(messages);
+    const resolution = voice.earlyTranscriptResolution;
+    if (resolution?.accepted) {
+      for (const [id, key] of causalTranscriptKeyByMessage) {
+        if (key === resolution.key)
+          causalTranscriptKeyByMessage.set(id, resolution.finalKey);
+      }
+    }
+    // Do not consume or invalidate speculative text while recognition or its
+    // final delivery is unresolved. The controller releases this gate only
+    // after the final row and the agent's correction have been admitted.
+    if (voice.earlyTranscriptPending !== null) return;
     if (
       heldSpeech ||
       voice.userSpeaking ||
@@ -1789,6 +1801,10 @@ export function startNativeAssistantSpeech(
       resolvePendingRecognitionSegment(false);
       interruptionReleaseReady = false;
       discardHeldAndResumableSpeech();
+      inspect();
+      return;
+    }
+    if (voice.earlyTranscriptPending !== null) {
       inspect();
       return;
     }

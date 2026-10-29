@@ -370,6 +370,42 @@ function voiceDeliveryOpportunity(
   return null;
 }
 
+export function waitForVoiceRunSettlement(sessionId: string): Promise<void> {
+  const settled = () => {
+    const runtime = useChatStore.getState().getSessionRuntime(sessionId);
+    return (
+      runtime.activeRunId === null &&
+      runtime.chatState === "idle" &&
+      !runtime.isRunCancellationPending
+    );
+  };
+  if (settled()) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      unsubscribeChat();
+      unsubscribeVoice();
+    };
+    const unsubscribeChat = useChatStore.subscribe(() => {
+      if (!settled()) return;
+      cleanup();
+      resolve();
+    });
+    const unsubscribeVoice = useVoiceConversationStore.subscribe((voice) => {
+      if (
+        voice.status.lifecycle === "running" &&
+        voice.status.sessionId === sessionId
+      )
+        return;
+      cleanup();
+      reject(
+        new VoiceTranscriptDeferredError(
+          "Voice transcript is waiting for its speculative run to settle.",
+        ),
+      );
+    });
+  });
+}
+
 export function waitForVoiceDeliveryOpportunity(
   sessionId: string,
 ): Promise<VoiceDeliveryOpportunity> {
@@ -524,11 +560,85 @@ export function resetVoiceUiWhenRunSettles(
   queueMicrotask(check);
 }
 
+interface EarlyDelivery {
+  text: string;
+  key: string;
+  admitted: boolean;
+}
+const earlyDeliveries = new Map<string, EarlyDelivery>();
+const finalTranscriptsSeen = new Set<string>();
+
+function sameVoiceWords(first: string, second: string): boolean {
+  const words = (text: string) =>
+    text
+      .toLowerCase()
+      .match(/[\p{L}\p{N}]+/gu)
+      ?.join(" ") ?? "";
+  return words(first) === words(second);
+}
+
+function voiceEventKey(event: {
+  sessionId: string;
+  lifecycleId: string;
+  revision: number;
+  id: string;
+}): string {
+  return `${event.sessionId}\0${event.lifecycleId}\0${event.revision}\0${event.id}`;
+}
+
+function earlyEventIsCurrent(
+  event: { sessionId: string; revision: number },
+  requireMicrophone = true,
+) {
+  const { status, microphoneMuted } = useVoiceConversationStore.getState();
+  return (
+    status.lifecycle === "running" &&
+    status.sessionId === event.sessionId &&
+    status.revision === event.revision &&
+    status.ownerWindowLabel === getCurrentWindow().label &&
+    (!requireMicrophone || !microphoneMuted)
+  );
+}
+
 function ensureVoiceEventDeliveryInitialized() {
   if (deliveryInitialized) return;
   deliveryInitialized = true;
   observeChainedVoiceStatus();
-  subscribeToVoiceConversationEvents(async (event) => {
+  useVoiceConversationStore.subscribe((state, previous) => {
+    if (
+      state.microphoneMuted &&
+      !previous.microphoneMuted &&
+      state.earlyTranscriptPending
+    ) {
+      const early = earlyDeliveries.get(state.earlyTranscriptPending);
+      useVoiceConversationStore.setState({
+        earlyTranscriptPending: null,
+        earlyTranscriptResolution: early
+          ? {
+              key: early.key,
+              finalKey: state.earlyTranscriptPending,
+              accepted: false,
+            }
+          : null,
+      });
+    }
+    if (
+      state.status.revision === previous.status.revision &&
+      state.status.sessionId === previous.status.sessionId &&
+      state.status.lifecycle === previous.status.lifecycle
+    )
+      return;
+    earlyDeliveries.clear();
+    finalTranscriptsSeen.clear();
+    if (state.earlyTranscriptPending !== null)
+      useVoiceConversationStore.setState({ earlyTranscriptPending: null });
+  });
+  subscribeToVoiceConversationEvents(async (incoming) => {
+    const isEarly = incoming.type === "interimUser";
+    const event =
+      incoming.type === "interimUser"
+        ? { ...incoming, type: "user" as const, deliveryAttempts: 0 }
+        : incoming;
     if (event.type === "cleanShutdown" || event.type === "controlsDismissed") {
       return;
     }
@@ -540,6 +650,24 @@ function ensureVoiceEventDeliveryInitialized() {
         activeSendRoute = null;
       }
       addErrorNotification(sessionId ?? null, event.message);
+      return;
+    }
+    if (event.type === "recognitionPending") {
+      if (event.pending) return;
+      if (!earlyEventIsCurrent(event, false)) return;
+      const pending =
+        useVoiceConversationStore.getState().earlyTranscriptPending;
+      // A final already queued owns reconciliation. Otherwise recognition has
+      // ended without a final. Release the gate even if admission is waiting.
+      if (!pending || finalTranscriptsSeen.has(pending)) return;
+      const early = earlyDeliveries.get(pending);
+      useVoiceConversationStore.setState({
+        earlyTranscriptPending: null,
+        earlyTranscriptResolution: early
+          ? { key: early.key, finalKey: pending, accepted: false }
+          : null,
+      });
+      earlyDeliveries.delete(pending);
       return;
     }
     if (event.type === "activity") return;
@@ -555,9 +683,38 @@ function ensureVoiceEventDeliveryInitialized() {
       return;
     }
 
+    const eventKey = voiceEventKey(event);
+    if (!isEarly) {
+      // Bounded by lifecycle, and retained only while an early delivery exists.
+      if (earlyDeliveries.has(eventKey)) finalTranscriptsSeen.add(eventKey);
+    }
     const deliveryRevision = event.revision;
     const shouldNotifyFailure = event.deliveryAttempts === 0;
+    if (isEarly) {
+      if (
+        !earlyEventIsCurrent(event) ||
+        earlyDeliveries.has(eventKey) ||
+        useVoiceConversationStore.getState().earlyTranscriptPending !== null
+      )
+        return;
+      earlyDeliveries.set(eventKey, {
+        text: event.text,
+        key: voiceEventKey({ ...event, id: `${event.id}:early` }),
+        admitted: false,
+      });
+      useVoiceConversationStore.setState({ earlyTranscriptPending: eventKey });
+    }
     return enqueueVoiceTranscriptDelivery(event.sessionId, async () => {
+      const early = earlyDeliveries.get(eventKey);
+      if (
+        isEarly &&
+        (!early ||
+          !earlyEventIsCurrent(event) ||
+          finalTranscriptsSeen.has(eventKey))
+      ) {
+        return;
+      }
+      if (isEarly && activeRouteIsBlocked(event.sessionId)) return;
       if (activeRouteIsBlocked(event.sessionId)) {
         throw new VoiceTranscriptDeferredError(
           "Voice transcript is waiting for its bound chat to become available.",
@@ -566,6 +723,7 @@ function ensureVoiceEventDeliveryInitialized() {
 
       const route = activeSendRoute;
       if (!route || route.sessionId !== event.sessionId) {
+        if (isEarly) return;
         const message =
           "Voice transcript could not be sent because its bound chat is unavailable.";
         if (shouldNotifyFailure) addErrorNotification(event.sessionId, message);
@@ -573,28 +731,53 @@ function ensureVoiceEventDeliveryInitialized() {
       }
 
       const store = useVoiceConversationStore.getState();
-      store.setUiState("user-speaking");
-
+      if (!isEarly) store.setUiState("user-speaking");
+      const releaseEarly = (accepted: boolean) => {
+        if (!early) return;
+        useVoiceConversationStore.setState({
+          earlyTranscriptPending: null,
+          earlyTranscriptResolution: {
+            key: early.key,
+            finalKey: eventKey,
+            accepted,
+          },
+        });
+        earlyDeliveries.delete(eventKey);
+        finalTranscriptsSeen.delete(eventKey);
+      };
       const sendOptions = {
+        assistantOnlyInput: isEarly,
         userMessageMetadata: {
+          ...(isEarly ? { userVisible: false } : { userVisible: true }),
           origin: "voice_conversation" as const,
-          voiceUtteranceId: event.id,
+          voiceUtteranceId: isEarly ? `${event.id}:early` : event.id,
           voiceConversationLifecycleId: event.lifecycleId,
           voiceConversationRevision: event.revision,
         },
         acpGooseMetadata: {
           origin: "voice_conversation",
-          voiceUtteranceId: event.id,
+          voiceUtteranceId: isEarly ? `${event.id}:early` : event.id,
           voiceConversationLifecycleId: event.lifecycleId,
           voiceConversationRevision: event.revision,
         },
       };
       try {
+        // Keep the provisional row and its causal identity immutable. A changed
+        // final must not become the cause of late messages from the old run.
+        if (
+          !isEarly &&
+          early?.admitted &&
+          !sameVoiceWords(early.text, event.text)
+        )
+          await waitForVoiceRunSettlement(event.sessionId);
         // This runs inside the per-session queue, so a prior send can change
         // the opportunity to steer before the next transcript is evaluated.
-        const opportunity = await waitForVoiceDeliveryOpportunity(
-          event.sessionId,
-        );
+        const opportunity = isEarly
+          ? voiceDeliveryOpportunity(event.sessionId)
+          : await waitForVoiceDeliveryOpportunity(event.sessionId);
+        // Provisional delivery is best effort. Never block retained finals or
+        // the next utterance waiting for a run that has not started yet.
+        if (!opportunity) return;
         if (activeRouteIsBlocked(event.sessionId)) {
           throw new VoiceTranscriptDeferredError(
             "Voice transcript is waiting for its bound chat to become available.",
@@ -606,13 +789,31 @@ function ensureVoiceEventDeliveryInitialized() {
             "Voice transcript could not be sent because its bound chat is unavailable.",
           );
         }
+        if (
+          isEarly &&
+          (!early ||
+            !earlyEventIsCurrent(event) ||
+            finalTranscriptsSeen.has(eventKey))
+        )
+          return;
         const playbackNotice = takeVoicePlaybackNotices(event.sessionId);
         const displayOptions = {
           ...sendOptions,
-          ...(playbackNotice ? { assistantPrompt: playbackNotice } : {}),
+          assistantPrompt: [
+            playbackNotice,
+            isEarly
+              ? "The user paused. This is provisional speech recognition and may be corrected. Do not treat it as confirmation for irreversible actions."
+              : early?.admitted
+                ? sameVoiceWords(early.text, event.text)
+                  ? "This is the final transcript of the provisional speech already sent. It is unchanged. Persist this user turn, but do not repeat an answer already given or in progress unless the request changed."
+                  : "Speech recognition correction: the final user transcript replaces the provisional words in the prior voice turn. Discard any answer based on the provisional wording and answer the corrected request."
+                : null,
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
           displayText: event.text,
         };
-        store.setUiState("agent-working");
+        if (!isEarly) store.setUiState("agent-working");
         const delivered =
           opportunity === "steer"
             ? await steerPromptInSession(
@@ -631,9 +832,9 @@ function ensureVoiceEventDeliveryInitialized() {
         if (delivered === false) {
           // Runtime state may have changed between the opportunity read and
           // send admission. Re-evaluate once, then steer if a run now exists.
-          const retryOpportunity = await waitForVoiceDeliveryOpportunity(
-            event.sessionId,
-          );
+          const retryOpportunity = isEarly
+            ? voiceDeliveryOpportunity(event.sessionId)
+            : await waitForVoiceDeliveryOpportunity(event.sessionId);
           if (retryOpportunity !== "steer") {
             throw new Error(
               "Voice transcript was not accepted by the chat session.",
@@ -647,10 +848,24 @@ function ensureVoiceEventDeliveryInitialized() {
             { throwOnError: true },
           );
         }
+        if (isEarly && early) early.admitted = true;
+        if (!isEarly)
+          releaseEarly(
+            Boolean(early?.admitted && sameVoiceWords(early.text, event.text)),
+          );
         // Admission releases the transcript queue so later speech can steer.
         // UI working state follows the actual chat runtime independently.
         resetVoiceUiWhenRunSettles(event.sessionId, deliveryRevision);
       } catch (deliveryError) {
+        if (isEarly) {
+          // Early delivery is best effort. Retained final delivery remains the
+          // authoritative recovery path. Keep the speech gate until then.
+          console.warn(
+            "Provisional voice delivery was not admitted",
+            deliveryError,
+          );
+          return;
+        }
         const current = useVoiceConversationStore.getState();
         if (deliveryError instanceof VoiceTranscriptDeferredError) {
           if (

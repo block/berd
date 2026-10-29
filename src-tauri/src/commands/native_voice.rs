@@ -205,6 +205,18 @@ pub(crate) enum NativeVoiceEvent {
         revision: u64,
         delivery_attempts: u8,
     },
+    RecognitionPending {
+        session_id: String,
+        pending: bool,
+        revision: u64,
+    },
+    InterimUser {
+        session_id: String,
+        lifecycle_id: String,
+        id: String,
+        text: String,
+        revision: u64,
+    },
     Activity {
         session_id: String,
         activity: &'static str,
@@ -1439,6 +1451,40 @@ fn reject_pending_transcript(
     Ok(TranscriptRejection { attempts, terminal })
 }
 
+struct EarlyVoiceTranscript {
+    utterance_id: String,
+    interim_text: String,
+    user_speaking: bool,
+    early_emitted: bool,
+}
+
+impl Default for EarlyVoiceTranscript {
+    fn default() -> Self {
+        Self {
+            utterance_id: uuid::Uuid::new_v4().to_string(),
+            interim_text: String::new(),
+            user_speaking: false,
+            early_emitted: false,
+        }
+    }
+}
+
+impl EarlyVoiceTranscript {
+    fn take_ready(&mut self) -> bool {
+        if self.user_speaking || self.early_emitted || self.interim_text.is_empty() {
+            return false;
+        }
+        self.early_emitted = true;
+        true
+    }
+
+    fn reset(&mut self) {
+        self.utterance_id = uuid::Uuid::new_v4().to_string();
+        self.interim_text.clear();
+        self.early_emitted = false;
+    }
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Tauri injects four guards beside the lifecycle claim.
 pub async fn start_native_voice_conversation(
@@ -1744,6 +1790,7 @@ pub async fn start_native_voice_conversation(
         .ok_or_else(|| "Voice admission was not initialized.".to_string())?;
     let event_state = state.inner().clone();
     tauri::async_runtime::spawn(async move {
+        let mut early = EarlyVoiceTranscript::default();
         while let Some(event) = events.recv().await {
             let active = runtime.lock().ok().is_some_and(|current| {
                 current.session_id.as_deref() == Some(session_id.as_str())
@@ -1758,7 +1805,20 @@ pub async fn start_native_voice_conversation(
                     log::warn!("Voice input emitted duplicate readiness");
                 }
                 berd_call::input::VoiceInputEvent::SpeakingChanged(speaking) => {
+                    early.user_speaking = speaking;
                     admission.set_user_speaking(speaking);
+                    if early.take_ready() {
+                        let _ = event_window.emit(
+                            EVENT_NAME,
+                            NativeVoiceEvent::InterimUser {
+                                session_id: session_id.clone(),
+                                lifecycle_id: lifecycle_id.clone(),
+                                id: early.utterance_id.clone(),
+                                text: early.interim_text.clone(),
+                                revision,
+                            },
+                        );
+                    }
                     event_state.set_status_sound_input_activity(&session_id, revision, speaking);
                     let event = NativeVoiceEvent::Activity {
                         session_id: session_id.clone(),
@@ -1774,11 +1834,33 @@ pub async fn start_native_voice_conversation(
                 }
                 berd_call::input::VoiceInputEvent::RecognitionPendingChanged(pending) => {
                     admission.set_recognition_pending(pending);
-                    // The runtime owns recognition-pending sequencing. Berd's
-                    // renderer does not project that state yet.
+                    if !pending {
+                        early.reset();
+                    }
+                    let _ = event_window.emit(
+                        EVENT_NAME,
+                        NativeVoiceEvent::RecognitionPending {
+                            session_id: session_id.clone(),
+                            pending,
+                            revision,
+                        },
+                    );
                 }
-                // Berd's renderer does not show interim words yet.
-                berd_call::input::VoiceInputEvent::InterimTranscript(_) => {}
+                berd_call::input::VoiceInputEvent::InterimTranscript(text) => {
+                    early.interim_text = text.trim().to_string();
+                    if early.take_ready() {
+                        let _ = event_window.emit(
+                            EVENT_NAME,
+                            NativeVoiceEvent::InterimUser {
+                                session_id: session_id.clone(),
+                                lifecycle_id: lifecycle_id.clone(),
+                                id: early.utterance_id.clone(),
+                                text: early.interim_text.clone(),
+                                revision,
+                            },
+                        );
+                    }
+                }
                 berd_call::input::VoiceInputEvent::FinalTranscript {
                     text,
                     storage_receipt,
@@ -1786,11 +1868,12 @@ pub async fn start_native_voice_conversation(
                     let transcript = PendingTranscript {
                         session_id: session_id.clone(),
                         lifecycle_id: lifecycle_id.clone(),
-                        id: uuid::Uuid::new_v4().to_string(),
+                        id: early.utterance_id.clone(),
                         text,
                         revision,
                         delivery_attempts: 0,
                     };
+                    early.reset();
                     let Ok(disposition) = store_final_if_active(
                         &runtime,
                         &pending,
@@ -2738,6 +2821,23 @@ fn store_final_if_active(
 mod tests {
     use super::*;
     use std::{thread, time::Instant};
+
+    #[test]
+    fn recognition_resolution_allows_early_delivery_after_no_final_or_mute() {
+        let mut early = EarlyVoiceTranscript::default();
+        early.user_speaking = true;
+        early.interim_text = "first words".into();
+        assert!(!early.take_ready());
+        early.user_speaking = false;
+        assert!(early.take_ready());
+        assert!(!early.take_ready());
+        let previous_id = early.utterance_id.clone();
+        early.reset();
+        assert_ne!(early.utterance_id, previous_id);
+        assert!(!early.take_ready());
+        early.interim_text = "next words".into();
+        assert!(early.take_ready());
+    }
 
     fn pending_transcript(
         session_id: &str,

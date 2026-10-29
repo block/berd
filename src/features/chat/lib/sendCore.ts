@@ -55,6 +55,8 @@ export interface SendCoreOptions {
   attachments?: ChatAttachmentDraft[];
   /** Assistant-audience prompt (skills/builder) merged ahead of the user text. */
   assistantPrompt?: string;
+  /** Internal provisional context, persisted for the assistant only. */
+  assistantOnlyInput?: boolean;
   /** Text shown in the transcript when it differs from the prompt sent. */
   displayText?: string;
   /** Reuses a provisional local transcript row when the send commits. */
@@ -231,6 +233,7 @@ export async function dispatchPrompt(
   const tSendStart = performance.now();
   const {
     assistantPrompt,
+    assistantOnlyInput,
     acpGooseMetadata,
     attachments,
     background,
@@ -417,6 +420,7 @@ export async function dispatchPrompt(
     const promptPromise = acpSendMessage(sessionId, acpPrompt, {
       systemPrompt,
       ...(assistantPrompt ? { assistantPrompt } : {}),
+      assistantOnlyInput,
       personaId: persona?.id,
       personaName: persona?.name,
       goose: acpGooseMetadata,

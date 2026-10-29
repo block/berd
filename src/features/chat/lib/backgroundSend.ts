@@ -44,6 +44,7 @@ export function sendPromptInBackground(
       : undefined,
     attachments,
     assistantPrompt: sendOptions.assistantPrompt,
+    assistantOnlyInput: sendOptions.assistantOnlyInput,
     displayText: sendOptions.displayText,
     chips: sendOptions.chips,
     userMessageMetadata: sendOptions.userMessageMetadata,

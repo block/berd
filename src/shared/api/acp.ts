@@ -55,6 +55,8 @@ export interface AcpProvider {
 export interface AcpSendMessageOptions {
   systemPrompt?: string;
   assistantPrompt?: string;
+  /** Internal provisional context, persisted for the assistant only. */
+  assistantOnlyInput?: boolean;
   personaId?: string;
   personaName?: string;
   goose?: Record<string, unknown>;
@@ -166,6 +168,7 @@ async function acpSendMessageNow(
   const {
     systemPrompt,
     assistantPrompt,
+    assistantOnlyInput,
     personaId,
     personaName,
     goose,
@@ -246,7 +249,13 @@ async function acpSendMessageNow(
       annotations: { audience: ["assistant"] },
     });
   }
-  content.push({ type: "text", text: prompt });
+  content.push({
+    type: "text",
+    text: prompt,
+    ...(assistantOnlyInput
+      ? { annotations: { audience: ["assistant" as const] } }
+      : {}),
+  });
   if (images) {
     for (const [data, mimeType] of images) {
       content.push({ type: "image", data, mimeType } as ContentBlock);
@@ -302,11 +311,11 @@ export async function acpSteerMessage(
   prompt: string,
   options: Pick<
     AcpSendMessageOptions,
-    "assistantPrompt" | "goose" | "images"
+    "assistantPrompt" | "assistantOnlyInput" | "goose" | "images"
   > = {},
 ): Promise<AcpSteerResponse> {
   sessionRegistry.requireSessionInvocationSelection(sessionId);
-  const { assistantPrompt, goose, images } = options;
+  const { assistantPrompt, assistantOnlyInput, goose, images } = options;
   const content: ContentBlock[] = [];
   const assistantText = assistantPrompt?.trim();
   if (assistantText) {
@@ -316,7 +325,13 @@ export async function acpSteerMessage(
       annotations: { audience: ["assistant"] },
     });
   }
-  content.push({ type: "text", text: prompt });
+  content.push({
+    type: "text",
+    text: prompt,
+    ...(assistantOnlyInput
+      ? { annotations: { audience: ["assistant" as const] } }
+      : {}),
+  });
   if (images) {
     for (const [data, mimeType] of images) {
       content.push({ type: "image", data, mimeType } as ContentBlock);

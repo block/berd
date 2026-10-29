@@ -271,6 +271,8 @@ describe("native assistant speech stream", () => {
       assistantSpeaking: false,
       microphoneMuted: false,
       latestFinalizedTranscriptKey: null,
+      earlyTranscriptPending: null,
+      earlyTranscriptResolution: null,
     });
   });
 
@@ -503,6 +505,117 @@ describe("native assistant speech stream", () => {
     expect(
       useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
     ).toMatchObject({ text: source });
+  });
+
+  it.each([
+    false,
+    true,
+  ])("holds speculative output and resolves its final (accepted: %s)", async (accepted) => {
+    const earlyKey = ["session-1", "lifecycle-1", "1", "early:early"].join(
+      "\0",
+    );
+    const finalKey = ["session-1", "lifecycle-1", "1", "early"].join("\0");
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useVoiceConversationStore.setState({ earlyTranscriptPending: finalKey });
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        voiceUser("early:early", { userVisible: false }),
+        assistant(
+          [{ type: "text", text: "Speculative answer." }],
+          "completed",
+          "early-answer",
+        ),
+      ]);
+    await new Promise((resolve) => window.setTimeout(resolve, 15));
+    expect(mocks.start).not.toHaveBeenCalled();
+    finalizeVoiceTranscript("early");
+    await new Promise((resolve) => window.setTimeout(resolve, 15));
+    expect(mocks.start).not.toHaveBeenCalled();
+    // The provisional row is immutable. A late message from that same run
+    // arrives before changed-final dispatch is allowed to begin.
+    useChatStore
+      .getState()
+      .addMessage(
+        "session-1",
+        assistant(
+          [{ type: "text", text: "Late speculative answer." }],
+          "completed",
+          "late-early-answer",
+        ),
+      );
+    useChatStore.getState().addMessage("session-1", voiceUser("early"));
+    useVoiceConversationStore.setState({
+      earlyTranscriptPending: null,
+      earlyTranscriptResolution: { key: earlyKey, finalKey, accepted },
+    });
+    if (accepted) {
+      await vi.waitFor(() =>
+        expect(mocks.append).toHaveBeenCalledWith(
+          expect.any(String),
+          "Speculative answer.",
+        ),
+      );
+    } else {
+      await new Promise((resolve) => window.setTimeout(resolve, 15));
+      expect(mocks.start).not.toHaveBeenCalled();
+      useChatStore
+        .getState()
+        .addMessage(
+          "session-1",
+          assistant(
+            [{ type: "text", text: "Corrected answer." }],
+            "completed",
+            "corrected-answer",
+          ),
+        );
+      await vi.waitFor(() =>
+        expect(mocks.append).toHaveBeenCalledWith(
+          expect.any(String),
+          "Corrected answer.",
+        ),
+      );
+      expect(
+        mocks.append.mock.calls.every(
+          ([, text]) => !text.toLowerCase().includes("speculative"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("releases an early reply after a real speaking-to-pause-to-final sequence", async () => {
+    const earlyKey = ["session-1", "lifecycle-1", "1", "paused:early"].join(
+      "\0",
+    );
+    const finalKey = ["session-1", "lifecycle-1", "1", "paused"].join("\0");
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    useVoiceConversationStore.setState({ earlyTranscriptPending: finalKey });
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        voiceUser("paused:early", { userVisible: false }),
+        assistant(
+          [{ type: "text", text: "Early paused answer." }],
+          "completed",
+          "paused-answer",
+        ),
+      ]);
+    useVoiceConversationStore.setState({ userSpeaking: false });
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
+    expect(mocks.start).not.toHaveBeenCalled();
+    finalizeVoiceTranscript("paused");
+    useChatStore.getState().addMessage("session-1", voiceUser("paused"));
+    useVoiceConversationStore.setState({
+      earlyTranscriptPending: null,
+      earlyTranscriptResolution: { key: earlyKey, finalKey, accepted: true },
+    });
+    await vi.waitFor(() =>
+      expect(mocks.append).toHaveBeenCalledWith(
+        expect.any(String),
+        "Early paused answer.",
+      ),
+    );
   });
 
   it("pushes raw assistant deltas without frontend sentence segmentation", async () => {

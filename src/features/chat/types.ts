@@ -73,6 +73,8 @@ export interface ChatSendOptions {
   /** Reuses a provisional local transcript row when the send commits. */
   userMessageId?: string;
   assistantPrompt?: string;
+  /** Internal provisional context, persisted for the assistant only. */
+  assistantOnlyInput?: boolean;
   chips?: MessageChip[];
   userMessageMetadata?: Partial<MessageMetadata>;
   acpGooseMetadata?: Record<string, unknown>;

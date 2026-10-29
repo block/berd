@@ -58,6 +58,14 @@ interface VoiceConversationStore {
   hydrated: boolean;
   requestedStartSessionId: string | null;
   latestFinalizedTranscriptKey: string | null;
+  // Internal speech gate, not a visual state. Speculative replies cannot be
+  // spoken until their final transcript has been reconciled.
+  earlyTranscriptPending: string | null;
+  earlyTranscriptResolution: {
+    key: string;
+    finalKey: string;
+    accepted: boolean;
+  } | null;
   init: () => Promise<void>;
   refreshStatus: () => Promise<VoiceConversationStatus>;
   requestStart: (sessionId: string) => void;
@@ -311,6 +319,8 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
     hydrated: false,
     requestedStartSessionId: null,
     latestFinalizedTranscriptKey: null,
+    earlyTranscriptPending: null,
+    earlyTranscriptResolution: null,
 
     requestStart: (sessionId) => set({ requestedStartSessionId: sessionId }),
     clearRequestedStart: (sessionId) =>
@@ -441,6 +451,8 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                     revision: event.revision,
                   },
                   uiState: "listening",
+                  earlyTranscriptPending: null,
+                  earlyTranscriptResolution: null,
                   microphoneMuted: false,
                   latestFinalizedTranscriptKey: null,
                   error: null,
@@ -463,6 +475,9 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   uiState: activityUiState(nextState),
                 };
               }
+              case "recognitionPending":
+              case "interimUser":
+                return state;
               case "user":
                 return {
                   ...state,
