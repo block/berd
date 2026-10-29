@@ -132,7 +132,7 @@ fn running_monitors_in(base: &Path) -> io::Result<Vec<RunningMonitorDescriptor>>
         };
         match owner.try_lock_exclusive() {
             Ok(()) => continue,
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+            Err(error) if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {}
             Err(_) => continue,
         }
         if let Ok(bytes) = fs::read(root.join("descriptor.json")) {
