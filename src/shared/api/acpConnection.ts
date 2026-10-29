@@ -191,6 +191,7 @@ export function createAcpConnection(
   backendId: AcpBackendId = LOCAL_BACKEND_ID,
   assertAvailable?: () => void,
 ): AcpConnection {
+  const workerOutboxClients = new WeakSet<GooseClient>();
   let clientPromise: Promise<GooseClient> | null = null;
   let resolvedClient: GooseClient | null = null;
   let activeStream: ReturnType<typeof createWebSocketStream> | null = null;
@@ -330,7 +331,7 @@ export function createAcpConnection(
 
     const tInit = performance.now();
     try {
-      await client.initialize({
+      const initialized = await client.initialize({
         protocolVersion: PROTOCOL_VERSION,
         clientCapabilities: {
           _meta: {
@@ -346,6 +347,15 @@ export function createAcpConnection(
         },
       } satisfies GooseInitializeRequest);
       assertInitializationCurrent(expectedGeneration);
+      const goose = initialized?.agentCapabilities?._meta?.goose;
+      if (
+        goose &&
+        typeof goose === "object" &&
+        "delegatedTaskOutbox" in goose &&
+        goose.delegatedTaskOutbox === true
+      ) {
+        workerOutboxClients.add(client);
+      }
     } catch (error) {
       if (invalidationGeneration === expectedGeneration) {
         advanceGeneration();
@@ -375,6 +385,19 @@ export function createAcpConnection(
         .then((client) => {
           assertInitializationCurrent(expectedGeneration);
           resolvedClient = client;
+          // Start only after publishing the client: delivery may need it to
+          // prepare the idle parent, so starting during initialize deadlocks.
+          if (workerOutboxClients.has(client))
+            void import("./delegatedTaskDelivery").then(
+              ({ startDelegatedTaskDelivery }) => {
+                if (invalidationGeneration !== expectedGeneration) return;
+                startDelegatedTaskDelivery(
+                  (method, args) => client.extMethod(method, args),
+                  backendId,
+                  permissionLifetime.signal,
+                );
+              },
+            );
           return client;
         })
         .catch((error) => {

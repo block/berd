@@ -189,6 +189,97 @@ describe("sendPromptToExistingSessionInBackground", () => {
     mocks.listSkills.mockResolvedValue([]);
   });
 
+  it("dispatches an idle worker completion once through the real monitor delivery route", async () => {
+    const { drainDelegatedTaskEvents } = await import(
+      "@/shared/api/delegatedTaskDelivery"
+    );
+    const { deliverSessionPrompt } = await import("./deliverSessionPrompt");
+    mocks.acpGetSessionInfo.mockResolvedValue({
+      sessionId: SESSION_ID,
+      title: "Owner",
+      messageCount: 1,
+      providerId: INITIAL_TARGET.modelProviderId,
+      modelId: INITIAL_TARGET.modelId,
+    });
+    mocks.acpLoadSession.mockImplementation(async () => {
+      await emitHistoricalReplay(SESSION_ID);
+    });
+    const event = {
+      taskId: "worker-idle",
+      parentSessionId: SESSION_ID,
+      description: "Inspect parser",
+      status: "completed",
+    };
+    const request = vi.fn().mockResolvedValue({ events: [event] });
+    await drainDelegatedTaskEvents(
+      request,
+      "local",
+      [SESSION_ID],
+      deliverSessionPrompt,
+    );
+    expect(mocks.acpSendMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.acpSendMessage.mock.calls[0][0]).toBe(SESSION_ID);
+    expect(mocks.acpSendMessage.mock.calls[0][1]).toContain(
+      "Worker ended with status: completed",
+    );
+    expect(request).toHaveBeenLastCalledWith(
+      "_goose/unstable/session/delegated-tasks/acknowledge",
+      { parentSessionId: SESSION_ID, taskId: "worker-idle" },
+    );
+    await drainDelegatedTaskEvents(
+      request,
+      "local",
+      [SESSION_ID],
+      deliverSessionPrompt,
+    );
+    expect(mocks.acpSendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("queues a busy worker completion without interrupting and deduplicates replay", async () => {
+    const { drainDelegatedTaskEvents } = await import(
+      "@/shared/api/delegatedTaskDelivery"
+    );
+    const { deliverSessionPrompt } = await import("./deliverSessionPrompt");
+    mocks.acpGetSessionInfo.mockResolvedValue({
+      sessionId: SESSION_ID,
+      title: "Owner",
+      messageCount: 1,
+      providerId: INITIAL_TARGET.modelProviderId,
+      modelId: INITIAL_TARGET.modelId,
+    });
+    useChatStore.setState({
+      sessionStateById: {
+        [SESSION_ID]: { chatState: "streaming", activeRunId: "busy-run" },
+      },
+    } as never);
+    const event = {
+      taskId: "worker-busy",
+      parentSessionId: SESSION_ID,
+      description: "Inspect parser",
+      status: "action_limit_reached",
+    };
+    const request = vi.fn().mockResolvedValue({ events: [event] });
+    await drainDelegatedTaskEvents(
+      request,
+      "local",
+      [SESSION_ID],
+      deliverSessionPrompt,
+    );
+    await drainDelegatedTaskEvents(
+      request,
+      "local",
+      [SESSION_ID],
+      deliverSessionPrompt,
+    );
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    const queue = useChatStore.getState().queuedMessageBySession[SESSION_ID];
+    expect(queue).toHaveLength(1);
+    expect(queue[0].payload.text).toContain("Work is incomplete");
+    expect(
+      queue[0].payload.sendOptions?.userMessageMetadata?.berdDeliveryId,
+    ).toBe("delegated-task:worker-busy");
+  });
+
   it("routes a berdctl Auto send under its own lease and releases it after dispatch", async () => {
     useChatSessionStore
       .getState()

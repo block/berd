@@ -1,7 +1,7 @@
 {
   "repo": "https://github.com/johnmatthewtennant/goose.git",
-  "ref": "jtennant/subagent-action-limit-current-pin",
-  "commit": "42fcc5518d4c6f875e920e4f6ac9d64abd459b1f",
+  "ref": "jtennant/delegated-parent-wakeup",
+  "commit": "ac3c7594e269ce8b5f5b4c2d1ceeb57fed5889b5",
   "package": "goose-cli",
   "bin": "goose"
 }
