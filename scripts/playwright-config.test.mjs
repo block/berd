@@ -8,12 +8,14 @@ const integration = {
   GOOSE_BIN: "/tmp/goose",
   GOOSE_SOURCE_DIR: "/tmp/goose-source",
   GOOSE_EXPECTED_COMMIT: "a".repeat(40),
+  GOOSE_EXPECTED_SHA256: "b".repeat(64),
 };
 
 for (const missing of [
   "all",
   "GOOSE_SOURCE_DIR",
   "GOOSE_EXPECTED_COMMIT",
+  "GOOSE_EXPECTED_SHA256",
   "GOOSE_BIN",
   "none",
 ]) {
@@ -38,6 +40,7 @@ test("a binary override alone does not enable the capacity project", () => {
   const env = { ...process.env, GOOSE_BIN: integration.GOOSE_BIN };
   delete env.GOOSE_SOURCE_DIR;
   delete env.GOOSE_EXPECTED_COMMIT;
+  delete env.GOOSE_EXPECTED_SHA256;
   const output = execFileSync(
     process.execPath,
     ["node_modules/@playwright/test/cli.js", "test", "--list"],

@@ -1,12 +1,13 @@
-import { spawn, execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { join } from "node:path";
 import { test as base, expect } from "@playwright/test";
 import { buildInitScript } from "./tauri-mock";
+import { verifyGooseTestBinary } from "../../../scripts/goose-test-provenance.mjs";
 
 export type Scenario =
   | "normal"
@@ -38,24 +39,7 @@ export const test = base.extend<{
   };
 }>({
   realGoose: async ({ page, baseURL }, use, testInfo) => {
-    // Bind the real ACP server binary to its matching source checkout and commit.
-    const binary = process.env.GOOSE_BIN;
-    const source = process.env.GOOSE_SOURCE_DIR;
-    const expected = process.env.GOOSE_EXPECTED_COMMIT;
-    if (!binary || !isAbsolute(binary) || !source || !expected) {
-      throw new Error(
-        "Set absolute GOOSE_BIN, GOOSE_SOURCE_DIR and full GOOSE_EXPECTED_COMMIT to a Goose binary built with acp-http and its matching source checkout.",
-      );
-    }
-    const commit = execFileSync("git", ["-C", source, "rev-parse", "HEAD"], {
-      encoding: "utf8",
-    }).trim();
-    expect(commit, "Goose source must match the explicit test pin").toBe(
-      expected,
-    );
-    const digest = createHash("sha256")
-      .update(await readFile(binary))
-      .digest("hex");
+    const { binary, commit, digest } = await verifyGooseTestBinary();
     console.log(
       `[real-goose] source=${commit} binary=${binary} sha256=${digest}`,
     );

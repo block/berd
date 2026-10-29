@@ -20,7 +20,8 @@ export default defineConfig({
   projects: [
     ...(process.env.GOOSE_BIN &&
     process.env.GOOSE_SOURCE_DIR &&
-    process.env.GOOSE_EXPECTED_COMMIT
+    process.env.GOOSE_EXPECTED_COMMIT &&
+    process.env.GOOSE_EXPECTED_SHA256
       ? [
           {
             name: "capacity-errors",
