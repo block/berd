@@ -12,7 +12,14 @@ export type SpeechTextSpan = {
 
 // Parse the full source prefix on each update, so split links and resumption
 // retain Markdown context. Only literal label/prose characters are synthesized.
-export function speechTextSpans(source: string, from = 0): SpeechTextSpan[] {
+export function speechTextSpans(
+  source: string,
+  from = 0,
+  complete = true,
+): {
+  spans: SpeechTextSpan[];
+  consumedThrough: number;
+} {
   const spans: SpeechTextSpan[] = [];
   let labels = 0;
   let afterLabel = false;
@@ -43,7 +50,7 @@ export function speechTextSpans(source: string, from = 0): SpeechTextSpan[] {
   visit(parser.parse(source));
   let codeIndex = 0;
   let blockIndex = 0;
-  let incompleteCodeEnd = 0;
+  let consumedThrough = source.length;
   for (const char of source) {
     const start = offset;
     offset += char.length;
@@ -51,16 +58,20 @@ export function speechTextSpans(source: string, from = 0): SpeechTextSpan[] {
     while (inlineBlocks[blockIndex] && inlineBlocks[blockIndex].end <= start)
       blockIndex++;
     const range = code[codeIndex];
-    let literalCode =
-      (range !== undefined && range.start <= start) ||
-      start < incompleteCodeEnd;
-    // Streamdown can complete unfinished inline code before CommonMark has a
-    // code node. Preserve only the rest of that inline block while streaming.
-    if (!literalCode && !destination && !escaped && char === "`") {
+    const literalCode = range !== undefined && range.start <= start;
+    // An unmatched backtick may still become code. Do not emit its suffix
+    // until the code closes or the inline block/message is final. A tool flush
+    // alone does not finalize text: later chunks can still close the code.
+    if (!complete && !literalCode && !destination && !escaped && char === "`") {
       const block = inlineBlocks[blockIndex];
-      if (block && block.start <= start) {
-        incompleteCodeEnd = block.end;
-        literalCode = true;
+      if (
+        block &&
+        block.start <= start &&
+        block.end >= source.trimEnd().length &&
+        !/^\r?\n[ \t]*\r?\n/.test(source.slice(block.end))
+      ) {
+        consumedThrough = start;
+        break;
       }
     }
     if (destination || !literalCode) {
@@ -110,5 +121,5 @@ export function speechTextSpans(source: string, from = 0): SpeechTextSpan[] {
       last.sourceEnd = offset;
     } else spans.push({ text, sourceStart, sourceEnd: offset });
   }
-  return spans;
+  return { spans, consumedThrough };
 }

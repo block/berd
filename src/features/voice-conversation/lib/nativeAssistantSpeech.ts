@@ -1600,14 +1600,18 @@ export function startNativeAssistantSpeech(
           heldReleaseReady && (heldSpeech?.targets.has(slot) ?? false);
         const utterance = ensureUtterance(target, causalTranscriptKey);
         if (!utterance) break;
-        consumedTextBySlot.set(slot, content.text);
         if (utterance.finishing) continue;
-        const speechSpans = speechTextSpans(
+        const speechText = speechTextSpans(
           content.text,
           appendOnly ? previous.length : 0,
+          message.metadata?.completionStatus === "completed",
+        );
+        consumedTextBySlot.set(
+          slot,
+          content.text.slice(0, speechText.consumedThrough),
         );
         let speechDelta = "";
-        for (const span of speechSpans) {
+        for (const span of speechText.spans) {
           const spanStart = utterance.text.length;
           utterance.text += span.text;
           speechDelta += span.text;

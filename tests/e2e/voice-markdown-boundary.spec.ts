@@ -4,6 +4,7 @@ import { buildInitScript } from "./fixtures/tauri-mock";
 
 type SpeechBoundaryWindow = Window & {
   __SPEECH_BOUNDARY__: { prepared: string[]; appended: string[] };
+  __FINISH_VOICE_PROMPT__: () => void;
   __TAURI_INTERNALS__: {
     invoke: (
       command: string,
@@ -16,7 +17,7 @@ const SESSION_ID = "voice-session";
 const ASSISTANT_MESSAGE_ID = "assistant-message";
 const SPOKEN_TEXT =
   String.raw`See [the page](<https://example.com/a(b> 'Read (first') for the next steps. Use \[brackets](not a link) now. Call ` +
-  "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n\n1. Read:\n    [guide](https://example.com/guide)\n\nSee [docs](\n    https://example.com/private/path\n) now.\n\n> Code:\n>\n>     callbacks[index](result)\n\nSee the manual:\n    [manual](https://example.com/manual) now.";
+  "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n\n1. Read:\n    [guide](https://example.com/guide)\n\nSee [docs](\n    https://example.com/private/path\n) now.\n\n> Code:\n>\n>     callbacks[index](result)\n\nSee the manual:\n    [manual](https://example.com/manual) now.\n\nUse ` when needed, then see [help](https://example.com/help).";
 
 const test = base.extend<{ voice: Page }>({
   voice: async ({ page }, use) => {
@@ -26,6 +27,8 @@ const test = base.extend<{ voice: Page }>({
           {
             sessionId: SESSION_ID,
             title: "Voice playback",
+            providerId: "openai",
+            modelId: "gpt-4.1",
             messageCount: 1,
           },
         ],
@@ -42,6 +45,57 @@ const test = base.extend<{ voice: Page }>({
     });
     await page.addInitScript(() => {
       localStorage.setItem("goose:voice-output-backend", "pocket");
+      const send = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (data) {
+        const request = JSON.parse(String(data));
+        if (request.method === "session/load") {
+          queueMicrotask(() =>
+            this.dispatchEvent(
+              new MessageEvent("message", {
+                data: JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: request.id,
+                  result: {
+                    configOptions: [
+                      {
+                        id: "provider",
+                        name: "Provider",
+                        type: "select",
+                        currentValue: "openai",
+                        options: [{ value: "openai", name: "OpenAI" }],
+                      },
+                      {
+                        id: "model",
+                        name: "Model",
+                        category: "model",
+                        type: "select",
+                        currentValue: "gpt-4.1",
+                        options: [{ value: "gpt-4.1", name: "GPT-4.1" }],
+                      },
+                    ],
+                  },
+                }),
+              }),
+            ),
+          );
+          return;
+        }
+        if (request.method === "session/prompt") {
+          (window as SpeechBoundaryWindow).__FINISH_VOICE_PROMPT__ = () => {
+            this.dispatchEvent(
+              new MessageEvent("message", {
+                data: JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: request.id,
+                  result: { stopReason: "end_turn" },
+                }),
+              }),
+            );
+          };
+          return;
+        }
+        send.call(this, data);
+      };
       const internals = (window as SpeechBoundaryWindow).__TAURI_INTERNALS__;
       const invoke = internals.invoke.bind(internals);
       const speech = { prepared: [] as string[], appended: [] as string[] };
@@ -75,6 +129,13 @@ test("build sends link labels to native speech and preserves the rendered link",
 }) => {
   await page.goto("/");
   await page.getByText("Voice playback", { exact: true }).click();
+  await page.getByTestId("chat-composer").fill("Read the docs");
+  await page.getByTestId("chat-composer").press("Enter");
+  await page.waitForFunction(
+    () =>
+      typeof (window as SpeechBoundaryWindow).__FINISH_VOICE_PROMPT__ ===
+      "function",
+  );
 
   await page.evaluate(
     async ({ sessionId, messageId, text }) => {
@@ -163,6 +224,23 @@ test("build sends link labels to native speech and preserves the rendered link",
     },
   );
 
+  // A tool flush is not completion. The ambiguous suffix must remain pending.
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.appended.join(""),
+      ),
+    )
+    .toContain("Use ");
+  expect(
+    await page.evaluate(() =>
+      (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.appended.join(""),
+    ),
+  ).not.toContain("when needed");
+  await page.evaluate(() => {
+    (window as SpeechBoundaryWindow).__FINISH_VOICE_PROMPT__();
+  });
+
   await expect(
     page.getByRole("link", { name: "the page", exact: true }),
   ).toHaveAttribute("href", "https://example.com/a(b");
@@ -177,7 +255,7 @@ test("build sends link labels to native speech and preserves the rendered link",
     )
     .toBe(
       String.raw`See the page for the next steps. Use \[brackets](not a link) now. Call ` +
-        "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n\n1. Read:\n    guide\n\nSee docs now.\n\n> Code:\n>\n>     callbacks[index](result)\n\nSee the manual:\n    manual now.",
+        "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n\n1. Read:\n    guide\n\nSee docs now.\n\n> Code:\n>\n>     callbacks[index](result)\n\nSee the manual:\n    manual now.\n\nUse ` when needed, then see help.",
     );
   await expect(
     page.getByRole("link", { name: "docs", exact: true }),

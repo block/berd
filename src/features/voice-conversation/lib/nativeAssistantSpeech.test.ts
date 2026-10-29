@@ -317,6 +317,79 @@ describe("native assistant speech stream", () => {
     ).toMatchObject({ text: source });
   });
 
+  it.each([
+    false,
+    true,
+  ])("sanitizes unmatched inline code at completion (streamed: %s)", async (streamed) => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    const source = "Use ` when needed, then see [docs](https://example.com).";
+    if (streamed) {
+      useChatStore
+        .getState()
+        .setMessages("session-1", [
+          assistant([{ type: "text", text: source }]),
+        ]);
+      await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+      expect(mocks.append.mock.calls.map((call) => call[1]).join("")).toBe(
+        "Use ",
+      );
+    }
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: source }], "completed"),
+      ]);
+    await vi.waitFor(() => expect(mocks.finish).toHaveBeenCalled());
+    expect(mocks.append.mock.calls.map((call) => call[1]).join("")).toBe(
+      "Use ` when needed, then see docs.",
+    );
+  });
+
+  it("keeps ambiguous code pending across a tool flush until its closing chunk", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    const prefix = "Call `callbacks[index](result)";
+    useChatStore
+      .getState()
+      .setMessages("session-1", [assistant([{ type: "text", text: prefix }])]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    expect(mocks.append.mock.calls.map((call) => call[1]).join("")).toBe(
+      "Call ",
+    );
+    useChatStore.getState().setMessages("session-1", [
+      assistant([
+        { type: "text", text: prefix },
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "Read",
+          arguments: {},
+          status: "completed",
+        },
+      ]),
+    ]);
+    await vi.waitFor(() => expect(mocks.flush).toHaveBeenCalledOnce());
+    expect(mocks.append.mock.calls.map((call) => call[1]).join("")).toBe(
+      "Call ",
+    );
+    useChatStore.getState().setMessages("session-1", [
+      assistant([
+        { type: "text", text: `${prefix}\` next.` },
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "Read",
+          arguments: {},
+          status: "completed",
+        },
+      ]),
+    ]);
+    await vi.waitFor(() =>
+      expect(mocks.append.mock.calls.map((call) => call[1]).join("")).toBe(
+        `${prefix}\` next.`,
+      ),
+    );
+  });
+
   it("speaks trailing prose after a streamed angle-bracket Markdown destination", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore
