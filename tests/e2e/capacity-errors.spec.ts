@@ -1,7 +1,7 @@
 import { test, expect, type Scenario } from "./fixtures/real-goose";
 
 // No ACP interception: Playwright observes native WebSocket frames while the
-// feature-pinned binary talks HTTP to the local Responses provider.
+// explicitly pinned binary talks HTTP to the local Responses provider.
 for (const scenario of [
   "normal",
   "http503",

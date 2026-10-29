@@ -38,22 +38,21 @@ export const test = base.extend<{
   };
 }>({
   realGoose: async ({ page, baseURL }, use, testInfo) => {
-    // An explicit feature-source pin is required, not the release sidecar or a mock ACP server.
+    // Bind the real ACP server binary to its matching source checkout and commit.
     const binary = process.env.GOOSE_BIN;
     const source = process.env.GOOSE_SOURCE_DIR;
     const expected = process.env.GOOSE_EXPECTED_COMMIT;
     if (!binary || !isAbsolute(binary) || !source || !expected) {
       throw new Error(
-        "Set absolute GOOSE_BIN, GOOSE_SOURCE_DIR and full GOOSE_EXPECTED_COMMIT to the feature build (goose-cli with acp-http). Build on Blox, not macOS.",
+        "Set absolute GOOSE_BIN, GOOSE_SOURCE_DIR and full GOOSE_EXPECTED_COMMIT to a Goose binary built with acp-http and its matching source checkout.",
       );
     }
     const commit = execFileSync("git", ["-C", source, "rev-parse", "HEAD"], {
       encoding: "utf8",
     }).trim();
-    expect(
-      commit,
-      "Goose feature source must match the explicit test pin",
-    ).toBe(expected);
+    expect(commit, "Goose source must match the explicit test pin").toBe(
+      expected,
+    );
     const digest = createHash("sha256")
       .update(await readFile(binary))
       .digest("hex");
