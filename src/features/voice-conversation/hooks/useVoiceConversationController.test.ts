@@ -94,16 +94,17 @@ function deferred<T>() {
 describe("voice transcript delivery coordination", () => {
   it.each([
     "provisional words",
-    "Provisional words?",
+    "provisional words?",
     "provisional words after mute",
     "corrected words",
     "corrected words after mute",
     "set the temperature to -10 degrees",
     "calculate 3 + 4",
+    "open foo.ts",
   ])("reconciles early speech once (%s)", async (finalText) => {
     const changed = ![
       "provisional words",
-      "Provisional words?",
+      "provisional words?",
       "provisional words after mute",
     ].includes(finalText);
     const onSend = vi.fn(async (text, _persona, _attachments, options) => {
@@ -159,7 +160,9 @@ describe("voice transcript delivery coordination", () => {
         ? "set the temperature to 10 degrees"
         : finalText.includes("calculate")
           ? "calculate 3 - 4"
-          : "provisional words",
+          : finalText === "open foo.ts"
+            ? "open Foo.ts"
+            : "provisional words",
     };
     await act(async () => {
       await voiceStoreMocks.subscriber?.({ ...event, type: "interimUser" });

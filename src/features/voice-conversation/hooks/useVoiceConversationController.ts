@@ -571,7 +571,6 @@ const finalTranscriptsSeen = new Set<string>();
 function sameVoiceWords(first: string, second: string): boolean {
   const words = (text: string) =>
     text
-      .toLowerCase()
       .trim()
       .replace(/[.!?]+$/u, "")
       .replace(/\s+/gu, " ");

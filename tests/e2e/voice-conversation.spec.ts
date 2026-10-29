@@ -340,43 +340,46 @@ base.describe("early voice delivery", () => {
     },
   );
 
-  base(
-    "changed final never speaks the old answer, including late old output",
-    async ({ page }) => {
-      const oldAnswer =
-        "This obsolete provisional answer must never be spoken.";
-      const finalText = "Set the temperature to -10 degrees.";
-      await assistantOutput(page, oldAnswer, "obsolete-run");
-      await nativeEvent(page, { type: "microphoneMute", muted: true });
-      await nativeEvent(page, {
-        type: "user",
-        ...utterance,
-        text: finalText,
-        deliveryAttempts: 0,
-      });
-      await assistantOutput(
-        page,
-        " Late obsolete output must also stay unspoken.",
-        "obsolete-run",
-      );
-      expect(await requests(page)).toHaveLength(1);
-      expect(await spoken(page)).toEqual(["The reply being interrupted."]);
-      await completePrompts(page);
-      await expect.poll(() => requests(page)).toHaveLength(2);
-      expect((await requests(page))[1].method).toBe("session/prompt");
-      await expect(page.getByText(finalText, { exact: true })).toHaveCount(1);
-      await expect(page.getByText(utterance.text, { exact: true })).toHaveCount(
-        0,
-      );
-      const correctedAnswer =
-        "Only the corrected final answer should be spoken.";
-      await assistantOutput(page, correctedAnswer, "corrected-run");
-      await completePrompts(page);
-      await expect
-        .poll(() => spoken(page))
-        .toEqual(["The reply being interrupted.", correctedAnswer]);
-    },
-  );
+  for (const finalText of [
+    "Set the temperature to -10 degrees.",
+    "set the temperature to 10 degrees.",
+  ])
+    base(
+      `changed final (${finalText}) never speaks the old answer, including late old output`,
+      async ({ page }) => {
+        const oldAnswer =
+          "This obsolete provisional answer must never be spoken.";
+        await assistantOutput(page, oldAnswer, "obsolete-run");
+        await nativeEvent(page, { type: "microphoneMute", muted: true });
+        await nativeEvent(page, {
+          type: "user",
+          ...utterance,
+          text: finalText,
+          deliveryAttempts: 0,
+        });
+        await assistantOutput(
+          page,
+          " Late obsolete output must also stay unspoken.",
+          "obsolete-run",
+        );
+        expect(await requests(page)).toHaveLength(1);
+        expect(await spoken(page)).toEqual(["The reply being interrupted."]);
+        await completePrompts(page);
+        await expect.poll(() => requests(page)).toHaveLength(2);
+        expect((await requests(page))[1].method).toBe("session/prompt");
+        await expect(page.getByText(finalText, { exact: true })).toHaveCount(1);
+        await expect(
+          page.getByText(utterance.text, { exact: true }),
+        ).toHaveCount(0);
+        const correctedAnswer =
+          "Only the corrected final answer should be spoken.";
+        await assistantOutput(page, correctedAnswer, "corrected-run");
+        await completePrompts(page);
+        await expect
+          .poll(() => spoken(page))
+          .toEqual(["The reply being interrupted.", correctedAnswer]);
+      },
+    );
 
   base(
     "recognition ending without a final discards speculative speech and permits the next utterance",
