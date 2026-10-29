@@ -25,6 +25,7 @@ export function buildInitScript(options?: {
   skills?: unknown[];
   projects?: unknown[];
   sessions?: unknown[];
+  runningMonitors?: unknown[];
   voiceConversationStatus?: unknown;
   siriVoiceStatus?: unknown;
   enabledExperiments?: string[];
@@ -40,6 +41,7 @@ export function buildInitScript(options?: {
   const skills = JSON.stringify(options?.skills ?? MOCK_SKILLS);
   const projects = JSON.stringify(options?.projects ?? MOCK_PROJECTS);
   const sessions = JSON.stringify(options?.sessions ?? []);
+  const runningMonitors = JSON.stringify(options?.runningMonitors ?? []);
   const voiceConversationStatus = JSON.stringify(
     options?.voiceConversationStatus ?? {
       available: false,
@@ -116,6 +118,7 @@ export function buildInitScript(options?: {
       const SKILLS = ${skills};
       const PROJECTS = ${projects};
       const SEED_SESSIONS = ${sessions};
+      const RUNNING_MONITORS = ${runningMonitors};
       const VOICE_CONVERSATION_STATUS = ${voiceConversationStatus};
       const ENABLED_EXPERIMENTS = ${enabledExperiments};
       const PROVIDER_CATALOG = ${providerCatalog};
@@ -156,6 +159,9 @@ export function buildInitScript(options?: {
         updatedAt: session.updatedAt ?? new Date().toISOString(),
         messageCount: session.messageCount ?? 0,
         conversationBefore: session.conversationBefore,
+        lastMessageAt: session.lastMessageAt,
+        workingDir: session.workingDir,
+        replayText: session.replayText,
         providerId: session.providerId ?? "goose",
         modelId: session.modelId ?? null,
       }));
@@ -390,7 +396,9 @@ export function buildInitScript(options?: {
                 updatedAt: session.updatedAt,
                 _meta: {
                   messageCount: session.messageCount,
+                  lastMessageAt: session.lastMessageAt,
                 },
+                cwd: session.workingDir,
               })),
             });
           case "session/new": {
@@ -431,8 +439,16 @@ export function buildInitScript(options?: {
             }
             return jsonRpcResult(message.id, {});
           }
-          case "session/load":
+          case "session/load": {
+            const session = findSession(message.params?.sessionId);
+            if (session?.replayText) {
+              window.__GOOSE_E2E__.emitAcpNotification({
+                sessionId: session.sessionId,
+                update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: session.replayText } },
+              });
+            }
             return jsonRpcResult(message.id, {});
+          }
           case "session/set_config_option": {
             const session = findSession(message.params?.sessionId);
             if (session) {
@@ -682,6 +698,8 @@ export function buildInitScript(options?: {
               return Promise.resolve(FAKE_ACP_URL);
             case "get_installation_cohort":
               return Promise.resolve("established-before-landing-v1");
+            case "get_running_monitors":
+              return Promise.resolve(clone(RUNNING_MONITORS));
             case "get_voice_conversation_status":
             case "get_native_voice_conversation_status":
               return Promise.resolve(clone(VOICE_CONVERSATION_STATUS));
@@ -865,6 +883,7 @@ export function buildInitScript(options?: {
                   title: session.title,
                   updatedAt: session.updatedAt,
                   messageCount: session.messageCount,
+                  lastMessageAt: session.lastMessageAt,
                   conversationBefore: session.conversationBefore,
                 })),
               );

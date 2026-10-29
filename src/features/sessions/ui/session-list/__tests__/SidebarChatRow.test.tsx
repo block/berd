@@ -1,6 +1,18 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  focusManager,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as monitorsApi from "@/shared/api/monitors";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import {
   resetHomeWidgetStoreForTests,
@@ -82,6 +94,104 @@ describe("SidebarChatRow", () => {
       return;
     }
     Reflect.deleteProperty(navigator, "clipboard");
+  });
+
+  it("keeps the monitor eye through running, unread, and focus refetch transitions", async () => {
+    const monitors = [
+      {
+        sessionId: "session-1",
+        stateKey: "pr-watcher",
+        label: "Watch pull request",
+        instanceId: "watcher-1",
+        stopping: false,
+      },
+    ];
+    const getRunningMonitors = vi
+      .spyOn(monitorsApi, "getRunningMonitors")
+      .mockResolvedValue(monitors);
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, refetchOnWindowFocus: "always" },
+      },
+    });
+    const { rerender, unmount } = render(
+      <SidebarChatRow id="session-1" title="Watch PR" isActive={false} />,
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      },
+    );
+
+    try {
+      const eye = await screen.findByRole("img", { name: "1 monitor running" });
+      expect(eye).toHaveAttribute("data-monitor-status", "sidebar");
+      expect(eye.querySelector("svg.lucide-eye")).toBeInTheDocument();
+
+      for (const [isRunning, hasUnread] of [
+        [true, false],
+        [true, true],
+        [false, true],
+        [false, false],
+      ]) {
+        rerender(
+          <SidebarChatRow
+            id="session-1"
+            title="Watch PR"
+            isActive={false}
+            isRunning={isRunning}
+            hasUnread={hasUnread}
+          />,
+        );
+        expect(screen.getByRole("img", { name: "1 monitor running" })).toBe(
+          eye,
+        );
+        expect(eye).toBeVisible();
+      }
+
+      rerender(
+        <SidebarChatRow
+          id="session-1"
+          title="Watch PR"
+          isActive={false}
+          isRunning
+        />,
+      );
+      let finishRefetch!: (value: typeof monitors) => void;
+      getRunningMonitors.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishRefetch = resolve;
+          }),
+      );
+      // React Query's focus signal models the refetch on renderer wake.
+      act(() => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+      await waitFor(() => expect(getRunningMonitors).toHaveBeenCalledTimes(2));
+      expect(client.isFetching()).toBe(1);
+      expect(eye).toBeVisible();
+
+      await act(async () => finishRefetch(monitors));
+      await waitFor(() => expect(client.isFetching()).toBe(0));
+      expect(screen.getByRole("img", { name: "1 monitor running" })).toBe(eye);
+      expect(eye).toBeVisible();
+
+      rerender(
+        <SidebarChatRow
+          id="session-1"
+          title="Watch PR"
+          isActive={false}
+          hasUnread
+        />,
+      );
+      expect(eye).toBeVisible();
+    } finally {
+      unmount();
+      client.clear();
+      focusManager.setFocused(undefined);
+    }
   });
 
   it("does not show the rename tooltip while a quick pin is available", async () => {

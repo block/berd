@@ -1,5 +1,7 @@
+use berd_monitor::{
+    try_claim_owner, validate_routing_identity, RunningMonitorDescriptor, StatePaths,
+};
 use clap::{Parser, Subcommand, ValueEnum};
-use fs2::FileExt;
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
@@ -87,13 +89,6 @@ enum MonitorCommand {
     },
 }
 
-struct StatePaths {
-    root: PathBuf,
-    log: PathBuf,
-    pending: PathBuf,
-    owner: PathBuf,
-}
-
 struct PendingState {
     generation: String,
     active_len: usize,
@@ -115,7 +110,7 @@ impl PendingState {
     }
 
     fn delivery_id(&self, paths: &StatePaths) -> String {
-        let state_hash = stable_hash(paths.root.to_string_lossy().as_bytes());
+        let state_hash = berd_monitor::stable_hash(paths.root.to_string_lossy().as_bytes());
         format!("berd-monitor-{state_hash:016x}-{}", self.generation)
     }
 
@@ -132,93 +127,6 @@ fn next_pending_generation() -> String {
         .as_nanos();
     let sequence = PENDING_GENERATION_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("{}-{timestamp}-{sequence}", std::process::id())
-}
-
-impl StatePaths {
-    fn for_key(key: &str, session_id: &str) -> Self {
-        let identity = format!("{session_id}\0{key}");
-        let suffix = stable_hash(identity.as_bytes());
-        let safe = key
-            .chars()
-            .take(80)
-            .map(|character| {
-                if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-') {
-                    character
-                } else {
-                    '-'
-                }
-            })
-            .collect::<String>();
-        let root = state_base_dir().join(format!("{safe}-{suffix:016x}"));
-        Self {
-            log: root.join("watcher.log"),
-            pending: root.join("pending.txt"),
-            owner: root.join("owner.pid"),
-            root,
-        }
-    }
-
-    fn launch_status(&self, token: &str) -> PathBuf {
-        self.root.join(format!("launch-{token}.status"))
-    }
-
-    fn stop_for(&self, owner_token: &str) -> PathBuf {
-        self.root.join(format!(
-            "stop-{:016x}.requested",
-            stable_hash(owner_token.as_bytes())
-        ))
-    }
-}
-
-fn state_base_dir() -> PathBuf {
-    if let Some(explicit) = env::var_os("BERD_MONITOR_STATE_DIR") {
-        return PathBuf::from(explicit);
-    }
-    #[cfg(target_os = "windows")]
-    if let Some(local) = env::var_os("LOCALAPPDATA") {
-        return PathBuf::from(local).join("Berd").join("monitor");
-    }
-    #[cfg(target_os = "macos")]
-    if let Some(home) = env::var_os("HOME") {
-        return PathBuf::from(home)
-            .join("Library")
-            .join("Caches")
-            .join("Berd")
-            .join("monitor");
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        if let Some(runtime) = env::var_os("XDG_RUNTIME_DIR") {
-            return PathBuf::from(runtime).join("berd-monitor");
-        }
-        if let Some(state) = env::var_os("XDG_STATE_HOME") {
-            return PathBuf::from(state).join("berd").join("monitor");
-        }
-        if let Some(home) = env::var_os("HOME") {
-            return PathBuf::from(home)
-                .join(".local")
-                .join("state")
-                .join("berd")
-                .join("monitor");
-        }
-    }
-    env::temp_dir().join(format!("berd-monitor-{}", current_user_suffix()))
-}
-
-#[cfg(unix)]
-fn current_user_suffix() -> u32 {
-    unsafe { libc::geteuid() }
-}
-
-#[cfg(windows)]
-fn current_user_suffix() -> u32 {
-    std::process::id()
-}
-
-fn stable_hash(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf29ce484222325, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
-    })
 }
 
 fn main() -> ExitCode {
@@ -242,6 +150,10 @@ fn run_cli() -> Result<(), String> {
             if_running,
             command,
         } => {
+            validate_routing_identity(&state_key)
+                .map_err(|error| format!("--state-key {error}"))?;
+            validate_routing_identity(&session_id)
+                .map_err(|error| format!("--session-id {error}"))?;
             validate_single_line("--label", &label)?;
             if label.encode_utf16().count() > MAX_LABEL_CODE_UNITS {
                 return Err(format!(
@@ -590,7 +502,7 @@ fn claim_owner(paths: &StatePaths, owner_token: &str) -> io::Result<File> {
         .read(true)
         .write(true)
         .open(&paths.owner)?;
-    owner.try_lock_exclusive().map_err(|error| {
+    try_claim_owner(&owner).map_err(|error| {
         io::Error::new(
             error.kind(),
             format!("a monitor already owns {}: {error}", paths.root.display()),
@@ -603,7 +515,11 @@ fn claim_owner(paths: &StatePaths, owner_token: &str) -> io::Result<File> {
 }
 
 fn owner_token(paths: &StatePaths) -> io::Result<String> {
-    let token = fs::read_to_string(&paths.owner)?.trim().to_owned();
+    let mut token = String::new();
+    File::open(&paths.owner)?
+        .take(4096)
+        .read_to_string(&mut token)?;
+    let token = token.trim().to_owned();
     if token.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -643,30 +559,11 @@ fn configure_detached(command: &mut Command) {
 }
 
 fn request_stop(state_key: &str, session_id: &str) -> io::Result<()> {
-    let paths = StatePaths::for_key(state_key, session_id);
-    let owner = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&paths.owner)
-        .map_err(|error| {
-            if error.kind() == io::ErrorKind::NotFound {
-                io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("no monitor found for state key {state_key:?}"),
-                )
-            } else {
-                error
-            }
-        })?;
-    if owner.try_lock_exclusive().is_ok() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("no monitor found for state key {state_key:?}"),
-        ));
-    }
-    let token = owner_token(&paths)?;
-    fs::write(paths.stop_for(&token), b"stop\n")?;
-    println!("stop requested for {}", paths.root.display());
+    berd_monitor::request_stop(state_key, session_id, None)?;
+    println!(
+        "stop requested for {}",
+        StatePaths::for_key(state_key, session_id).root.display()
+    );
     Ok(())
 }
 
@@ -709,6 +606,29 @@ fn run_foreground_after_claim(
     let _owner = claim_owner(&paths, &owner_token).inspect_err(|error| {
         write_launch_status(&paths, launch_token, &format!("error: {error}"));
     })?;
+    atomic_write(
+        &paths.descriptor,
+        &RunningMonitorDescriptor {
+            session_id: session_id.to_owned(),
+            state_key: state_key.to_owned(),
+            label: label.to_owned(),
+            instance_id: owner_token.clone(),
+            command: producer_command
+                .iter()
+                .map(|arg| arg.to_str().map(str::to_owned))
+                .collect(),
+            started_at: Some(
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map_err(io::Error::other)?
+                    .as_millis()
+                    .try_into()
+                    .map_err(io::Error::other)?,
+            ),
+            stopping: false,
+        }
+        .to_discovery_bytes()?,
+    )?;
     after_claim();
     if paths.stop_for(&owner_token).exists() {
         log_line(&paths, "stop requested before producer start")?;

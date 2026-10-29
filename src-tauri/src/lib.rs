@@ -604,6 +604,8 @@ pub fn run() {
             commands::model_setup::get_model_setup_status,
             commands::local_mcp_inventory::list_local_mcp_inventory,
             commands::model_setup::list_model_setup_status,
+            commands::monitors::get_running_monitors,
+            commands::monitors::stop_running_monitor,
             commands::model_setup::clear_model_setup_status,
             commands::notifications::show_completion_notification,
             commands::openai_realtime::get_openai_realtime_status,

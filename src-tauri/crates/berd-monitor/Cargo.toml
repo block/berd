@@ -8,6 +8,11 @@ edition = "2021"
 [dependencies]
 clap = { version = "4", features = ["derive", "env"] }
 fs2 = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -19,5 +24,6 @@ windows-sys = { version = "0.59", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_JobObjects",
+    "Win32_System_IO",
     "Win32_System_Threading",
 ] }

@@ -15,6 +15,10 @@ import {
   useSessionAddressedComposerAdmission,
   type SessionAddressedComposerAdmission,
 } from "@/features/chat/hooks/useSessionAddressedComposerAdmission";
+import {
+  MonitorStatus,
+  useRunningMonitors,
+} from "@/features/monitors/MonitorStatus";
 
 export type ConversationComposerTarget =
   | {
@@ -202,6 +206,34 @@ export function ConversationComposerCapability({
   const deferredWorkspaceStartup = summarizeProjectWorkspaceStartup(
     workspaceSetup?.desired ?? [],
   );
+  const monitorSessionId =
+    !isPendingConversation && !controller.selectedRemoteHost
+      ? target.sessionId
+      : null;
+  const { data: runningMonitors = [] } = useRunningMonitors(monitorSessionId);
+  const showMonitorStatus = runningMonitors.length > 0;
+  const workspaceAccessory = controller.unresolvedDeferredSend ? (
+    <p className="text-xs text-destructive" role="alert">
+      {controller.deferredWorkspaceError}
+    </p>
+  ) : !isPendingConversation &&
+    !isReadOnly &&
+    deferredWorkspaceStartup.worktreeCount > 0 &&
+    (workspaceSetup?.status === "choice" ||
+      workspaceSetup?.status === "naming" ||
+      workspaceSetup?.status === "creating") ? (
+    <WorkspaceSetupChoice
+      state={workspaceSetup.status}
+      worktreeCount={deferredWorkspaceStartup.worktreeCount}
+      branchCount={deferredWorkspaceStartup.branchCount}
+      exactCounts={deferredWorkspaceStartup.exact}
+      error={workspaceSetup.error}
+      onCancelName={controller.cancelDeferredWorkspaceName}
+      onCreate={controller.createDeferredWorkspace}
+      onSubmitName={controller.submitDeferredWorkspaceName}
+      onSkip={controller.skipDeferredWorkspace}
+    />
+  ) : null;
   const policyControls = renderingPolicy.allowedInteractions?.controls;
   const controls: ChatInputControls | undefined = isReadOnly
     ? {
@@ -227,27 +259,17 @@ export function ConversationComposerCapability({
       innerBareSurface={renderingPolicy.presentation.innerBareSurface}
       controls={controls}
       queuedMessageAccessory={
-        controller.unresolvedDeferredSend ? (
-          <p className="text-xs text-destructive" role="alert">
-            {controller.deferredWorkspaceError}
-          </p>
-        ) : !isPendingConversation &&
-          !isReadOnly &&
-          deferredWorkspaceStartup.worktreeCount > 0 &&
-          (workspaceSetup?.status === "choice" ||
-            workspaceSetup?.status === "naming" ||
-            workspaceSetup?.status === "creating") ? (
-          <WorkspaceSetupChoice
-            state={workspaceSetup.status}
-            worktreeCount={deferredWorkspaceStartup.worktreeCount}
-            branchCount={deferredWorkspaceStartup.branchCount}
-            exactCounts={deferredWorkspaceStartup.exact}
-            error={workspaceSetup.error}
-            onCancelName={controller.cancelDeferredWorkspaceName}
-            onCreate={controller.createDeferredWorkspace}
-            onSubmitName={controller.submitDeferredWorkspaceName}
-            onSkip={controller.skipDeferredWorkspace}
-          />
+        workspaceAccessory || showMonitorStatus ? (
+          <>
+            {workspaceAccessory}
+            {showMonitorStatus ? (
+              <MonitorStatus
+                sessionId={monitorSessionId}
+                variant="composer"
+                className="px-3 py-2"
+              />
+            ) : null}
+          </>
         ) : null
       }
       skillProjectDirs={
