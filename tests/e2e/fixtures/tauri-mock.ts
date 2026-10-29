@@ -24,6 +24,7 @@ export function buildInitScript(options?: {
   realAcpUrl?: string;
   homeDir?: string;
   modelId?: string;
+  holdAcpPrompts?: boolean;
   personas?: unknown[];
   skills?: unknown[];
   projects?: unknown[];
@@ -120,6 +121,9 @@ export function buildInitScript(options?: {
 
   return `
     (() => {
+      const HOLD_ACP_PROMPTS = ${options?.holdAcpPrompts ?? false};
+      const ACP_REQUESTS = [];
+      const PENDING_ACP_PROMPTS = new Map();
       const PERSONAS = ${personas};
       const SKILLS = ${skills};
       const PROJECTS = ${projects};
@@ -313,8 +317,23 @@ export function buildInitScript(options?: {
       })();
       const SKILL_SOURCES = SKILLS.map(skillToSourceEntry);
       const POCKET_VOICE_SPOKEN_TEXTS = [];
+      const VOICE_STREAM_TEXTS = new Map();
+      let voiceSpeechId = 0;
 
       window.__GOOSE_E2E__ = {
+        acpRequests: () => clone(ACP_REQUESTS),
+        completeAcpPrompts: () => {
+          for (const [id, { socket, sessionId }] of PENDING_ACP_PROMPTS) {
+            socket.dispatchEvent(new MessageEvent("message", {
+              data: JSON.stringify(jsonRpcResult(id, { stopReason: "end_turn" })),
+            }));
+            window.__GOOSE_E2E__.emitAcpNotification({
+              sessionId,
+              update: { sessionUpdate: "session_info_update", _meta: { goose: { activeRunId: null } } },
+            });
+          }
+          PENDING_ACP_PROMPTS.clear();
+        },
         listAgentSources: () => clone(AGENT_SOURCES),
         clearAgentSources: () => {
           AGENT_SOURCES = PERSONAS.map(personaToSourceEntry);
@@ -410,6 +429,8 @@ export function buildInitScript(options?: {
                 _meta: {
                   messageCount: session.messageCount,
                   lastMessageAt: session.lastMessageAt,
+                  providerId: session.providerId,
+                  modelId: session.modelId,
                 },
                 cwd: session.workingDir,
               })),
@@ -476,6 +497,11 @@ export function buildInitScript(options?: {
             }
             return jsonRpcResult(message.id, {});
           }
+          case "_goose/unstable/session/steer":
+            return jsonRpcResult(message.id, {
+              runId: message.params.expectedRunId,
+              messageId: "mock-steer-" + message.id,
+            });
           case "session/prompt": {
             const session = findSession(message.params?.sessionId);
             if (session) {
@@ -530,6 +556,10 @@ export function buildInitScript(options?: {
                 isConfigured: entry.configured,
               })),
             });
+          case "_goose/unstable/providers/secrets/list":
+            return jsonRpcResult(message.id, { secrets: [{ provider: "openai", name: "OPENAI_API_KEY", storage: "secret_store", status: "unknown", configured: true, hasSecret: true, canDelete: true, canConfigure: false }] });
+          case "_goose/unstable/defaults/read":
+          case "_goose/unstable/defaults/save":
           case "_goose/defaults/read":
           case "_goose/defaults/save":
             return jsonRpcResult(message.id, {
@@ -673,6 +703,11 @@ export function buildInitScript(options?: {
 
         send(raw) {
           const message = JSON.parse(raw);
+          ACP_REQUESTS.push(clone(message));
+          if (HOLD_ACP_PROMPTS && message.method === "session/prompt") {
+            PENDING_ACP_PROMPTS.set(message.id, { socket: this, sessionId: message.params.sessionId });
+            return;
+          }
           const response =
             message && typeof message === "object" && "id" in message
               ? handleAcpRequest(message)
@@ -802,6 +837,32 @@ export function buildInitScript(options?: {
               );
               emitTauriEvent("openai-voice:settings-changed", null);
               return Promise.resolve(null);
+            case "prepare_native_voice_assistant_speech":
+              return Promise.resolve({ outcome: "admitted", speechId: ++voiceSpeechId });
+            case "start_pocket_voice_stream":
+            case "start_siri_voice_stream":
+              VOICE_STREAM_TEXTS.set(args.streamId, "");
+              return Promise.resolve(true);
+            case "append_pocket_voice_stream":
+            case "append_siri_voice_stream": {
+              VOICE_STREAM_TEXTS.set(args.streamId, (VOICE_STREAM_TEXTS.get(args.streamId) ?? "") + args.text);
+              return Promise.resolve(null);
+            }
+            case "flush_pocket_voice_stream":
+            case "flush_siri_voice_stream":
+            case "finish_pocket_voice_stream":
+            case "finish_siri_voice_stream": {
+              const text = VOICE_STREAM_TEXTS.get(args.streamId);
+              if (text) {
+                POCKET_VOICE_SPOKEN_TEXTS.push(text);
+                VOICE_STREAM_TEXTS.set(args.streamId, "");
+              }
+              if (cmd.startsWith("finish")) queueMicrotask(() => emitTauriEvent(
+                cmd.includes("siri") ? "siri-voice:stream-event" : "pocket-voice:stream-event",
+                { streamId: args.streamId, state: "completed", error: null },
+              ));
+              return Promise.resolve(null);
+            }
             case "speak_pocket_voice":
               POCKET_VOICE_SPOKEN_TEXTS.push(args?.text);
               return new Promise((resolve) =>
@@ -876,6 +937,8 @@ export function buildInitScript(options?: {
               });
 
             // ---- Sessions / Misc ----
+            case "list_berd_app_skills":
+              return Promise.resolve({ skills: [] });
             case "get_session_window_support":
               return Promise.resolve({
                 supported: false,
@@ -897,6 +960,8 @@ export function buildInitScript(options?: {
                   updatedAt: session.updatedAt,
                   messageCount: session.messageCount,
                   lastMessageAt: session.lastMessageAt,
+                  providerId: session.providerId,
+                  modelId: session.modelId,
                   conversationBefore: session.conversationBefore,
                 })),
               );
