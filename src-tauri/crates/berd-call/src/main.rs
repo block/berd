@@ -2762,7 +2762,7 @@ fn acknowledge_output_ready(
     current.assistant_activity = input_controls.map(|controls| {
         controls
             .begin_assistant_activity(current.input_during_tts.policy)
-            .expect("VAD threshold is valid")
+            .expect("assistant activity generation is available")
     });
     write_message(
         writer,
