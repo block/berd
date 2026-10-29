@@ -1,4 +1,4 @@
-import { ChevronDown, Eye } from "lucide-react";
+import { Eye } from "lucide-react";
 import {
   QueryClient,
   QueryClientContext,
@@ -186,7 +186,6 @@ export function MonitorStatus({
                   {t("monitorStatus.more", { count: data.length - 1 })}
                 </span>
               ) : null}
-              <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
             </Button>
           </PopoverTrigger>
           <PopoverContent
