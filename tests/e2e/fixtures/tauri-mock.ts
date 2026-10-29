@@ -161,6 +161,7 @@ export function buildInitScript(options?: {
         conversationBefore: session.conversationBefore,
         lastMessageAt: session.lastMessageAt,
         workingDir: session.workingDir,
+        replayText: session.replayText,
         providerId: session.providerId ?? "goose",
         modelId: session.modelId ?? null,
       }));
@@ -438,8 +439,16 @@ export function buildInitScript(options?: {
             }
             return jsonRpcResult(message.id, {});
           }
-          case "session/load":
+          case "session/load": {
+            const session = findSession(message.params?.sessionId);
+            if (session?.replayText) {
+              window.__GOOSE_E2E__.emitAcpNotification({
+                sessionId: session.sessionId,
+                update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: session.replayText } },
+              });
+            }
             return jsonRpcResult(message.id, {});
+          }
           case "session/set_config_option": {
             const session = findSession(message.params?.sessionId);
             if (session) {
