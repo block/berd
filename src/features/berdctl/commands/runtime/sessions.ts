@@ -147,5 +147,7 @@ export function sessionMetadata(session: ChatSession) {
     is_open_in_window: isOpenInWindow,
     chat_state: runtime.chatState,
     message_count: session.messageCount,
+    session_type: session.sessionType ?? null,
+    parent_session_id: session.parentSessionId ?? null,
   };
 }

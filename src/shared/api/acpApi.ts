@@ -59,6 +59,8 @@ export interface AcpSessionInfo {
   providerId: string | null;
   modelId: string | null;
   personaId: string | null;
+  sessionType?: string | null;
+  parentSessionId?: string | null;
   activeRunId?: string | null;
 }
 
@@ -111,6 +113,17 @@ function metaString(
   return typeof value === "string" ? value : null;
 }
 
+function metaStringAny(
+  meta: SessionInfo["_meta"] | null | undefined,
+  ...keys: string[]
+): string | null {
+  for (const key of keys) {
+    const value = metaString(meta, key);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
 function metaNumber(
   meta: SessionInfo["_meta"] | null | undefined,
   key: string,
@@ -143,6 +156,12 @@ function mapSessionInfo(info: SessionInfo): AcpSessionInfo {
     providerId: metaString(info._meta, "providerId"),
     modelId: metaString(info._meta, "modelId"),
     personaId: metaString(info._meta, "personaId"),
+    sessionType: metaStringAny(info._meta, "sessionType", "session_type"),
+    parentSessionId: metaStringAny(
+      info._meta,
+      "parentSessionId",
+      "parent_session_id",
+    ),
     ...(activeRunId !== undefined ? { activeRunId } : {}),
   };
 }

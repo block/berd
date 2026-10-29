@@ -47,6 +47,20 @@ describe("acpSessionToChatSession execution target", () => {
     });
   });
 
+  it("preserves delegate type and parent metadata", () => {
+    expect(
+      acpSessionToChatSession(
+        sessionInfo({
+          sessionType: "sub_agent",
+          parentSessionId: "parent-session",
+        }),
+      ),
+    ).toMatchObject({
+      sessionType: "sub_agent",
+      parentSessionId: "parent-session",
+    });
+  });
+
   it("preserves the complete UI-owned target over stale ACP metadata", () => {
     const executionTarget = {
       harnessId: "goose" as const,
