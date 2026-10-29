@@ -1,4 +1,4 @@
-pub(crate) const SESSION_PROTOCOL_VERSION: u32 = 8;
+pub(crate) const SESSION_PROTOCOL_VERSION: u32 = 9;
 pub(crate) const FRAME_MAGIC: [u8; 2] = *b"BV";
 pub(crate) const FRAME_MARKER: u8 = 3;
 pub(crate) const JSON_FRAME_KIND: u8 = 1;

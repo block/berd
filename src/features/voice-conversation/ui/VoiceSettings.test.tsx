@@ -56,16 +56,11 @@ const inputState = vi.hoisted(() => ({
 const outputState = vi.hoisted(() => ({
   backend: "pocket" as VoiceOutputBackend,
 }));
-const modeState = vi.hoisted(() => ({
-  mode: "chained" as "chained" | "openai-realtime",
-}));
 const preferenceMocks = vi.hoisted(() => ({
   setInputBackend: vi.fn(),
   setOutputBackend: vi.fn(),
   setInterruptionMode: vi.fn(),
-  setMode: vi.fn(),
   setStatusSounds: vi.fn(),
-  setRealtimePreference: vi.fn(),
 }));
 const statusSoundState = vi.hoisted(() => ({
   mode: "working" as "off" | "working" | "working-and-waiting",
@@ -102,17 +97,14 @@ const openAiApiMocks = vi.hoisted(() => ({
     Promise.resolve({
       sttConfigured: false,
       ttsConfigured: false,
-      realtimeConfigured: false,
     }),
   ),
   getEndpoints: vi.fn(() =>
     Promise.resolve({
-      realtime: null as string | null,
       stt: null as string | null,
       tts: null as string | null,
     }),
   ),
-  setRealtimeApiKey: vi.fn(() => Promise.resolve()),
   setEndpoint: vi.fn(() => Promise.resolve()),
   setSttApiKey: vi.fn(() => Promise.resolve()),
   clearSttApiKey: vi.fn(() => Promise.resolve()),
@@ -125,8 +117,6 @@ const openAiApiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../api/openAiVoice", () => ({
-  setOpenAiRealtimeApiKey: openAiApiMocks.setRealtimeApiKey,
-  clearOpenAiRealtimeApiKey: vi.fn(() => Promise.resolve()),
   getOpenAiVoiceEndpoints: openAiApiMocks.getEndpoints,
   getOpenAiVoiceStatus: openAiApiMocks.getStatus,
   setOpenAiVoiceEndpoint: openAiApiMocks.setEndpoint,
@@ -194,23 +184,12 @@ vi.mock("../lib/voiceInterruptionPreference", () => ({
     setMode: preferenceMocks.setInterruptionMode,
   }),
 }));
-vi.mock("../lib/voiceConversationModePreference", () => ({
-  getDefaultVoiceConversationMode: () => "chained",
-  useVoiceConversationModePreference: () => ({
-    mode: modeState.mode,
-    setMode: preferenceMocks.setMode,
-  }),
-}));
 vi.mock("../lib/statusSoundPreference", () => ({
   getDefaultStatusSoundPreference: () => ({ mode: "working" }),
   useStatusSoundPreference: () => ({
     ...statusSoundState,
     update: preferenceMocks.setStatusSounds,
   }),
-}));
-vi.mock("../lib/realtimeVoicePreference", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../lib/realtimeVoicePreference")>()),
-  setRealtimeVoicePreference: preferenceMocks.setRealtimePreference,
 }));
 
 function setup(status: PocketVoiceStatus): PocketVoiceSetup {
@@ -273,6 +252,7 @@ function siriSetup(): SiriVoiceSetup {
       voices: [
         {
           name: "Nora",
+          displayName: "Nora",
           language: "en-US",
           sizeBytes: 0,
           installed: true,
@@ -304,7 +284,6 @@ describe("VoiceSettings", () => {
     microphonePermissionState.openSettings.mockReset();
     inputState.backend = "parakeet";
     outputState.backend = "pocket";
-    modeState.mode = "chained";
     platformState.current = "mac";
     setupState.current = setup(
       pocketStatus({ pocketInstalled: true, parakeetInstalled: true }),
@@ -350,7 +329,6 @@ describe("VoiceSettings", () => {
     openAiApiMocks.clearSttApiKey.mockClear();
     openAiApiMocks.setSpeechVoice.mockClear();
     openAiApiMocks.getEndpoints.mockReset().mockResolvedValue({
-      realtime: null,
       stt: null,
       tts: null,
     });
@@ -360,8 +338,6 @@ describe("VoiceSettings", () => {
     preferenceMocks.setInputBackend.mockClear();
     preferenceMocks.setOutputBackend.mockClear();
     preferenceMocks.setInterruptionMode.mockClear();
-    preferenceMocks.setMode.mockClear();
-    preferenceMocks.setRealtimePreference.mockClear();
   });
 
   it("offers off and both repeating status sound modes without a volume control", async () => {
@@ -380,29 +356,7 @@ describe("VoiceSettings", () => {
     expect(screen.getAllByRole("option")).toHaveLength(3);
   });
 
-  it("describes voice modes by who the user talks with", () => {
-    renderWithProviders(<VoiceSettings />);
-
-    expect(
-      screen.getByRole("radio", { name: /Talk to your coding agent/ }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Your speech becomes a message to your coding agent, and its response is read aloud. Best for direct, project-aware work.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("radio", { name: /Talk through a voice assistant/ }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Have a lower-latency, more natural conversation with a voice assistant that consults your coding agent when it needs your project or tools. Requires an OpenAI API key.",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("confirms before resetting every voice setting to chained Apple defaults", async () => {
-    modeState.mode = "openai-realtime";
+  it("confirms before resetting every voice setting to Apple defaults", async () => {
     inputState.backend = "openai";
     outputState.backend = "openai";
     interruptionState.mode = "preventFeedback";
@@ -424,7 +378,6 @@ describe("VoiceSettings", () => {
       name: "Reset all voice settings?",
     });
     expect(dialog).toBeInTheDocument();
-    expect(preferenceMocks.setMode).not.toHaveBeenCalled();
 
     await user.click(
       within(dialog).getByRole("button", { name: "Reset to defaults" }),
@@ -437,42 +390,6 @@ describe("VoiceSettings", () => {
     expect(preferenceMocks.setOutputBackend).toHaveBeenCalledWith("siri");
     expect(preferenceMocks.setInterruptionMode).toHaveBeenCalledWith(
       "automatic",
-    );
-    expect(preferenceMocks.setMode).toHaveBeenCalledWith("chained");
-    expect(preferenceMocks.setRealtimePreference).toHaveBeenCalledOnce();
-  });
-
-  it("refreshes the mounted Realtime endpoint after resetting all voice settings", async () => {
-    modeState.mode = "openai-realtime";
-    openAiApiMocks.getEndpoints.mockResolvedValue({
-      realtime: "wss://previous.test/realtime",
-      stt: null,
-      tts: null,
-    });
-    openAiApiMocks.resetAll.mockImplementationOnce(async () => {
-      openAiApiMocks.getEndpoints.mockResolvedValue({
-        realtime: null,
-        stt: null,
-        tts: null,
-      });
-    });
-    renderWithProviders(<VoiceSettings />);
-    const user = userEvent.setup();
-    expect(
-      await screen.findByDisplayValue("wss://previous.test/realtime"),
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Reset to defaults" }));
-    await user.click(
-      within(
-        screen.getByRole("dialog", { name: "Reset all voice settings?" }),
-      ).getByRole("button", { name: "Reset to defaults" }),
-    );
-    expect(screen.getByLabelText("Realtime endpoint URL")).toHaveValue("");
-    await user.type(screen.getByLabelText("OpenAI API key"), "disposable-key");
-    await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(openAiApiMocks.setRealtimeApiKey).toHaveBeenCalledWith(
-      "disposable-key",
-      "",
     );
   });
 
@@ -511,8 +428,6 @@ describe("VoiceSettings", () => {
     expect(preferenceMocks.setInputBackend).not.toHaveBeenCalled();
     expect(preferenceMocks.setOutputBackend).not.toHaveBeenCalled();
     expect(preferenceMocks.setInterruptionMode).not.toHaveBeenCalled();
-    expect(preferenceMocks.setMode).not.toHaveBeenCalled();
-    expect(preferenceMocks.setRealtimePreference).not.toHaveBeenCalled();
   });
 
   it("reports a Pocket refresh failure and succeeds on retry", async () => {
@@ -535,7 +450,7 @@ describe("VoiceSettings", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Could not refresh Pocket settings",
     );
-    expect(preferenceMocks.setMode).not.toHaveBeenCalled();
+    expect(preferenceMocks.setInterruptionMode).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Reset to defaults" }));
     await user.click(
@@ -546,7 +461,9 @@ describe("VoiceSettings", () => {
 
     expect(refreshSettings).toHaveBeenCalledTimes(2);
     expect(openAiApiMocks.resetAll).toHaveBeenCalledTimes(2);
-    expect(preferenceMocks.setMode).toHaveBeenCalledWith("chained");
+    expect(preferenceMocks.setInterruptionMode).toHaveBeenCalledWith(
+      "automatic",
+    );
   });
 
   it("refreshes mounted Apple controls before completing reset", async () => {
@@ -570,7 +487,7 @@ describe("VoiceSettings", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Could not refresh Apple settings",
     );
-    expect(preferenceMocks.setMode).not.toHaveBeenCalled();
+    expect(preferenceMocks.setInterruptionMode).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Reset to defaults" }));
     await user.click(
@@ -580,7 +497,9 @@ describe("VoiceSettings", () => {
     );
 
     expect(refreshSettings).toHaveBeenCalledTimes(2);
-    expect(preferenceMocks.setMode).toHaveBeenCalledWith("chained");
+    expect(preferenceMocks.setInterruptionMode).toHaveBeenCalledWith(
+      "automatic",
+    );
   });
 
   it("does not inspect OpenAI credentials for Apple speech input and output", () => {
@@ -804,7 +723,6 @@ describe("VoiceSettings", () => {
       unavailableReason: "missingApiKey",
     };
     openAiApiMocks.getEndpoints.mockResolvedValue({
-      realtime: null,
       stt: "ws://127.0.0.1:18870/v1/realtime?intent=transcription",
       tts: "http://127.0.0.1:18870/v1/audio/speech",
     });

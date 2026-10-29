@@ -154,7 +154,7 @@ block-skill-discovery = []
 # For managed internal distributions where consent is an employment-policy
 # fact, not a per-user choice.
 block-telemetry-enforced = []
-# Enables Block-service-backed voice dictation. Public Realtime voice is a
+# Enables Block-service-backed voice dictation. Public OpenAI voice is a
 # separate, user-configured path and does not depend on Block services.
 block-voice-dictation = []
 # Admin runtime-config endpoint fetch. Default-OFF: a normal build never

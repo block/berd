@@ -26,6 +26,7 @@ export function buildInitScript(options?: {
   projects?: unknown[];
   sessions?: unknown[];
   voiceConversationStatus?: unknown;
+  siriVoiceStatus?: unknown;
   enabledExperiments?: string[];
   providerCatalog?: unknown[];
   providerInventory?: unknown[];
@@ -49,6 +50,7 @@ export function buildInitScript(options?: {
     },
   );
   const enabledExperiments = JSON.stringify(options?.enabledExperiments ?? []);
+  const siriVoiceStatus = JSON.stringify(options?.siriVoiceStatus ?? null);
   const providerCatalog = JSON.stringify(options?.providerCatalog ?? []);
   const providerInventory = JSON.stringify(
     options?.providerInventory ?? [
@@ -162,7 +164,7 @@ export function buildInitScript(options?: {
       const ACP_SOCKETS = new Set();
       const VOICE_ENDPOINTS = JSON.parse(
         localStorage.getItem("goose:e2e:voice-endpoints") ??
-          '{"realtime":null,"stt":null,"tts":null}',
+          '{"stt":null,"tts":null}',
       );
       const LAYOUT_CONSTRAINTS = {
         minCenter: -1000000,
@@ -713,7 +715,7 @@ export function buildInitScript(options?: {
                 revision: 1,
               });
             case "get_siri_voice_status":
-              return Promise.resolve({
+              return Promise.resolve(${siriVoiceStatus} ?? {
                 supported: true,
                 availableLanguages: ["en-US"],
                 selectedVoice: { name: "Samantha", language: "en-US" },
@@ -722,6 +724,7 @@ export function buildInitScript(options?: {
                 voices: [
                   {
                     name: "Samantha",
+                    displayName: "Samantha",
                     language: "en-US",
                     sizeBytes: 0,
                     installed: true,

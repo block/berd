@@ -8,9 +8,6 @@ const test = base.extend<{ settings: Page }>({
       content: buildInitScript({ enabledExperiments: ["voice-conversation"] }),
     });
     await page.addInitScript(() => {
-      if (localStorage.getItem("goose:voice-conversation-mode") === null) {
-        localStorage.setItem("goose:voice-conversation-mode", "chained");
-      }
       if (localStorage.getItem("goose:voice-input-backend") === null) {
         localStorage.setItem("goose:voice-input-backend", "openai");
       }
@@ -26,7 +23,7 @@ test.use({ screenshot: "off", trace: "off", video: "off" });
 
 async function saveEndpoint(
   page: Page,
-  kind: "realtime" | "stt" | "tts",
+  kind: "stt" | "tts",
   label: string,
   url: string,
 ) {
@@ -39,7 +36,7 @@ async function saveEndpoint(
   await expect(input).toHaveValue(url);
 }
 
-test("keeps Realtime, STT, and TTS URLs independent across settings reloads", async ({
+test("keeps STT and TTS URLs independent across settings reloads", async ({
   settings: page,
 }) => {
   await page.goto("/");
@@ -69,28 +66,9 @@ test("keeps Realtime, STT, and TTS URLs independent across settings reloads", as
     "http://127.0.0.1:18870/v1/audio/speech",
   );
 
-  await page
-    .getByRole("radio", { name: /Talk through a voice assistant/ })
-    .click();
-  const realtime = page.getByLabel("Realtime endpoint URL");
-  await expect(realtime).toHaveAttribute(
-    "placeholder",
-    "wss://api.openai.com/v1/realtime",
-  );
-  await saveEndpoint(
-    page,
-    "realtime",
-    "Realtime endpoint URL",
-    "ws://127.0.0.1:18870/v1/realtime",
-  );
-
   await page.goto("/");
   await page.locator("[data-sidebar-nav-id=settings]").click();
   await page.locator("[data-sidebar-nav-id=settings-voice]").click();
-  await expect(page.getByLabel("Realtime endpoint URL")).toHaveValue(
-    "ws://127.0.0.1:18870/v1/realtime",
-  );
-  await page.getByRole("radio", { name: /Talk to your coding agent/ }).click();
   await expect(page.getByLabel("Speech-to-text endpoint URL")).toHaveValue(
     "ws://127.0.0.1:18870/v1/realtime?intent=transcription",
   );

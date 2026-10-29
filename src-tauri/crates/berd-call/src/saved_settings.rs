@@ -19,6 +19,8 @@ pub(crate) struct SavedSettings {
     pub vad_debug_sounds: bool,
 }
 
+const REMOVED_FLAGS: [&str; 3] = ["--mode", "--spokesperson-voice", "--spokesperson-rate"];
+
 pub(crate) fn path() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("BERD_CALL_SETTINGS_FILE") {
         return Ok(PathBuf::from(path));
@@ -45,8 +47,27 @@ pub(crate) fn load(path: &Path) -> Result<SavedSettings, String> {
     if bytes.len() > 65536 {
         return Err("saved call settings exceed 64 KiB".into());
     }
-    let settings: SavedSettings = serde_json::from_slice(&bytes)
+    let mut settings: SavedSettings = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid saved call settings: {error}"))?;
+    // Spokesperson calls without agent speech saved the Realtime model and its
+    // speed, which can be slower than speech allows, as their speech settings.
+    let realtime = matches!(&settings.tts, Some(TtsSettings::OpenAi { model, .. }) if model.to_ascii_lowercase().contains("realtime"));
+    if realtime {
+        settings.tts = None;
+    }
+    // Calls once chose a mode and a Spokesperson voice. Those options, and a
+    // Realtime speed, fall back to the defaults, and the next save overwrites them.
+    if settings.arguments.len().is_multiple_of(2) {
+        settings.arguments = settings
+            .arguments
+            .chunks_exact(2)
+            .filter(|pair| {
+                !REMOVED_FLAGS.contains(&pair[0].as_str()) && !(realtime && pair[0] == "--rate")
+            })
+            .flatten()
+            .cloned()
+            .collect();
+    }
     validate_arguments(&settings.arguments)?;
     Ok(settings)
 }
@@ -98,14 +119,11 @@ fn validate_arguments(arguments: &[String]) -> Result<(), String> {
                 pair[0].as_str(),
                 "--tts-backend"
                     | "--stt-backend"
-                    | "--mode"
                     | "--voice"
                     | "--language"
                     | "--rate"
                     | "--model-dir"
                     | "--stt-model-dir"
-                    | "--spokesperson-voice"
-                    | "--spokesperson-rate"
             )
         })
     {
@@ -133,51 +151,15 @@ pub(crate) fn merge_arguments(saved: &[String], explicit: &[String]) -> Vec<Stri
 }
 
 pub(crate) fn persistable_arguments(arguments: &[String]) -> Vec<String> {
-    let arguments: Vec<_> = arguments
-        .iter()
-        .filter(|argument| *argument != crate::DIRECT_AGENT_SPEECH)
-        .cloned()
-        .collect();
     arguments
         .chunks_exact(2)
         .filter(|pair| {
             !berd_call::detection::is_detection_flag(&pair[0])
                 && !matches!(
                     pair[0].as_str(),
-                    "--realtime-url"
-                        | "--stt-url"
-                        | "--tts-url"
-                        | "--spokesperson-options"
-                        | "--stt-hint"
-                        | "--capture"
+                    "--stt-url" | "--tts-url" | "--stt-hint" | "--capture"
                 )
         })
-        .flatten()
-        .cloned()
-        .collect()
-}
-
-fn spokesperson_flag(pair: &[String]) -> bool {
-    matches!(
-        pair[0].as_str(),
-        "--spokesperson-voice" | "--spokesperson-rate"
-    )
-}
-
-/// Leaves out the Spokesperson's own voice, which only calls whose replies have theirs take.
-pub(crate) fn without_spokesperson(arguments: &[String]) -> Vec<String> {
-    arguments
-        .chunks_exact(2)
-        .filter(|pair| !spokesperson_flag(pair))
-        .flatten()
-        .cloned()
-        .collect()
-}
-
-pub(crate) fn only_spokesperson(arguments: &[String]) -> Vec<String> {
-    arguments
-        .chunks_exact(2)
-        .filter(|pair| spokesperson_flag(pair))
         .flatten()
         .cloned()
         .collect()
@@ -195,44 +177,6 @@ pub(crate) fn without_tts(arguments: &[String]) -> Vec<String> {
         .flatten()
         .cloned()
         .collect()
-}
-
-/// The same call's session options with the Spokesperson on or off. Options only one mode takes are left out of the
-/// other; with the Spokesperson on, `direct` lets agents also speak in their own voice.
-/// The Spokesperson keeps as close to the agents' speed as it can.
-pub(crate) fn with_spokesperson(arguments: &[String], on: bool, direct: bool) -> Vec<String> {
-    let mut result: Vec<_> = arguments
-        .iter()
-        .filter(|argument| *argument != crate::DIRECT_AGENT_SPEECH)
-        .cloned()
-        .collect::<Vec<_>>()
-        .chunks_exact(2)
-        .filter(|pair| match pair[0].as_str() {
-            "--mode" => false,
-            "--realtime-url" => on,
-            "--stt-url" | "--capture" => !on,
-            "--tts-url" => !on || direct,
-            // The Spokesperson's speed follows the agents'.
-            "--spokesperson-rate" => false,
-            _ => on || !spokesperson_flag(pair),
-        })
-        .flatten()
-        .cloned()
-        .collect();
-    result.extend([
-        "--mode".into(),
-        if on {
-            "expert-spokesperson"
-        } else {
-            "conventional"
-        }
-        .into(),
-    ]);
-    if on && direct {
-        // Last, since it takes no value.
-        result.push(crate::DIRECT_AGENT_SPEECH.into());
-    }
-    result
 }
 
 #[cfg(test)]
@@ -342,8 +286,6 @@ mod tests {
     #[test]
     fn removing_tts_preferences_preserves_other_call_preferences() {
         let arguments = [
-            "--mode",
-            "chained",
             "--stt-backend",
             "macos",
             "--tts-backend",
@@ -357,70 +299,84 @@ mod tests {
         ]
         .map(str::to_string);
 
-        assert_eq!(
-            without_tts(&arguments),
-            ["--mode", "chained", "--stt-backend", "macos"]
-        );
+        assert_eq!(without_tts(&arguments), ["--stt-backend", "macos"]);
     }
 
     #[test]
-    fn turning_the_spokesperson_off_and_on_keeps_the_options_both_modes_take() {
-        let strings = |values: &[&str]| {
-            values
-                .iter()
-                .map(|value| value.to_string())
-                .collect::<Vec<_>>()
-        };
-        let realtime = strings(&[
-            "--mode",
-            "expert-spokesperson",
-            "--voice",
-            "Aaron",
-            "--rate",
-            "2",
-            "--spokesperson-voice",
-            "cedar",
-            "--spokesperson-rate",
-            "1",
-            "--realtime-url",
-            "wss://realtime.test/",
-            "--allow-direct-agent-speech",
-        ]);
-        let conventional = with_spokesperson(&realtime, false, true);
+    fn removed_mode_and_spokesperson_options_fall_back_to_defaults_and_are_overwritten() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "arguments": [
+                    "--mode", "expert-spokesperson",
+                    "--voice", "Aaron",
+                    "--spokesperson-voice", "cedar",
+                    "--spokesperson-rate", "1"
+                ],
+                "tts": null,
+                "input_policy": "suppress_input",
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let restored = load(&path).unwrap();
+        assert_eq!(restored.arguments, ["--voice", "Aaron"]);
         assert_eq!(
-            conventional,
-            strings(&["--voice", "Aaron", "--rate", "2", "--mode", "conventional"])
+            restored.input_policy,
+            Some(InputDuringTtsPolicy::SuppressInput)
         );
+        update(&path, |latest| {
+            latest.status_sounds = Some(StatusSoundMode::Off)
+        })
+        .unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        for removed in ["--mode", "expert-spokesperson", "spokesperson"] {
+            assert!(
+                !written.contains(removed),
+                "{removed} survived in {written}"
+            );
+        }
+        assert_eq!(load(&path).unwrap().arguments, ["--voice", "Aaron"]);
+    }
+
+    fn saved_with_tts(model: &str, rate: f32) -> serde_json::Value {
+        serde_json::json!({
+            "arguments": ["--mode", "expert-spokesperson", "--tts-backend", "openai", "--rate", rate.to_string()],
+            "tts": {"backend": "openai", "model": model, "voice": "cedar", "rate": rate},
+        })
+    }
+
+    #[test]
+    fn a_realtime_model_saved_as_speech_settings_falls_back_and_is_overwritten() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        std::fs::write(&path, saved_with_tts("gpt-realtime-2.1", 0.5).to_string()).unwrap();
+        let restored = load(&path).unwrap();
+        assert_eq!(restored.tts, None);
+        assert_eq!(restored.arguments, ["--tts-backend", "openai"]);
+        update(&path, |latest| {
+            latest.status_sounds = Some(StatusSoundMode::Off)
+        })
+        .unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("realtime"), "survived in {written}");
+        assert_eq!(load(&path).unwrap().tts, None);
+    }
+
+    #[test]
+    fn speech_settings_for_a_speech_model_survive_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        std::fs::write(&path, saved_with_tts("gpt-4o-mini-tts", 1.2).to_string()).unwrap();
         assert_eq!(
-            with_spokesperson(
-                &[
-                    conventional.clone(),
-                    strings(&["--stt-url", "wss://stt.test/"])
-                ]
-                .concat(),
-                true,
-                true
-            ),
-            strings(&[
-                "--voice",
-                "Aaron",
-                "--rate",
-                "2",
-                "--mode",
-                "expert-spokesperson",
-                "--allow-direct-agent-speech"
-            ])
-        );
-        assert_eq!(
-            with_spokesperson(&conventional, true, false),
-            strings(&[
-                "--voice",
-                "Aaron",
-                "--rate",
-                "2",
-                "--mode",
-                "expert-spokesperson"
-            ])
+            load(&path).unwrap().tts,
+            Some(TtsSettings::OpenAi {
+                model: "gpt-4o-mini-tts".into(),
+                voice: "cedar".into(),
+                rate: 1.2,
+            })
         );
     }
 }

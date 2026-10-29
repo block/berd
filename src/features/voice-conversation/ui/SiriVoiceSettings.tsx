@@ -42,7 +42,7 @@ function groupVoicesByLocale(
   return Array.from(groups, ([locale, groupedVoices]) => ({
     locale,
     voices: groupedVoices.sort((left, right) =>
-      collator.compare(left.name, right.name),
+      collator.compare(left.displayName, right.displayName),
     ),
   })).sort((left, right) =>
     collator.compare(
@@ -81,7 +81,11 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
   const selectedKey = setup.status?.selectedVoice
     ? voiceKey(setup.status.selectedVoice)
     : null;
-  const selectedVoice = setup.status?.selectedVoice?.name ?? null;
+  const selectedVoice =
+    setup.status?.voices.find((voice) => voiceKey(voice) === selectedKey)
+      ?.displayName ??
+    setup.status?.selectedVoice?.name ??
+    null;
 
   if (setup.status && !setup.status.supported) {
     return (
@@ -142,7 +146,7 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
                       const voiceDetails = (
                         <span className="min-w-0 text-left">
                           <span className="block truncate text-sm font-medium">
-                            {voice.name}
+                            {voice.displayName}
                           </span>
                           <span className="block text-xs text-muted-foreground">
                             {voice.installed
@@ -169,7 +173,7 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
                                 selected
                                   ? "voice.selectedVoice"
                                   : "voice.useVoice",
-                                { voice: voice.name },
+                                { voice: voice.displayName },
                               )}
                               aria-pressed={selected}
                               onClick={() => void setup.selectVoice(voice)}
@@ -193,17 +197,17 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
                               feedbackState={downloading ? "loading" : "idle"}
                               loadingVisual="spinner"
                               loadingLabel={t("voice.downloadingVoice", {
-                                voice: voice.name,
+                                voice: voice.displayName,
                               })}
                               disabled={setup.downloadingVoiceKey !== null}
                               aria-label={t(
                                 downloading
                                   ? "voice.downloadingVoice"
                                   : "voice.downloadVoice",
-                                { voice: voice.name },
+                                { voice: voice.displayName },
                               )}
                               tooltip={t("voice.downloadVoice", {
-                                voice: voice.name,
+                                voice: voice.displayName,
                               })}
                               onClick={() => void setup.downloadVoice(voice)}
                             >
@@ -217,17 +221,17 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
                             feedbackState={previewing ? "loading" : "idle"}
                             loadingVisual="spinner"
                             loadingLabel={t("voice.playingVoice", {
-                              voice: voice.name,
+                              voice: voice.displayName,
                             })}
                             disabled={setup.previewingVoiceKey !== null}
                             aria-label={t(
                               previewing
                                 ? "voice.playingVoice"
                                 : "voice.previewVoice",
-                              { voice: voice.name },
+                              { voice: voice.displayName },
                             )}
                             tooltip={t("voice.previewVoice", {
-                              voice: voice.name,
+                              voice: voice.displayName,
                             })}
                             onClick={() => void setup.previewVoice(voice)}
                           >

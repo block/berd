@@ -38,7 +38,6 @@ const STATUS_SOUNDS: [(StatusSoundMode, &str); 3] = [
         "While Working and Waiting",
     ),
 ];
-const SPOKESPERSON: &str = "Enable Experimental Realtime Spokesperson";
 const REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Runs the call on a worker thread while the main thread owns the menu bar.
@@ -79,11 +78,9 @@ pub(crate) enum MenuAction {
         language: Option<String>,
     },
     Rate(f32),
-    SpokespersonVoice(String),
     Muted(bool),
     InputDuringTts(InputDuringTtsPolicy),
     StatusSounds(StatusSoundMode),
-    SpokespersonMode(bool),
     DownloadVoice(VoiceChoice),
     Stop,
 }
@@ -128,11 +125,7 @@ struct MenuState {
     status: Option<Value>,
     voices: Vec<VoiceChoice>,
     action_error: Option<String>,
-    // The mode a Spokesperson switch is restarting the call in, shown until the switch finishes.
-    switching: Option<bool>,
     catalog_error: Option<String>,
-    // Without an OpenAI key the Spokesperson can't be turned on.
-    no_openai_key: bool,
     downloading: Option<VoiceChoice>,
     download_error: Option<String>,
     // A download finished, so the coordinator reloads which voices are installed.
@@ -151,8 +144,7 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
     let muted = status["muted"].as_bool().unwrap_or(false);
     let input_policy = input_policy(status);
     let tts = &status["session"]["tts"];
-    let spokesperson = &status["session"]["spokesperson"];
-    let mut nodes = vec![item(format!("Berd Call · {}", mode_name(status)), None)];
+    let mut nodes = vec![item("Berd Call", None)];
     for error in [
         &state.action_error,
         &state.catalog_error,
@@ -166,43 +158,15 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
     if let Some(voice) = &state.downloading {
         nodes.push(item(format!("Downloading {}…", voice.name), None));
     }
-    let expert = state
-        .switching
-        .unwrap_or(mode_name(status) == "Expert-Spokesperson");
-    // The experimental Spokesperson goes last, with its own voice under it.
-    let mut experimental = vec![];
-    if expert || !state.no_openai_key {
-        experimental.extend([
-            SEPARATOR,
-            MenuNode {
-                checked: expert,
-                ..item(SPOKESPERSON, Some(MenuAction::SpokespersonMode(!expert)))
-            },
-        ]);
-    }
-    if expert && !spokesperson.is_null() {
-        experimental.push(voice_menu(
-            "Spokesperson ",
-            spokesperson,
-            &available_voices("openai").unwrap_or_default(),
-            None,
-            |entry| MenuAction::SpokespersonVoice(entry.voice.clone()),
-        ));
-    }
-    let agents = if spokesperson.is_null() { "" } else { "Agent " };
     nodes.extend([
         SEPARATOR,
-        voice_menu(
-            agents,
-            tts,
-            &state.voices,
-            state.downloading.as_ref(),
-            |entry| MenuAction::Voice {
+        voice_menu(tts, &state.voices, state.downloading.as_ref(), |entry| {
+            MenuAction::Voice {
                 voice: entry.voice.clone(),
                 language: entry.language.clone(),
-            },
-        ),
-        rate_menu(tts, spokesperson, rate_range(status)),
+            }
+        }),
+        rate_menu(tts, rate_range(status)),
         MenuNode {
             title: "Mute Input During TTS".into(),
             children: [
@@ -226,15 +190,12 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
             ..item("Mute Microphone", Some(MenuAction::Muted(!muted)))
         },
     ]);
-    nodes.extend(experimental);
     nodes.extend([SEPARATOR, end_call]);
     nodes
 }
 
-/// A voice's choices, titled with whose voice it is, then the voices in its
-/// language that can be downloaded, one at a time.
+/// A voice's choices, then the voices in its language that can be downloaded, one at a time.
 fn voice_menu(
-    whose: &str,
     tts: &Value,
     voices: &[VoiceChoice],
     downloading: Option<&VoiceChoice>,
@@ -294,18 +255,12 @@ fn voice_menu(
     }
     MenuNode {
         children,
-        ..item(format!("{whose}Voice: {name}"), None)
+        ..item(format!("Voice: {name}"), None)
     }
 }
 
-/// One speed for every voice, noting the Spokesperson's when it can't go as fast.
-fn rate_menu(tts: &Value, spokesperson: &Value, range: std::ops::RangeInclusive<f32>) -> MenuNode {
-    let speed = |tts: &Value| tts["rate"].as_f64().unwrap_or(1.0) as f32;
-    let rate = speed(tts);
-    let mut title = format!("Speech Rate: {}", rate_title(rate));
-    if !spokesperson.is_null() && (speed(spokesperson) - rate).abs() >= 0.01 {
-        title += &format!(" (Spokesperson {})", rate_title(speed(spokesperson)));
-    }
+fn rate_menu(tts: &Value, range: std::ops::RangeInclusive<f32>) -> MenuNode {
+    let rate = tts["rate"].as_f64().unwrap_or(1.0) as f32;
     MenuNode {
         children: RATES
             .iter()
@@ -315,7 +270,7 @@ fn rate_menu(tts: &Value, spokesperson: &Value, range: std::ops::RangeInclusive<
                 ..item(rate_title(option), Some(MenuAction::Rate(option)))
             })
             .collect(),
-        ..item(title, None)
+        ..item(format!("Speech Rate: {}", rate_title(rate)), None)
     }
 }
 
@@ -352,27 +307,19 @@ pub(crate) fn control_request(action: &MenuAction) -> ControlRequest {
             language: language.clone(),
         },
         MenuAction::Rate(rate) => ControlRequest::Rate { rate: *rate },
-        MenuAction::SpokespersonVoice(voice) => ControlRequest::Spokesperson {
-            voice: Some(voice.clone()),
-            rate: None,
-        },
         MenuAction::Muted(muted) => ControlRequest::Muted { muted: *muted },
         MenuAction::InputDuringTts(policy) => ControlRequest::InputDuringTts { policy: *policy },
         MenuAction::StatusSounds(mode) => ControlRequest::StatusSounds {
             mode: Some(*mode),
             status: None,
         },
-        MenuAction::SpokespersonMode(on) => ControlRequest::SpokespersonMode { on: *on },
         MenuAction::DownloadVoice(_) => unreachable!("the menu downloads voices itself"),
         MenuAction::Stop => ControlRequest::Stop,
     }
 }
 
-/// The rates `berd-call` accepts for the call's TTS backend and mode.
+/// The rates `berd-call` accepts for the call's TTS backend.
 fn rate_range(status: &Value) -> std::ops::RangeInclusive<f32> {
-    if mode_name(status) == "Expert-Spokesperson" && status["session"]["spokesperson"].is_null() {
-        return crate::SPOKESPERSON_RATES;
-    }
     match status["session"]["tts"]["backend"].as_str() {
         Some("siri") => 0.5..=2.0,
         _ => 0.75..=2.0,
@@ -381,20 +328,6 @@ fn rate_range(status: &Value) -> std::ops::RangeInclusive<f32> {
 
 fn input_policy(status: &Value) -> Option<InputDuringTtsPolicy> {
     serde_json::from_value(status["session"]["input_during_tts"]["policy"].clone()).ok()
-}
-
-fn mode_name(status: &Value) -> &'static str {
-    let arguments = status["sessionArguments"].as_array();
-    let expert = arguments.is_some_and(|arguments| {
-        arguments
-            .windows(2)
-            .any(|pair| pair[0] == "--mode" && pair[1] == "expert-spokesperson")
-    });
-    if expert {
-        "Expert-Spokesperson"
-    } else {
-        "Conventional"
-    }
 }
 
 fn rate_title(rate: f32) -> String {
@@ -503,10 +436,7 @@ define_class!(
 
 impl MenuTarget {
     fn new(mtm: MainThreadMarker, port: u16) -> Retained<Self> {
-        let state = Arc::new(Mutex::new(MenuState {
-            no_openai_key: berd_call::openai_spokesperson::api_key().is_none(),
-            ..MenuState::default()
-        }));
+        let state = Arc::new(Mutex::new(MenuState::default()));
         let commands = spawn_coordinator(port, state.clone());
         let this = mtm.alloc::<Self>().set_ivars(MenuTargetIvars {
             commands,
@@ -633,11 +563,6 @@ fn spawn_coordinator(port: u16, state: Arc<Mutex<MenuState>>) -> mpsc::SyncSende
                 if latest_by_domain.get(&domain) != Some(&generation) {
                     continue;
                 }
-                if domain == ActionDomain::Mode {
-                    if let Ok(mut state) = state.lock() {
-                        state.switching = None;
-                    }
-                }
                 if let Some(error) = menu_action_error(result) {
                     errors.insert(domain, (generation, error));
                 } else {
@@ -675,10 +600,7 @@ fn spawn_coordinator(port: u16, state: Arc<Mutex<MenuState>>) -> mpsc::SyncSende
                     latest
                 });
             if let Ok(mut state) = state.lock() {
-                // The call doesn't answer while it restarts in the other mode.
-                if latest.is_some() || state.switching.is_none() {
-                    state.status = latest;
-                }
+                state.status = latest;
                 state.voices = catalog
                     .as_ref()
                     .map(|(_, voices)| voices.clone())
@@ -732,7 +654,6 @@ enum ActionDomain {
     Mute,
     InputDuringTts,
     StatusSounds,
-    Mode,
     Stop,
 }
 
@@ -740,12 +661,10 @@ fn action_domain(request: &ControlRequest) -> ActionDomain {
     match request {
         ControlRequest::TtsSettings { .. }
         | ControlRequest::Rate { .. }
-        | ControlRequest::Voice { .. }
-        | ControlRequest::Spokesperson { .. } => ActionDomain::Tts,
+        | ControlRequest::Voice { .. } => ActionDomain::Tts,
         ControlRequest::Muted { .. } => ActionDomain::Mute,
         ControlRequest::InputDuringTts { .. } => ActionDomain::InputDuringTts,
         ControlRequest::StatusSounds { .. } => ActionDomain::StatusSounds,
-        ControlRequest::SpokespersonMode { .. } => ActionDomain::Mode,
         ControlRequest::Stop => ActionDomain::Stop,
         _ => unreachable!("menu only sends supported actions"),
     }
@@ -757,7 +676,6 @@ fn revisioned_tts_action(request: &ControlRequest) -> bool {
         ControlRequest::TtsSettings { .. }
             | ControlRequest::Rate { .. }
             | ControlRequest::Voice { .. }
-            | ControlRequest::Spokesperson { .. }
     )
 }
 
@@ -769,11 +687,6 @@ fn begin_menu_action(
     results: &mpsc::Sender<(u64, ActionDomain, Result<Value, String>)>,
     state: &Mutex<MenuState>,
 ) {
-    if let ControlRequest::SpokespersonMode { on } = request {
-        if let Ok(mut state) = state.lock() {
-            state.switching = Some(on);
-        }
-    }
     match host_control::begin_request(port, request) {
         Ok(pending) => {
             let results = results.clone();
@@ -997,18 +910,14 @@ mod tests {
         assert_eq!(error, None);
     }
 
-    fn status(muted: bool, policy: &str, mode: Option<&str>) -> Value {
-        let mut arguments = vec!["--voice", "Aaron", "--language", "en-US"];
-        if let Some(mode) = mode {
-            arguments.extend(["--mode", mode]);
-        }
+    fn status(muted: bool, policy: &str) -> Value {
         json!({
             "muted": muted,
             "session": {
                 "input_during_tts": {"policy": policy, "revision": 1},
                 "tts": {"backend": "siri", "voice": "Aaron", "language": "en-US", "rate": 1.25, "revision": 3},
             },
-            "sessionArguments": arguments,
+            "sessionArguments": ["--voice", "Aaron", "--language", "en-US"],
             "statusSounds": "working-and-waiting",
         })
     }
@@ -1023,7 +932,7 @@ mod tests {
     #[test]
     fn menu_keeps_auto_selected() {
         let nodes = menu_model(&MenuState {
-            status: Some(status(false, "auto", None)),
+            status: Some(status(false, "auto")),
             ..MenuState::default()
         });
         let choices = &find(&nodes, "Mute Input During TTS").children;
@@ -1045,12 +954,12 @@ mod tests {
 
     #[test]
     fn menu_reflects_live_call_state() {
-        let status = status(true, "suppress_input", Some("expert-spokesperson"));
+        let status = status(true, "suppress_input");
         let nodes = menu_model(&MenuState {
             status: Some(status.clone()),
             ..MenuState::default()
         });
-        find(&nodes, "Berd Call · Expert-Spokesperson");
+        find(&nodes, "Berd Call");
         let checked: Vec<_> = find(&nodes, "Speech Rate: 1.25×")
             .children
             .iter()
@@ -1063,8 +972,11 @@ mod tests {
             .iter()
             .map(|node| node.title.as_str())
             .collect();
-        assert_eq!(offered, ["0.5×", "0.75×", "1×", "1.25×", "1.5×"]);
-        let mut openai = self::status(false, "allow_barge_in", None);
+        assert_eq!(
+            offered,
+            ["0.5×", "0.75×", "1×", "1.25×", "1.5×", "1.75×", "2×"]
+        );
+        let mut openai = self::status(false, "allow_barge_in");
         openai["session"]["tts"]["backend"] = json!("openai");
         assert_eq!(rate_range(&openai), 0.75..=2.0);
         assert!(matches!(
@@ -1085,40 +997,6 @@ mod tests {
                 ..
             }
         ));
-        assert!(matches!(
-            find(&nodes, SPOKESPERSON),
-            MenuNode {
-                checked: true,
-                action: Some(MenuAction::SpokespersonMode(false)),
-                ..
-            }
-        ));
-        assert!(matches!(
-            find(
-                &menu_model(&MenuState {
-                    status: Some(self::status(false, "allow_barge_in", None)),
-                    ..MenuState::default()
-                }),
-                SPOKESPERSON
-            ),
-            MenuNode {
-                checked: false,
-                action: Some(MenuAction::SpokespersonMode(true)),
-                ..
-            }
-        ));
-        // A switch shows its mode at once, before the call has restarted in it.
-        assert!(
-            find(
-                &menu_model(&MenuState {
-                    status: Some(self::status(false, "allow_barge_in", None)),
-                    switching: Some(true),
-                    ..MenuState::default()
-                }),
-                SPOKESPERSON
-            )
-            .checked
-        );
         let sounds = find(&nodes, "Status Sounds: While Working and Waiting");
         assert_eq!(
             sounds
@@ -1142,57 +1020,11 @@ mod tests {
     }
 
     #[test]
-    fn the_spokesperson_is_offered_only_with_a_key_to_start_it() {
-        let titles = |mode| {
-            menu_model(&MenuState {
-                status: Some(status(false, "allow_barge_in", mode)),
-                no_openai_key: true,
-                ..MenuState::default()
-            })
-            .into_iter()
-            .map(|node| node.title)
-            .collect::<Vec<_>>()
-        };
-        let conventional = titles(None);
-        assert!(!conventional.contains(&SPOKESPERSON.to_string()));
-        assert_eq!(conventional[1], "");
-        assert_ne!(conventional[2], "");
-        // A call already in the Spokesperson's hands can still leave them.
-        assert!(titles(Some("expert-spokesperson")).contains(&SPOKESPERSON.to_string()));
-    }
-
-    #[test]
-    fn replies_with_their_own_voice_put_the_spokespersons_at_the_bottom() {
-        let mut status = status(false, "allow_barge_in", Some("expert-spokesperson"));
-        status["session"]["spokesperson"] = json!({"backend": "openai", "model": "gpt-realtime", "voice": "marin", "rate": 1.0, "revision": 1});
+    fn the_menu_groups_voice_settings_above_the_microphone_and_end_call() {
         let nodes = menu_model(&MenuState {
-            status: Some(status),
+            status: Some(status(false, "allow_barge_in")),
             ..MenuState::default()
         });
-        let titles = |wanted: &str| -> Vec<String> {
-            find(&nodes, wanted)
-                .children
-                .iter()
-                .map(|node| node.title.clone())
-                .collect()
-        };
-        // One speed for everyone, noting the Spokesperson's when it differs.
-        let rates = titles("Speech Rate: 1.25× (Spokesperson 1×)");
-        assert_eq!(
-            rates,
-            ["0.5×", "0.75×", "1×", "1.25×", "1.5×", "1.75×", "2×"]
-        );
-        let cedar = find(&nodes, "Spokesperson Voice: marin")
-            .children
-            .iter()
-            .find(|node| node.title == "cedar")
-            .unwrap();
-        assert_eq!(
-            serde_json::to_value(control_request(cedar.action.as_ref().unwrap())).unwrap(),
-            json!({"command": "spokesperson", "voice": "cedar", "rate": null})
-        );
-        find(&nodes, "Agent Voice: Aaron");
-        // The agents' voice comes first, and the Spokesperson's sits with it at the bottom.
         let sections: Vec<_> = nodes[1..]
             .split(|node| node.title.is_empty())
             .map(|section| {
@@ -1206,13 +1038,12 @@ mod tests {
             sections[1..],
             [
                 vec![
-                    "Agent Voice: Aaron",
-                    "Speech Rate: 1.25× (Spokesperson 1×)",
+                    "Voice: Aaron",
+                    "Speech Rate: 1.25×",
                     "Mute Input During TTS",
                     "Status Sounds: While Working and Waiting"
                 ],
                 vec!["Mute Microphone"],
-                vec![SPOKESPERSON, "Spokesperson Voice: marin"],
                 vec!["End Call"],
             ]
         );
@@ -1243,7 +1074,7 @@ mod tests {
 
     #[test]
     fn voice_menu_marks_the_selected_locale_and_uses_live_voice_requests() {
-        let mut status = status(false, "allow_barge_in", None);
+        let mut status = status(false, "allow_barge_in");
         status["session"]["tts"]["voice"] = json!("Aaron");
         status["session"]["tts"]["language"] = json!("en-US");
         let voices = ["en-US", "en-GB"]
@@ -1272,7 +1103,7 @@ mod tests {
 
     #[test]
     fn voice_menu_shows_display_names_for_code_named_voices() {
-        let mut status = status(false, "allow_barge_in", None);
+        let mut status = status(false, "allow_barge_in");
         status["session"]["tts"]["voice"] = json!("en-US-F");
         status["session"]["tts"]["language"] = json!("en-US");
         let nodes = menu_model(&MenuState {
@@ -1301,7 +1132,7 @@ mod tests {
 
     fn downloadable_state() -> MenuState {
         MenuState {
-            status: Some(status(false, "allow_barge_in", None)),
+            status: Some(status(false, "allow_barge_in")),
             voices: vec![
                 siri_voice("Aaron", "en-US", None),
                 siri_voice("Damon", "en-US", Some(325_238_784)),

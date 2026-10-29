@@ -43,12 +43,7 @@ describe("getVisibleTranscriptMessages voice no-op", () => {
   });
 
   it("hides the backend empty-response fallback after a voice turn", () => {
-    const voice = message(
-      "voice",
-      "user",
-      "Emissary said: Hello",
-      "voice_conversation",
-    );
+    const voice = message("voice", "user", "Hello", "voice_conversation");
     const fallback = message(
       "fallback",
       "assistant",
@@ -59,12 +54,7 @@ describe("getVisibleTranscriptMessages voice no-op", () => {
   });
 
   it("hides an empty-response system notification after a voice turn", () => {
-    const voice = message(
-      "voice",
-      "user",
-      "Emissary said: Hello",
-      "voice_conversation",
-    );
+    const voice = message("voice", "user", "Hello", "voice_conversation");
     const fallback: Message = {
       id: "fallback",
       role: "system",
@@ -81,12 +71,8 @@ describe("getVisibleTranscriptMessages voice no-op", () => {
     expect(getVisibleTranscriptMessages([voice, fallback])).toEqual([voice]);
   });
 
-  it("hides replayed and localized empty-response fallbacks after a voice transcript", () => {
-    const voice = message(
-      "voice",
-      "user",
-      "[Voice transcript] Emissary said: Bonjour",
-    );
+  it("hides localized empty-response fallbacks after a voice turn", () => {
+    const voice = message("voice", "user", "Bonjour", "voice_conversation");
     const fallback = message(
       "fallback",
       "assistant",
@@ -125,7 +111,7 @@ describe("getVisibleTranscriptMessages voice no-op", () => {
     ]);
   });
 
-  it("never renders a transient empty-response fallback inside spoken Emissary text", () => {
+  it("never renders a transient empty-response fallback inside spoken assistant text", () => {
     const voice = message(
       "voice",
       "user",
@@ -143,10 +129,7 @@ describe("getVisibleTranscriptMessages voice no-op", () => {
           speech: { status: "spoken" },
         },
       ],
-      metadata: {
-        origin: "voice_conversation",
-        voiceConversationDebugEvent: "emissarySpeech",
-      },
+      metadata: { origin: "voice_conversation" },
     };
 
     expect(getVisibleTranscriptMessages([voice, spoken])).toEqual([

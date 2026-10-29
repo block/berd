@@ -7,7 +7,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
-import { RadioGroup, RadioGroupCard } from "@/shared/ui/radio-group";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import {
   Select,
@@ -51,11 +50,6 @@ import {
   getDefaultVoiceOutputBackend,
   useVoiceOutputPreference,
 } from "../lib/voiceOutputPreference";
-import type { VoiceConversationMode } from "../lib/voiceConversationModePreference";
-import {
-  getDefaultVoiceConversationMode,
-  useVoiceConversationModePreference,
-} from "../lib/voiceConversationModePreference";
 import { PocketVoiceSetupContent } from "./PocketVoiceSetupContent";
 import { MacSpeechSettings } from "./MacSpeechSettings";
 import { SiriVoiceSettings } from "./SiriVoiceSettings";
@@ -63,11 +57,6 @@ import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
 import { SimpleVoicePickerDialog } from "./SimpleVoicePickerDialog";
 import { useOpenAiVoiceSetup } from "../hooks/useOpenAiVoiceSetup";
 import { OpenAiEndpointField } from "./OpenAiEndpointField";
-import { RealtimeVoiceSettings } from "./RealtimeVoiceSettings";
-import {
-  getDefaultRealtimeVoicePreference,
-  setRealtimeVoicePreference,
-} from "../lib/realtimeVoicePreference";
 import {
   DEFAULT_OPENAI_VOICE,
   openAiVoiceOptions,
@@ -173,7 +162,6 @@ export function VoiceSettings() {
     }
   }, [openAiStatus]);
   const interruption = useVoiceInterruptionPreference();
-  const mode = useVoiceConversationModePreference();
   const statusSounds = useStatusSoundPreference();
   const siriSetup = useSiriVoiceSetup(output.backend === "siri");
   const siriSupported = getPlatform() === "mac";
@@ -242,11 +230,9 @@ export function VoiceSettings() {
       setEndpointResetRevision((revision) => revision + 1);
       await setup.refreshSettings();
       await siriSetup.refreshSettings();
-      setRealtimeVoicePreference(getDefaultRealtimeVoicePreference());
       input.setBackend(getDefaultVoiceInputBackend(macSpeechAvailable));
       output.setBackend(getDefaultVoiceOutputBackend());
       interruption.setMode(getDefaultVoiceInterruptionPreference().mode);
-      mode.setMode(getDefaultVoiceConversationMode());
       statusSounds.update(getDefaultStatusSoundPreference());
       setResetDialogOpen(false);
     } finally {
@@ -275,347 +261,301 @@ export function VoiceSettings() {
         </Button>
       }
     >
-      <section className="space-y-3 overflow-hidden">
-        <div>
-          <h2 className="text-sm font-medium">{t("voice.conversationMode")}</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {t("voice.conversationModeDescription")}
-          </p>
-        </div>
-        <RadioGroup
-          value={mode.mode}
-          onValueChange={(value) =>
-            mode.setMode(value as VoiceConversationMode)
-          }
-          className="grid gap-2 sm:grid-cols-2"
-          aria-label={t("voice.conversationMode")}
-        >
-          <RadioGroupCard
-            id="voice-mode-chained"
-            value="chained"
-            label={t("voice.modeChained")}
-            description={t("voice.modeChainedDescription")}
-          />
-          <RadioGroupCard
-            id="voice-mode-openai-realtime"
-            value="openai-realtime"
+      <>
+        {microphonePermission.status === "denied" ? (
+          <Alert variant="destructive">
+            <CircleAlert />
+            <AlertTitle>{t("voice.microphonePermissionTitle")}</AlertTitle>
+            <AlertDescription>
+              <p>{t("voice.microphonePermissionDenied")}</p>
+              <Button
+                type="button"
+                variant="alert"
+                size="sm"
+                onClick={() => void microphonePermission.openSettings()}
+              >
+                {t("voice.openMicrophoneSettings")}
+              </Button>
+              {microphonePermission.openSettingsError ? (
+                <p>{t("voice.openMicrophoneSettingsError")}</p>
+              ) : null}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {readinessKey ? (
+          <Alert variant="destructive">
+            <CircleAlert />
+            <AlertTitle>{t("voice.notReadyTitle")}</AlertTitle>
+            <AlertDescription>{t(readinessKey)}</AlertDescription>
+          </Alert>
+        ) : null}
+        <section className="space-y-2 overflow-hidden">
+          <SettingsRow
+            className="py-2"
             label={
-              <span className="flex items-center gap-2">
-                {t("voice.modeOpenAiRealtime")}
-                <Badge variant="outline">{t("voice.cloud")}</Badge>
-              </span>
+              <h2 className="text-sm font-medium">{t("voice.speechInput")}</h2>
             }
-            description={t("voice.modeOpenAiRealtimeDescription")}
-          />
-        </RadioGroup>
-      </section>
-      {mode.mode === "chained" ? (
-        <>
-          {microphonePermission.status === "denied" ? (
-            <Alert variant="destructive">
-              <CircleAlert />
-              <AlertTitle>{t("voice.microphonePermissionTitle")}</AlertTitle>
-              <AlertDescription>
-                <p>{t("voice.microphonePermissionDenied")}</p>
-                <Button
-                  type="button"
-                  variant="alert"
-                  size="sm"
-                  onClick={() => void microphonePermission.openSettings()}
+            description={t("voice.inputBackendDescription")}
+            labelId={inputHeadingId}
+            descriptionId={inputDescriptionId}
+            layout="responsive"
+            action={({ labelId, descriptionId }) => (
+              <Select
+                value={input.backend ?? undefined}
+                disabled={input.backend === null}
+                onValueChange={(value) =>
+                  input.setBackend(value as VoiceInputBackend)
+                }
+              >
+                <SelectTrigger
+                  className="w-full sm:w-auto"
+                  aria-labelledby={labelId}
+                  aria-describedby={descriptionId}
                 >
-                  {t("voice.openMicrophoneSettings")}
-                </Button>
-                {microphonePermission.openSettingsError ? (
-                  <p>{t("voice.openMicrophoneSettingsError")}</p>
-                ) : null}
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          {readinessKey ? (
-            <Alert variant="destructive">
-              <CircleAlert />
-              <AlertTitle>{t("voice.notReadyTitle")}</AlertTitle>
-              <AlertDescription>{t(readinessKey)}</AlertDescription>
-            </Alert>
-          ) : null}
-          <section className="space-y-2 overflow-hidden">
-            <SettingsRow
-              className="py-2"
-              label={
-                <h2 className="text-sm font-medium">
-                  {t("voice.speechInput")}
-                </h2>
-              }
-              description={t("voice.inputBackendDescription")}
-              labelId={inputHeadingId}
-              descriptionId={inputDescriptionId}
-              layout="responsive"
-              action={({ labelId, descriptionId }) => (
-                <Select
-                  value={input.backend ?? undefined}
-                  disabled={input.backend === null}
-                  onValueChange={(value) =>
-                    input.setBackend(value as VoiceInputBackend)
-                  }
-                >
-                  <SelectTrigger
-                    className="w-full sm:w-auto"
-                    aria-labelledby={labelId}
-                    aria-describedby={descriptionId}
-                  >
-                    <SelectValue placeholder={t("voice.macSpeechLoading")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="parakeet">
+                  <SelectValue placeholder={t("voice.macSpeechLoading")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="parakeet">
+                    <BackendOption
+                      label={t("voice.backendParakeet")}
+                      location={t("voice.local")}
+                    />
+                  </SelectItem>
+                  <SelectItem value="openai">
+                    <BackendOption
+                      label={t("voice.backendOpenAiStt")}
+                      location={t("voice.cloud")}
+                    />
+                  </SelectItem>
+                  {macSpeechSetup.status?.supported &&
+                  macSpeechSetup.status.localeSupported ? (
+                    <SelectItem value="macos">
                       <BackendOption
-                        label={t("voice.backendParakeet")}
+                        label={t("voice.backendMacSpeech")}
                         location={t("voice.local")}
+                        recommended
                       />
                     </SelectItem>
+                  ) : null}
+                </SelectContent>
+              </Select>
+            )}
+            details={
+              input.backend === "openai" ? (
+                <div className="space-y-2">
+                  <OpenAiEndpointField
+                    key={`stt-${endpointResetRevision}`}
+                    kind="stt"
+                    label={t("voice.openAiSttEndpoint")}
+                    keyLabel={t("voice.openAiSttApiKey")}
+                    configured={openAiStatus?.sttConfigured ?? false}
+                    onSaveKey={setOpenAiSttApiKey}
+                    onClearKey={clearOpenAiSttApiKey}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {openAiError ??
+                      openAiStatus?.sttUnavailableReason ??
+                      (openAiStatus
+                        ? openAiStatus.sttConfigured
+                          ? t("voice.openAiSttConfigured", {
+                              model: openAiStatus.transcriptionModel,
+                            })
+                          : t("voice.openAiSttNotConfigured")
+                        : t("voice.openAiChecking"))}
+                  </p>
+                  {openAiStatus?.sttConfigurationSource === "environment" ? (
+                    <p className="text-xs text-muted-foreground">
+                      {t("voice.openAiEnvironmentOverride")}
+                    </p>
+                  ) : null}
+                </div>
+              ) : input.backend === "macos" ? (
+                <MacSpeechSettings setup={macSpeechSetup} />
+              ) : input.backend === "parakeet" ? (
+                <PocketVoiceSetupContent
+                  setup={setup}
+                  models={["parakeet"]}
+                  showPocketVoiceControls={false}
+                />
+              ) : null
+            }
+          />
+        </section>
+        <section className="space-y-2">
+          <SettingsRow
+            className="py-2"
+            label={
+              <h2 className="text-sm font-medium">{t("voice.speechOutput")}</h2>
+            }
+            description={t("voice.outputBackendDescription")}
+            labelId={outputHeadingId}
+            descriptionId={outputDescriptionId}
+            layout="responsive"
+            action={({ labelId, descriptionId }) => (
+              <Select
+                value={output.backend}
+                onValueChange={(value) =>
+                  output.setBackend(value as VoiceOutputBackend)
+                }
+              >
+                <SelectTrigger
+                  className="w-full sm:w-auto"
+                  aria-labelledby={labelId}
+                  aria-describedby={descriptionId}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pocket">
+                    <BackendOption
+                      label={t("voice.backendPocket")}
+                      location={t("voice.local")}
+                    />
+                  </SelectItem>
+                  {getPlatform() === "mac" ? (
                     <SelectItem value="openai">
                       <BackendOption
-                        label={t("voice.backendOpenAiStt")}
+                        label={t("voice.backendOpenAiTts")}
                         location={t("voice.cloud")}
                       />
                     </SelectItem>
-                    {macSpeechSetup.status?.supported &&
-                    macSpeechSetup.status.localeSupported ? (
-                      <SelectItem value="macos">
-                        <BackendOption
-                          label={t("voice.backendMacSpeech")}
-                          location={t("voice.local")}
-                          recommended
-                        />
-                      </SelectItem>
-                    ) : null}
-                  </SelectContent>
-                </Select>
-              )}
-              details={
-                input.backend === "openai" ? (
-                  <div className="space-y-2">
-                    <OpenAiEndpointField
-                      key={`stt-${endpointResetRevision}`}
-                      kind="stt"
-                      label={t("voice.openAiSttEndpoint")}
-                      keyLabel={t("voice.openAiSttApiKey")}
-                      configured={openAiStatus?.sttConfigured ?? false}
-                      onSaveKey={setOpenAiSttApiKey}
-                      onClearKey={clearOpenAiSttApiKey}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      {openAiError ??
-                        openAiStatus?.sttUnavailableReason ??
-                        (openAiStatus
-                          ? openAiStatus.sttConfigured
-                            ? t("voice.openAiSttConfigured", {
-                                model: openAiStatus.transcriptionModel,
-                              })
-                            : t("voice.openAiSttNotConfigured")
-                          : t("voice.openAiChecking"))}
-                    </p>
-                    {openAiStatus?.sttConfigurationSource === "environment" ? (
-                      <p className="text-xs text-muted-foreground">
-                        {t("voice.openAiEnvironmentOverride")}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : input.backend === "macos" ? (
-                  <MacSpeechSettings setup={macSpeechSetup} />
-                ) : input.backend === "parakeet" ? (
-                  <PocketVoiceSetupContent
-                    setup={setup}
-                    models={["parakeet"]}
-                    showPocketVoiceControls={false}
-                  />
-                ) : null
-              }
-            />
-          </section>
-          <section className="space-y-2">
-            <SettingsRow
-              className="py-2"
-              label={
-                <h2 className="text-sm font-medium">
-                  {t("voice.speechOutput")}
-                </h2>
-              }
-              description={t("voice.outputBackendDescription")}
-              labelId={outputHeadingId}
-              descriptionId={outputDescriptionId}
-              layout="responsive"
-              action={({ labelId, descriptionId }) => (
-                <Select
-                  value={output.backend}
-                  onValueChange={(value) =>
-                    output.setBackend(value as VoiceOutputBackend)
-                  }
-                >
-                  <SelectTrigger
-                    className="w-full sm:w-auto"
-                    aria-labelledby={labelId}
-                    aria-describedby={descriptionId}
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pocket">
+                  ) : null}
+                  {siriSupported ? (
+                    <SelectItem value="siri">
                       <BackendOption
-                        label={t("voice.backendPocket")}
+                        label={t("voice.backendSiri")}
                         location={t("voice.local")}
+                        recommended
                       />
                     </SelectItem>
-                    {getPlatform() === "mac" ? (
-                      <SelectItem value="openai">
-                        <BackendOption
-                          label={t("voice.backendOpenAiTts")}
-                          location={t("voice.cloud")}
-                        />
-                      </SelectItem>
-                    ) : null}
-                    {siriSupported ? (
-                      <SelectItem value="siri">
-                        <BackendOption
-                          label={t("voice.backendSiri")}
-                          location={t("voice.local")}
-                          recommended
-                        />
-                      </SelectItem>
-                    ) : null}
-                  </SelectContent>
-                </Select>
-              )}
-              details={
-                output.backend === "openai" ? (
-                  <div className="space-y-2">
-                    <OpenAiEndpointField
-                      key={`tts-${endpointResetRevision}`}
-                      kind="tts"
-                      label={t("voice.openAiTtsEndpoint")}
-                      keyLabel={t("voice.openAiTtsApiKey")}
-                      configured={openAiStatus?.ttsConfigured ?? false}
-                      onSaveKey={setOpenAiTtsApiKey}
-                      onClearKey={clearOpenAiTtsApiKey}
-                    />
+                  ) : null}
+                </SelectContent>
+              </Select>
+            )}
+            details={
+              output.backend === "openai" ? (
+                <div className="space-y-2">
+                  <OpenAiEndpointField
+                    key={`tts-${endpointResetRevision}`}
+                    kind="tts"
+                    label={t("voice.openAiTtsEndpoint")}
+                    keyLabel={t("voice.openAiTtsApiKey")}
+                    configured={openAiStatus?.ttsConfigured ?? false}
+                    onSaveKey={setOpenAiTtsApiKey}
+                    onClearKey={clearOpenAiTtsApiKey}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {openAiError ??
+                      openAiStatus?.ttsUnavailableReason ??
+                      (openAiStatus?.unavailableReason === "unsupportedPlatform"
+                        ? t("voice.openAiTtsUnsupportedPlatform")
+                        : openAiStatus?.unavailableReason === "missingApiKey"
+                          ? t("voice.openAiTtsNeedsKey")
+                          : openAiStatus
+                            ? t("voice.openAiTtsConfigured", {
+                                model: openAiStatus.speechModel,
+                                voice: openAiStatus.speechVoice,
+                              })
+                            : t("voice.openAiChecking"))}
+                  </p>
+                  {openAiStatus?.ttsConfigurationSource === "environment" ? (
                     <p className="text-xs text-muted-foreground">
-                      {openAiError ??
-                        openAiStatus?.ttsUnavailableReason ??
-                        (openAiStatus?.unavailableReason ===
-                        "unsupportedPlatform"
-                          ? t("voice.openAiTtsUnsupportedPlatform")
-                          : openAiStatus?.unavailableReason === "missingApiKey"
-                            ? t("voice.openAiTtsNeedsKey")
-                            : openAiStatus
-                              ? t("voice.openAiTtsConfigured", {
-                                  model: openAiStatus.speechModel,
-                                  voice: openAiStatus.speechVoice,
-                                })
-                              : t("voice.openAiChecking"))}
+                      {t("voice.openAiEnvironmentOverride")}
                     </p>
-                    {openAiStatus?.ttsConfigurationSource === "environment" ? (
-                      <p className="text-xs text-muted-foreground">
-                        {t("voice.openAiEnvironmentOverride")}
-                      </p>
-                    ) : null}
-                    <div className="divide-y divide-border">
-                      <SimpleVoicePickerDialog
-                        options={openAiVoiceOptions(
-                          openAiStatus?.speechVoices ?? [openAiVoice],
-                        )}
-                        selectedVoice={openAiVoice}
-                        defaultVoice={DEFAULT_OPENAI_VOICE}
-                        error={openAiVoiceError}
-                        onChange={async (voice) => {
-                          setOpenAiVoiceError(null);
-                          try {
-                            await setOpenAiSpeechVoice(voice);
-                            setOpenAiVoice(voice);
-                          } catch (cause) {
-                            setOpenAiVoiceError(
-                              cause instanceof Error
-                                ? cause.message
-                                : String(cause),
-                            );
-                          }
-                        }}
-                      />
-                      <PlaybackSpeedRow
-                        speed={openAiSpeed}
-                        speeds={[0.75, 1, 1.25, 1.5, 2]}
-                        onChange={async (speed) => {
-                          setOpenAiSpeedError(null);
-                          try {
-                            await setOpenAiPlaybackSpeed(speed);
-                            setOpenAiSpeed(speed);
-                          } catch (cause) {
-                            setOpenAiSpeedError(
-                              cause instanceof Error
-                                ? cause.message
-                                : String(cause),
-                            );
-                          }
-                        }}
-                      />
-                    </div>
-                    {openAiSpeedError ? (
-                      <p className="text-xs text-destructive" role="alert">
-                        {openAiSpeedError}
-                      </p>
-                    ) : null}
+                  ) : null}
+                  <div className="divide-y divide-border">
+                    <SimpleVoicePickerDialog
+                      options={openAiVoiceOptions(
+                        openAiStatus?.speechVoices ?? [openAiVoice],
+                      )}
+                      selectedVoice={openAiVoice}
+                      defaultVoice={DEFAULT_OPENAI_VOICE}
+                      error={openAiVoiceError}
+                      onChange={async (voice) => {
+                        setOpenAiVoiceError(null);
+                        try {
+                          await setOpenAiSpeechVoice(voice);
+                          setOpenAiVoice(voice);
+                        } catch (cause) {
+                          setOpenAiVoiceError(
+                            cause instanceof Error
+                              ? cause.message
+                              : String(cause),
+                          );
+                        }
+                      }}
+                    />
+                    <PlaybackSpeedRow
+                      speed={openAiSpeed}
+                      speeds={[0.75, 1, 1.25, 1.5, 2]}
+                      onChange={async (speed) => {
+                        setOpenAiSpeedError(null);
+                        try {
+                          await setOpenAiPlaybackSpeed(speed);
+                          setOpenAiSpeed(speed);
+                        } catch (cause) {
+                          setOpenAiSpeedError(
+                            cause instanceof Error
+                              ? cause.message
+                              : String(cause),
+                          );
+                        }
+                      }}
+                    />
                   </div>
-                ) : output.backend === "siri" ? (
-                  <SiriVoiceSettings setup={siriSetup} />
-                ) : (
-                  <PocketVoiceSetupContent setup={setup} models={["pocket"]} />
-                )
-              }
-            />
-          </section>
-          <section className="space-y-2 overflow-hidden">
-            <SettingsRow
-              className="py-2"
-              label={
-                <h2 id={interruptionHeadingId} className="text-sm font-medium">
-                  {t("voice.interruptionMode")}
-                </h2>
-              }
-              description={t(
-                `voice.interruptionModeDescriptions.${interruption.mode}`,
-              )}
-              descriptionId={interruptionDescriptionId}
-              layout="responsive"
-              action={({ labelId, descriptionId }) => (
-                <Select
-                  value={interruption.mode}
-                  onValueChange={(value) =>
-                    interruption.setMode(value as VoiceInterruptionMode)
-                  }
+                  {openAiSpeedError ? (
+                    <p className="text-xs text-destructive" role="alert">
+                      {openAiSpeedError}
+                    </p>
+                  ) : null}
+                </div>
+              ) : output.backend === "siri" ? (
+                <SiriVoiceSettings setup={siriSetup} />
+              ) : (
+                <PocketVoiceSetupContent setup={setup} models={["pocket"]} />
+              )
+            }
+          />
+        </section>
+        <section className="space-y-2 overflow-hidden">
+          <SettingsRow
+            className="py-2"
+            label={
+              <h2 id={interruptionHeadingId} className="text-sm font-medium">
+                {t("voice.interruptionMode")}
+              </h2>
+            }
+            description={t(
+              `voice.interruptionModeDescriptions.${interruption.mode}`,
+            )}
+            descriptionId={interruptionDescriptionId}
+            layout="responsive"
+            action={({ labelId, descriptionId }) => (
+              <Select
+                value={interruption.mode}
+                onValueChange={(value) =>
+                  interruption.setMode(value as VoiceInterruptionMode)
+                }
+              >
+                <SelectTrigger
+                  className="w-full sm:w-60"
+                  aria-labelledby={labelId}
+                  aria-describedby={descriptionId}
                 >
-                  <SelectTrigger
-                    className="w-full sm:w-60"
-                    aria-labelledby={labelId}
-                    aria-describedby={descriptionId}
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {INTERRUPTION_MODES.map((interruptionMode) => (
-                      <SelectItem
-                        key={interruptionMode}
-                        value={interruptionMode}
-                      >
-                        {t(`voice.interruptionModes.${interruptionMode}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            />
-          </section>
-        </>
-      ) : (
-        <RealtimeVoiceSettings key={`realtime-${endpointResetRevision}`} />
-      )}
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {INTERRUPTION_MODES.map((interruptionMode) => (
+                    <SelectItem key={interruptionMode} value={interruptionMode}>
+                      {t(`voice.interruptionModes.${interruptionMode}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
+        </section>
+      </>
       <section className="space-y-2 overflow-hidden">
         <SettingsRow
           className="py-2"
