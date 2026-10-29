@@ -76,7 +76,6 @@ import {
   REDUCED_MOTION_QUERY,
   RESPONSE_START_HINT_HIDE_DELAY_MS,
   getTimelineMessageIdentity,
-  getVoiceSubmissionKey,
   isResponseStartHintInRelevanceBand,
   useStickyFlag,
   type MessageBubbleCallbacks,
@@ -1055,7 +1054,6 @@ function VirtualMessageTimelineSession({
   const resolvedScrollTargetMessageIdRef = useRef<string | null>(null);
   const scheduledBottomScrollSessionIdRef = useRef(sessionId);
   const lastAutoScrollMessagesRef = useRef<readonly Message[] | null>(null);
-  const lastLatestUserAutoScrollKeyRef = useRef<string | null>(null);
   const responseStartRowRefs = useRef(new Map<string, HTMLElement>());
   const previousStreamingMessageIdRef = useRef<string | null>(null);
   const previousLatestAssistantCompletionStatusRef = useRef<string | null>(
@@ -2479,7 +2477,6 @@ function VirtualMessageTimelineSession({
     }
     return null;
   }, [stableMessageByRowId, stableRows]);
-  const latestMessage = latestMessageEntry?.message;
   const latestMessageId = latestMessageEntry?.messageId;
   const timelineMessages = useMemo(() => {
     const result: Message[] = [];
@@ -2498,14 +2495,14 @@ function VirtualMessageTimelineSession({
     () => timelineMessages.map(getTimelineMessageIdentity),
     [timelineMessages],
   );
-  const voiceSubmissionKeys = useMemo(
+  const userSubmissionKeys = useMemo(
     () =>
       timelineMessages
-        .map(getVoiceSubmissionKey)
-        .filter((key): key is string => key !== null),
+        .filter((message) => message.role === "user")
+        .map(getTimelineMessageIdentity),
     [timelineMessages],
   );
-  const seenVoiceSubmissionKeysRef = useRef(new Set(voiceSubmissionKeys));
+  const seenUserSubmissionKeysRef = useRef(new Set(userSubmissionKeys));
   const previousTimelineTailIdentityRef = useRef(
     timelineMessageIdentities.at(-1),
   );
@@ -2983,54 +2980,30 @@ function VirtualMessageTimelineSession({
   }, [pulsingMessageId]);
 
   useEffect(() => {
-    if (
-      !latestMessageId ||
-      latestMessage?.role !== "user" ||
-      latestMessage.metadata?.origin === "voice_conversation"
-    ) {
-      return;
-    }
-
-    const latestUserKey = `${sessionId}\0${latestMessageId}`;
-    if (lastLatestUserAutoScrollKeyRef.current === latestUserKey) {
-      return;
-    }
-    lastLatestUserAutoScrollKeyRef.current = latestUserKey;
-
-    clearProgrammaticFollowResumeSuppression();
-    setDetachedFromLatest(false);
-    scrollToBottom("auto");
-  }, [
-    clearProgrammaticFollowResumeSuppression,
-    latestMessageId,
-    latestMessage?.metadata?.origin,
-    latestMessage?.role,
-    sessionId,
-    scrollToBottom,
-    setDetachedFromLatest,
-  ]);
-
-  useEffect(() => {
-    let latestUnseenVoiceSubmissionIndex = -1;
+    let latestUnseenUserSubmissionIndex = -1;
     for (let index = 0; index < timelineMessages.length; index += 1) {
-      const key = getVoiceSubmissionKey(timelineMessages[index]);
-      if (key && !seenVoiceSubmissionKeysRef.current.has(key)) {
-        latestUnseenVoiceSubmissionIndex = index;
+      const message = timelineMessages[index];
+      const key = getTimelineMessageIdentity(message);
+      if (
+        message.role === "user" &&
+        !seenUserSubmissionKeysRef.current.has(key)
+      ) {
+        latestUnseenUserSubmissionIndex = index;
       }
     }
     const previousTailIdentity = previousTimelineTailIdentityRef.current;
     const previousTailIndex = previousTailIdentity
       ? timelineMessageIdentities.indexOf(previousTailIdentity)
       : -1;
-    for (const key of voiceSubmissionKeys) {
-      seenVoiceSubmissionKeysRef.current.add(key);
+    for (const key of userSubmissionKeys) {
+      seenUserSubmissionKeysRef.current.add(key);
     }
     previousTimelineTailIdentityRef.current = timelineMessageIdentities.at(-1);
     if (
-      latestUnseenVoiceSubmissionIndex < 0 ||
+      latestUnseenUserSubmissionIndex < 0 ||
       (previousTailIdentity &&
         (previousTailIndex < 0 ||
-          latestUnseenVoiceSubmissionIndex <= previousTailIndex))
+          latestUnseenUserSubmissionIndex <= previousTailIndex))
     ) {
       return;
     }
@@ -3045,7 +3018,7 @@ function VirtualMessageTimelineSession({
     setDetachedFromLatest,
     timelineMessageIdentities,
     timelineMessages,
-    voiceSubmissionKeys,
+    userSubmissionKeys,
   ]);
 
   const requestMcpAppAutoScroll = useCallback(
