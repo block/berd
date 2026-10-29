@@ -1,5 +1,8 @@
 //! Reusable voice primitives for Berd.
 
+/// Speech probability that counts as user speech for both active listening and assistant interruption.
+pub const DEFAULT_VAD_THRESHOLD: f32 = 0.9;
+
 /// Maximum time the macOS recognizer waits for native completion after input ends.
 pub const MAC_SPEECH_RECOGNITION_FINISH_TIMEOUT_SECONDS: u64 = 5;
 

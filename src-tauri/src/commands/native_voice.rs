@@ -25,7 +25,6 @@ use super::{
 pub(crate) const EVENT_NAME: &str = "voice-conversation:event";
 const MAX_PENDING_TRANSCRIPTS: usize = 64;
 const MAX_TRANSCRIPT_DELIVERY_ATTEMPTS: u8 = 3;
-const VAD_THRESHOLD: f32 = 0.5;
 const INPUT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[cfg(any(test, target_os = "macos"))]
@@ -145,16 +144,6 @@ pub enum InterruptionSensitivity {
     Less,
     Balanced,
     More,
-}
-
-impl InterruptionSensitivity {
-    pub(crate) fn vad_threshold(self) -> f32 {
-        match self {
-            Self::Less => 0.8,
-            Self::Balanced => 0.65,
-            Self::More => VAD_THRESHOLD,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize)]
@@ -784,14 +773,31 @@ impl NativeVoiceState {
             .is_ok_and(|blocks| blocks.contains_key(session_id))
     }
 
+    fn start_input_pipeline(
+        &self,
+        engine: berd_call::input::VoiceInputEngineConfig,
+    ) -> Result<
+        (
+            berd_call::input::VoiceInputRuntime,
+            tokio::sync::mpsc::Receiver<berd_call::input::VoiceInputEvent>,
+        ),
+        String,
+    > {
+        berd_call::input::VoiceInputRuntime::start(berd_call::input::VoiceInputConfig {
+            engine,
+            speech_vad_threshold: berd_call::DEFAULT_VAD_THRESHOLD,
+            controls: self.input_controls.clone(),
+        })
+    }
+
     pub(crate) fn begin_assistant_speech(
         &self,
-        sensitivity: InterruptionSensitivity,
+        _sensitivity: InterruptionSensitivity,
         input_during_tts: berd_call::input::InputDuringTtsPolicy,
     ) -> AssistantSpeechGuard {
         let activity = self
             .input_controls
-            .begin_assistant_activity(sensitivity.vad_threshold(), input_during_tts)
+            .begin_assistant_activity(input_during_tts)
             .ok();
         let status_sound_activity = self.runtime.lock().ok().and_then(|runtime| {
             runtime.status_sounds.as_ref().and_then(|status_sounds| {
@@ -1538,11 +1544,7 @@ pub async fn start_native_voice_conversation(
             return Err(error);
         }
     };
-    let pipeline = berd_call::input::VoiceInputRuntime::start(berd_call::input::VoiceInputConfig {
-        engine,
-        speech_vad_threshold: VAD_THRESHOLD,
-        controls: state.input_controls.clone(),
-    });
+    let pipeline = state.start_input_pipeline(engine);
     let (pipeline, mut events) = match pipeline {
         Ok(result) => result,
         Err(error) => {
@@ -3354,6 +3356,194 @@ mod tests {
             true,
         ));
         assert!(!caller_owns_target("voice-buddy", None, true,));
+    }
+
+    // Keep the CC-BY attribution beside the reused benchmark fixture. No generated audio is stored.
+    // LibriSpeech test-clean, CC-BY-4.0: crates/berd-call/fixtures/stt/librispeech-test-clean-mini/NOTICE.md
+    fn threshold_boundary_audio() -> Vec<f32> {
+        let bytes = include_bytes!(
+            "../../crates/berd-call/fixtures/stt/librispeech-test-clean-mini/1089-134686-0002.flac"
+        );
+        let mut reader = claxon::FlacReader::new(std::io::Cursor::new(bytes)).unwrap();
+        let scale = (1_u64 << (reader.streaminfo().bits_per_sample - 1)) as f32;
+        let speech: Vec<f32> = reader
+            .samples()
+            .map(|s| s.unwrap() as f32 / scale)
+            .collect();
+        // The short prefix crosses .65, but never .9, including its trailing silence.
+        // The longer repetition is a positive marker which crosses .9 on the same detector.
+        let mut probe = speech[..32 * 256].to_vec();
+        probe.resize(32_000, 0.0);
+        probe.extend_from_slice(&speech[..80 * 256]);
+        probe.resize(probe.len() + 32_000, 0.0);
+        let mut detector = earshot::Detector::new(earshot::DefaultPredictor::new());
+        let probabilities: Vec<_> = probe
+            .chunks_exact(256)
+            .map(|frame| detector.predict_f32(frame))
+            .collect();
+        let prefix_peak = probabilities[..125].iter().copied().fold(0.0_f32, f32::max);
+        assert!(
+            prefix_peak > 0.65 && prefix_peak < 0.9,
+            "prefix peak: {prefix_peak}"
+        );
+        assert!(
+            probabilities[125..].iter().any(|p| *p > 0.9),
+            "positive marker"
+        );
+        // Production OpenAI VAD decimates 48 kHz capture by three. Preserve these exact samples.
+        let mut capture: Vec<_> = probe.into_iter().flat_map(|sample| [sample; 3]).collect();
+        capture.resize(capture.len().div_ceil(960) * 960, 0.0);
+        capture
+    }
+
+    async fn sensitivity_runtime_trace(sensitivity: Option<InterruptionSensitivity>) -> Vec<bool> {
+        use berd_call::input::{VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame};
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}", listener.local_addr().unwrap());
+        // Mock only the transcription provider. The actual worker owns VAD, framing and controls.
+        let provider = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let mut audio_bytes = 0;
+            let mut commits = 0;
+            while let Some(Ok(Message::Text(text))) = socket.next().await {
+                let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+                let response = match value["type"].as_str().unwrap() {
+                    "session.update" => serde_json::json!({"type":"session.updated"}),
+                    "input_audio_buffer.append" => {
+                        use base64::Engine;
+                        audio_bytes += base64::engine::general_purpose::STANDARD
+                            .decode(value["audio"].as_str().unwrap())
+                            .unwrap()
+                            .len();
+                        continue;
+                    }
+                    "input_audio_buffer.commit" => {
+                        commits += 1;
+                        let item = format!("turn-{commits}");
+                        socket
+                            .send(Message::Text(
+                                serde_json::json!({
+                                    "type":"input_audio_buffer.committed", "item_id":item
+                                })
+                                .to_string()
+                                .into(),
+                            ))
+                            .await
+                            .unwrap();
+                        // A .65 prefix turn is shorter than two seconds. The .9 marker turn
+                        // includes over two seconds of speech, pre-roll and endpoint silence.
+                        let transcript = if audio_bytes > 24_000 * 2 * 2 {
+                            "marker"
+                        } else {
+                            "prefix"
+                        };
+                        audio_bytes = 0;
+                        serde_json::json!({
+                            "type":"conversation.item.input_audio_transcription.completed",
+                            "item_id":item, "transcript":transcript
+                        })
+                    }
+                    other => panic!("unexpected provider request: {other}"),
+                };
+                if socket
+                    .send(Message::Text(response.to_string().into()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        let state = NativeVoiceState::default();
+        let (pipeline, mut events) = state
+            .start_input_pipeline(VoiceInputEngineConfig::OpenAi {
+                endpoint,
+                api_key: "fixture-key".into(),
+                model: "fixture-model".into(),
+            })
+            .unwrap();
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .unwrap(),
+            Some(VoiceInputEvent::Ready)
+        ));
+        let _playback = sensitivity.map(|sensitivity| {
+            state.begin_assistant_speech(
+                sensitivity,
+                berd_call::input::InputDuringTtsPolicy::AllowBargeIn,
+            )
+        });
+        let audio = threshold_boundary_audio();
+        let mut trace = Vec::new();
+        let run = async {
+            let feed = async {
+                for frame in audio.chunks_exact(960) {
+                    pipeline
+                        .try_push_frame(VoiceInputFrame::try_from_samples(frame).unwrap())
+                        .unwrap();
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            };
+            let observe = async {
+                loop {
+                    match events.recv().await.expect("live input worker") {
+                        VoiceInputEvent::SpeakingChanged(speaking) => trace.push(speaking),
+                        VoiceInputEvent::FinalTranscript {
+                            text,
+                            storage_receipt,
+                        } => {
+                            storage_receipt.stored();
+                            if text == "marker" {
+                                break;
+                            }
+                            assert_eq!(text, "prefix");
+                        }
+                        VoiceInputEvent::Failed(error) => panic!("input failed: {error}"),
+                        _ => {}
+                    }
+                }
+            };
+            tokio::join!(feed, observe);
+        };
+        // A completed marker transcript is the positive processing barrier, not a silence timeout.
+        let result = tokio::time::timeout(Duration::from_secs(15), run).await;
+        pipeline.cancel();
+        pipeline.finish().await.unwrap();
+        provider.await.unwrap();
+        result.expect("worker completes the positive marker");
+        trace
+    }
+
+    async fn assert_sensitivity_preserves_production_vad_trace(
+        sensitivity: InterruptionSensitivity,
+    ) {
+        let idle = sensitivity_runtime_trace(None).await;
+        assert_eq!(idle, [true, false]);
+        assert_eq!(
+            sensitivity_runtime_trace(Some(sensitivity)).await,
+            idle,
+            "{sensitivity:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn interruption_sensitivity_less_preserves_production_vad_trace() {
+        assert_sensitivity_preserves_production_vad_trace(InterruptionSensitivity::Less).await;
+    }
+
+    #[tokio::test]
+    async fn interruption_sensitivity_balanced_preserves_production_vad_trace() {
+        assert_sensitivity_preserves_production_vad_trace(InterruptionSensitivity::Balanced).await;
+    }
+
+    #[tokio::test]
+    async fn interruption_sensitivity_more_preserves_production_vad_trace() {
+        assert_sensitivity_preserves_production_vad_trace(InterruptionSensitivity::More).await;
     }
 
     #[test]

@@ -35,6 +35,7 @@ use berd_call::{
     },
     ConfiguredTtsSlot, DeliveryProgress, TtsBackend, TtsConfiguration, TtsConfigurationLease,
     TtsConfigurationRejection, TtsConfigurationRejectionKind, TtsSettings, WavSynthesisErrorKind,
+    DEFAULT_VAD_THRESHOLD,
 };
 use serde::Serialize;
 
@@ -70,8 +71,6 @@ const MAX_LINE_BYTES: usize = 1024 * 1024;
 const PCM_FRAME_BYTES: usize = INPUT_FRAME_SAMPLES * std::mem::size_of::<f32>();
 const MAX_FINAL_TEXT_BYTES: usize = 64 * 1024;
 const MAX_SPEAK_TEXT_BYTES: usize = 16 * 1024;
-/// Speech probability that counts as the user talking, with or without agent playback.
-const VAD_THRESHOLD: f32 = 0.9;
 const INPUT_QUEUE_CAPACITY: usize = 32;
 const INPUT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const SHUTDOWN_PLAYBACK_TIMEOUT: Duration = Duration::from_secs(3);
@@ -2762,8 +2761,8 @@ fn acknowledge_output_ready(
 ) -> Result<(), String> {
     current.assistant_activity = input_controls.map(|controls| {
         controls
-            .begin_assistant_activity(VAD_THRESHOLD, current.input_during_tts.policy)
-            .expect("VAD threshold is valid")
+            .begin_assistant_activity(current.input_during_tts.policy)
+            .expect("assistant activity generation is available")
     });
     write_message(
         writer,
@@ -3535,7 +3534,7 @@ fn stt_benchmark_target(config: &SttBackendConfig) -> Result<SttBenchmarkTarget,
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned()),
             locale: None,
-            vad_threshold: VAD_THRESHOLD,
+            vad_threshold: DEFAULT_VAD_THRESHOLD,
             endpoint_source: None,
             model_source: Some("explicit --stt-model-dir".into()),
             credential_source: None,
@@ -3548,7 +3547,7 @@ fn stt_benchmark_target(config: &SttBackendConfig) -> Result<SttBenchmarkTarget,
                     backend: "macos".into(),
                     model: Some(status.model_status),
                     locale: status.locale,
-                    vad_threshold: VAD_THRESHOLD,
+                    vad_threshold: DEFAULT_VAD_THRESHOLD,
                     endpoint_source: None,
                     model_source: Some("installed current-locale model".into()),
                     credential_source: None,
@@ -3583,7 +3582,7 @@ fn stt_benchmark_target(config: &SttBackendConfig) -> Result<SttBenchmarkTarget,
                 backend: "openai".into(),
                 model: Some(model),
                 locale: None,
-                vad_threshold: VAD_THRESHOLD,
+                vad_threshold: DEFAULT_VAD_THRESHOLD,
                 endpoint_source: Some(endpoint_source.into()),
                 model_source: Some(model_source.into()),
                 credential_source: Some(format!(
@@ -3928,7 +3927,7 @@ fn create_input_runtime(
     };
     VoiceInputRuntime::start(VoiceInputConfig {
         engine,
-        speech_vad_threshold: VAD_THRESHOLD,
+        speech_vad_threshold: DEFAULT_VAD_THRESHOLD,
         controls: VoiceInputControls::default(),
     })
     .map_err(|error| match config {
