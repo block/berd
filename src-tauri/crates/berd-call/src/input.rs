@@ -732,6 +732,9 @@ struct PendingRecognitions {
     /// The interim text last shown, so repeats and clears are sent once.
     interim: String,
     interim_recognition_id: String,
+    /// Apple recognition segments can span multiple VAD admission holds.
+    #[cfg(any(target_os = "macos", test))]
+    segment_id: Option<String>,
 }
 
 impl PendingRecognitions {
@@ -803,9 +806,36 @@ impl PendingRecognitions {
         self.unfinalized = false;
     }
 
-    /// Interim text is best effort: a full event queue drops it rather than stall recognition.
+    /// Apple reports cumulative text until a final, independent of VAD pauses.
+    #[cfg(any(target_os = "macos", test))]
+    fn show_segment_interim(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>, text: &str) {
+        let id = self
+            .segment_id
+            .get_or_insert_with(|| uuid::Uuid::new_v4().to_string())
+            .clone();
+        self.emit_interim(events, text, id);
+    }
+
+    #[cfg(any(target_os = "macos", test))]
+    fn take_segment_recognition_id(&mut self) -> String {
+        self.segment_id
+            .take()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+    }
+
+    /// Turn-scoped backends retain the oldest final's identity after hold expiry.
     fn show_interim(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>, text: &str) {
-        let recognition_id = self.recognition_ids.back().cloned().unwrap_or_default();
+        let id = self.recognition_ids.back().cloned().unwrap_or_default();
+        self.emit_interim(events, text, id);
+    }
+
+    /// Interim text is best effort: a full event queue drops it rather than stall recognition.
+    fn emit_interim(
+        &mut self,
+        events: &tokio_mpsc::Sender<VoiceInputEvent>,
+        text: &str,
+        recognition_id: String,
+    ) {
         if self.interim != text
             || (!text.is_empty() && self.interim_recognition_id != recognition_id)
         {
@@ -1552,13 +1582,9 @@ fn forward_mac_events(
         match event {
             crate::mac_speech::MacSpeechRecognitionEvent::Final(text, end) => {
                 let text = text.trim().to_string();
+                let recognition_id = pending.take_segment_recognition_id();
                 if !text.is_empty() {
-                    send_final(
-                        events,
-                        pending.take_final_recognition_id(),
-                        text,
-                        storage_deadline,
-                    )?;
+                    send_final(events, recognition_id, text, storage_deadline)?;
                 }
                 // One final can span several turns split by pauses, and one turn
                 // can produce several finals, so a final with an end resolves
@@ -1577,7 +1603,7 @@ fn forward_mac_events(
             }
             crate::mac_speech::MacSpeechRecognitionEvent::Heard(_, text) => {
                 pending.unfinalized = true;
-                pending.show_interim(events, &text);
+                pending.show_segment_interim(events, &text);
             }
             crate::mac_speech::MacSpeechRecognitionEvent::Finished => {
                 if storage_deadline.is_none() {
@@ -3144,6 +3170,28 @@ mod tests {
             effective_mute_epoch(&controls, &shutdown, &shutdown_epoch),
             (true, 0)
         );
+    }
+
+    #[test]
+    fn apple_cumulative_segment_survives_pause_turns() {
+        let (events, mut receiver) = tokio_mpsc::channel(16);
+        let mut pending = PendingRecognitions::new();
+        pending.begin(&events).unwrap();
+        pending.show_segment_interim(&events, "first words");
+        pending.end_turn(&events, 100).unwrap();
+        pending.begin(&events).unwrap();
+        pending.show_segment_interim(&events, "first words and more");
+        let mut ids = Vec::new();
+        while let Ok(event) = receiver.try_recv() {
+            if let VoiceInputEvent::InterimTranscript { recognition_id, .. } = event {
+                ids.push(recognition_id);
+            }
+        }
+        assert_eq!(ids[0], ids[1], "one Apple segment across two VAD turns");
+        pending.release_hold(&events).unwrap();
+        assert_eq!(pending.take_segment_recognition_id(), ids[1]);
+        pending.show_segment_interim(&events, "next segment");
+        assert_ne!(pending.take_segment_recognition_id(), ids[1]);
     }
 
     #[test]
