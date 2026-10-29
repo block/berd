@@ -437,7 +437,6 @@ export function buildInitScript(options?: {
                   providerId: session.providerId,
                   modelId: session.modelId,
                 },
-                cwd: session.workingDir,
               })),
             });
           case "_goose/unstable/session/info": {
@@ -995,13 +994,12 @@ export function buildInitScript(options?: {
                   sessionId: session.sessionId,
                   title: session.title,
                   updatedAt: session.updatedAt,
-                cwd: session.cwd,
+                  cwd: session.cwd,
                   messageCount: session.messageCount,
                   lastMessageAt: session.lastMessageAt,
                   providerId: session.providerId,
                   modelId: session.modelId,
                   conversationBefore: session.conversationBefore,
-        cwd: session.workingDir ?? "/tmp/alpha",
                 })),
               );
             case "create_session":
