@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-// Receiver budgets, not producer launch limits. Mirror the producer's label policy.
+// Shared routing and display budgets. Command budgets never limit producer argv.
 const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 const MAX_RUNNING_MONITORS: usize = 256;
 const MAX_ID_BYTES: usize = 1024;
@@ -227,6 +227,44 @@ fn valid_single_line(value: &str) -> bool {
     !value.trim().is_empty() && !value.contains(['\r', '\n'])
 }
 
+/// Routing identities must survive discovery unchanged. Length is measured in UTF-8 bytes.
+pub fn validate_routing_identity(value: &str) -> Result<(), &'static str> {
+    if !valid_single_line(value) {
+        return Err("must be nonblank and contain no CR or LF");
+    }
+    if value.len() > MAX_ID_BYTES {
+        return Err("must not exceed 1024 UTF-8 bytes");
+    }
+    Ok(())
+}
+
+fn valid_command_detail(args: &[String]) -> bool {
+    args.len() <= MAX_COMMAND_ARGS
+        && args.iter().all(|arg| arg.len() <= MAX_COMMAND_ARG_BYTES)
+        && args.iter().map(String::len).sum::<usize>() <= MAX_COMMAND_BYTES
+}
+
+impl RunningMonitorDescriptor {
+    /// Omit optional argv detail rather than hiding a live monitor from discovery.
+    pub fn to_discovery_bytes(&self) -> serde_json::Result<Vec<u8>> {
+        let mut descriptor = self.clone();
+        if descriptor
+            .command
+            .as_ref()
+            .is_some_and(|args| !valid_command_detail(args))
+        {
+            descriptor.command = None;
+        }
+        let bytes = serde_json::to_vec(&descriptor)?;
+        // JSON escaping can exceed the wire budget even within the raw argv budget.
+        if bytes.len() > MAX_DESCRIPTOR_BYTES && descriptor.command.is_some() {
+            descriptor.command = None;
+            return serde_json::to_vec(&descriptor);
+        }
+        Ok(bytes)
+    }
+}
+
 fn read_descriptor(root: &Path, base: &Path) -> Option<RunningMonitorDescriptor> {
     let file = fs::File::open(root.join("descriptor.json")).ok()?;
     if !file.metadata().ok()?.is_file() {
@@ -242,7 +280,7 @@ fn read_descriptor(root: &Path, base: &Path) -> Option<RunningMonitorDescriptor>
     let mut descriptor: RunningMonitorDescriptor = serde_json::from_slice(&bytes).ok()?;
     if [&descriptor.session_id, &descriptor.state_key]
         .iter()
-        .any(|value| value.len() > MAX_ID_BYTES || !valid_single_line(value))
+        .any(|value| validate_routing_identity(value).is_err())
         || !valid_single_line(&descriptor.label)
         || descriptor.label.encode_utf16().count() > MAX_LABEL_CODE_UNITS
         || StatePaths::in_base(base, &descriptor.state_key, &descriptor.session_id).root != root
@@ -250,11 +288,11 @@ fn read_descriptor(root: &Path, base: &Path) -> Option<RunningMonitorDescriptor>
         return None;
     }
     // Optional display details must not hide an otherwise valid live monitor.
-    if descriptor.command.as_ref().is_some_and(|args| {
-        args.len() > MAX_COMMAND_ARGS
-            || args.iter().any(|arg| arg.len() > MAX_COMMAND_ARG_BYTES)
-            || args.iter().map(String::len).sum::<usize>() > MAX_COMMAND_BYTES
-    }) {
+    if descriptor
+        .command
+        .as_ref()
+        .is_some_and(|args| !valid_command_detail(args))
+    {
         descriptor.command = None;
     }
     if descriptor

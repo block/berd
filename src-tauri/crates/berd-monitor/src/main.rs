@@ -1,4 +1,6 @@
-use berd_monitor::{try_claim_owner, RunningMonitorDescriptor, StatePaths};
+use berd_monitor::{
+    try_claim_owner, validate_routing_identity, RunningMonitorDescriptor, StatePaths,
+};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::env;
 use std::ffi::OsString;
@@ -148,6 +150,10 @@ fn run_cli() -> Result<(), String> {
             if_running,
             command,
         } => {
+            validate_routing_identity(&state_key)
+                .map_err(|error| format!("--state-key {error}"))?;
+            validate_routing_identity(&session_id)
+                .map_err(|error| format!("--session-id {error}"))?;
             validate_single_line("--label", &label)?;
             if label.encode_utf16().count() > MAX_LABEL_CODE_UNITS {
                 return Err(format!(
@@ -602,7 +608,7 @@ fn run_foreground_after_claim(
     })?;
     atomic_write(
         &paths.descriptor,
-        &serde_json::to_vec(&RunningMonitorDescriptor {
+        &RunningMonitorDescriptor {
             session_id: session_id.to_owned(),
             state_key: state_key.to_owned(),
             label: label.to_owned(),
@@ -620,7 +626,8 @@ fn run_foreground_after_claim(
                     .map_err(io::Error::other)?,
             ),
             stopping: false,
-        })?,
+        }
+        .to_discovery_bytes()?,
     )?;
     after_claim();
     if paths.stop_for(&owner_token).exists() {
