@@ -4,7 +4,7 @@ import { buildInitScript } from "./fixtures/tauri-mock";
 
 type SpeechBoundaryWindow = Window & {
   __SPEECH_BOUNDARY__: { prepared: string[]; appended: string[] };
-  __FINISH_VOICE_PROMPT__: () => void;
+  __FINISH_VOICE_PROMPT__: (failed: boolean) => void;
   __TAURI_INTERNALS__: {
     invoke: (
       command: string,
@@ -81,13 +81,22 @@ const test = base.extend<{ voice: Page }>({
           return;
         }
         if (request.method === "session/prompt") {
-          (window as SpeechBoundaryWindow).__FINISH_VOICE_PROMPT__ = () => {
+          (window as SpeechBoundaryWindow).__FINISH_VOICE_PROMPT__ = (
+            failed,
+          ) => {
             this.dispatchEvent(
               new MessageEvent("message", {
                 data: JSON.stringify({
                   jsonrpc: "2.0",
                   id: request.id,
-                  result: { stopReason: "end_turn" },
+                  ...(failed
+                    ? {
+                        error: {
+                          code: -32603,
+                          message: "Fixture prompt failed",
+                        },
+                      }
+                    : { result: { stopReason: "end_turn" } }),
                 }),
               }),
             );
@@ -124,165 +133,171 @@ const test = base.extend<{ voice: Page }>({
   },
 });
 
-test("build sends link labels to native speech and preserves the rendered link", async ({
-  voice: page,
-}) => {
-  await page.goto("/");
-  await page.getByText("Voice playback", { exact: true }).click();
-  await page.getByTestId("chat-composer").fill("Read the docs");
-  await page.getByTestId("chat-composer").press("Enter");
-  await page.waitForFunction(
-    () =>
-      typeof (window as SpeechBoundaryWindow).__FINISH_VOICE_PROMPT__ ===
-      "function",
-  );
+for (const failed of [false, true]) {
+  test(`build preserves speech projection when prompt ${failed ? "fails" : "completes"}`, async ({
+    voice: page,
+  }) => {
+    await page.goto("/");
+    await page.getByText("Voice playback", { exact: true }).click();
+    await page.getByTestId("chat-composer").fill("Read the docs");
+    await page.getByTestId("chat-composer").press("Enter");
+    await page.waitForFunction(
+      () =>
+        typeof (window as SpeechBoundaryWindow).__FINISH_VOICE_PROMPT__ ===
+        "function",
+    );
 
-  await page.evaluate(
-    async ({ sessionId, messageId, text }) => {
-      const harness = (
-        window as typeof window & {
-          __GOOSE_E2E__: {
-            emitAcpNotification: (params: unknown) => void;
-            emitTauriEvent: (event: string, payload: unknown) => void;
-          };
-        }
-      ).__GOOSE_E2E__;
-      harness.emitTauriEvent("voice-conversation:event", {
-        type: "startup",
-        sessionId,
-        ownerWindowLabel: "main",
-        line: "Voice conversation ready",
-        revision: 2,
-      });
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-      );
-      harness.emitAcpNotification({
-        sessionId,
-        update: {
-          sessionUpdate: "session_info_update",
-          _meta: {
-            goose: {
-              activeRunId: "voice-e2e-run",
+    await page.evaluate(
+      async ({ sessionId, messageId, text }) => {
+        const harness = (
+          window as typeof window & {
+            __GOOSE_E2E__: {
+              emitAcpNotification: (params: unknown) => void;
+              emitTauriEvent: (event: string, payload: unknown) => void;
+            };
+          }
+        ).__GOOSE_E2E__;
+        harness.emitTauriEvent("voice-conversation:event", {
+          type: "startup",
+          sessionId,
+          ownerWindowLabel: "main",
+          line: "Voice conversation ready",
+          revision: 2,
+        });
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+        harness.emitAcpNotification({
+          sessionId,
+          update: {
+            sessionUpdate: "session_info_update",
+            _meta: {
+              goose: {
+                activeRunId: "voice-e2e-run",
+              },
             },
           },
-        },
-      });
-      harness.emitAcpNotification({
-        sessionId,
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          messageId,
-          content: {
-            type: "text",
-            text: text.slice(0, text.indexOf(">")),
+        });
+        harness.emitAcpNotification({
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId,
+            content: {
+              type: "text",
+              text: text.slice(0, text.indexOf(">")),
+            },
           },
-        },
-      });
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-      );
-      harness.emitAcpNotification({
-        sessionId,
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          messageId,
-          content: {
-            type: "text",
-            text: text.slice(text.indexOf(">"), text.indexOf("private/path")),
+        });
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+        harness.emitAcpNotification({
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId,
+            content: {
+              type: "text",
+              text: text.slice(text.indexOf(">"), text.indexOf("private/path")),
+            },
           },
-        },
-      });
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-      );
-      harness.emitAcpNotification({
-        sessionId,
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          messageId,
-          content: {
-            type: "text",
-            text: text.slice(text.indexOf("private/path")),
+        });
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+        harness.emitAcpNotification({
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId,
+            content: {
+              type: "text",
+              text: text.slice(text.indexOf("private/path")),
+            },
           },
-        },
-      });
-      harness.emitAcpNotification({
-        sessionId,
-        update: {
-          sessionUpdate: "tool_call",
-          toolCallId: "voice-e2e-tool",
-          title: "read_file",
-          rawInput: { path: "/tmp/voice-e2e.txt" },
-        },
-      });
-      harness.emitAcpNotification({
-        sessionId,
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          messageId,
-          content: { type: "text", text: " Then continue." },
-        },
-      });
-    },
-    {
-      sessionId: SESSION_ID,
-      messageId: ASSISTANT_MESSAGE_ID,
-      text: SPOKEN_TEXT,
-    },
-  );
-
-  // A tool flush is not completion. The ambiguous suffix must remain pending.
-  await expect
-    .poll(() =>
-      page.evaluate(() =>
-        (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.appended.join(""),
-      ),
-    )
-    .toContain("Use ");
-  expect(
-    await page.evaluate(() =>
-      (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.appended.join(""),
-    ),
-  ).not.toContain("when needed");
-  expect(
-    await page.evaluate(() =>
-      (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.appended.join(""),
-    ),
-  ).not.toContain("Then continue.");
-  await page.evaluate(() => {
-    (window as SpeechBoundaryWindow).__FINISH_VOICE_PROMPT__();
-  });
-
-  await expect(
-    page.getByRole("link", { name: "the page", exact: true }),
-  ).toHaveAttribute("href", "https://example.com/a(b");
-  await expect(
-    page.getByText("for the next steps.", { exact: false }),
-  ).toBeVisible();
-  await expect
-    .poll(() =>
-      page.evaluate(() =>
-        (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.appended.join(""),
-      ),
-    )
-    .toBe(
-      String.raw`See the page for the next steps. Use \[brackets](not a link) now. Call ` +
-        "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n\n1. Read:\n    guide\n\nSee docs now.\n\n> Code:\n>\n>     callbacks[index](result)\n\nSee the manual:\n    manual now.\n\nSee broken\nImportant: do not restart the server.\n\nUse ` when needed, then see help. Then continue.",
+        });
+        harness.emitAcpNotification({
+          sessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "voice-e2e-tool",
+            title: "read_file",
+            rawInput: { path: "/tmp/voice-e2e.txt" },
+          },
+        });
+        harness.emitAcpNotification({
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId,
+            content: { type: "text", text: " Then continue." },
+          },
+        });
+      },
+      {
+        sessionId: SESSION_ID,
+        messageId: ASSISTANT_MESSAGE_ID,
+        text: SPOKEN_TEXT,
+      },
     );
-  await expect(
-    page.getByRole("link", { name: "docs", exact: true }),
-  ).toHaveAttribute("href", "https://example.com/private/path");
-  await expect(
-    page.getByRole("link", { name: "manual", exact: true }),
-  ).toHaveAttribute("href", "https://example.com/manual");
-  const prepared = await page.evaluate(
-    () => (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.prepared,
-  );
-  expect(prepared.length).toBe(1);
-  expect(prepared[0]).toMatch(/^See the page/);
-  expect(prepared[0]).not.toContain("https://");
-  await expect(
-    page.getByText("Use [brackets](not a link) now.", { exact: false }),
-  ).toBeVisible();
-});
+
+    // A tool flush is not completion. The ambiguous suffix must remain pending.
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.appended.join(
+            "",
+          ),
+        ),
+      )
+      .toContain("Use ");
+    expect(
+      await page.evaluate(() =>
+        (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.appended.join(""),
+      ),
+    ).not.toContain("when needed");
+    expect(
+      await page.evaluate(() =>
+        (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.appended.join(""),
+      ),
+    ).not.toContain("Then continue.");
+    await page.evaluate((failed) => {
+      (window as SpeechBoundaryWindow).__FINISH_VOICE_PROMPT__(failed);
+    }, failed);
+
+    await expect(
+      page.getByRole("link", { name: "the page", exact: true }),
+    ).toHaveAttribute("href", "https://example.com/a(b");
+    await expect(
+      page.getByText("for the next steps.", { exact: false }),
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.appended.join(
+            "",
+          ),
+        ),
+      )
+      .toBe(
+        String.raw`See the page for the next steps. Use \[brackets](not a link) now. Call ` +
+          "`callbacks[index](result)` next.\n\n    callbacks[index](result)\n\n1. Read:\n    guide\n\nSee docs now.\n\n> Code:\n>\n>     callbacks[index](result)\n\nSee the manual:\n    manual now.\n\nSee broken\nImportant: do not restart the server.\n\nUse ` when needed, then see help. Then continue.",
+      );
+    await expect(
+      page.getByRole("link", { name: "docs", exact: true }),
+    ).toHaveAttribute("href", "https://example.com/private/path");
+    await expect(
+      page.getByRole("link", { name: "manual", exact: true }),
+    ).toHaveAttribute("href", "https://example.com/manual");
+    const prepared = await page.evaluate(
+      () => (window as SpeechBoundaryWindow).__SPEECH_BOUNDARY__.prepared,
+    );
+    expect(prepared.length).toBe(1);
+    expect(prepared[0]).toMatch(/^See the page/);
+    expect(prepared[0]).not.toContain("https://");
+    await expect(
+      page.getByText("Use [brackets](not a link) now.", { exact: false }),
+    ).toBeVisible();
+  });
+}

@@ -345,6 +345,45 @@ describe("native assistant speech stream", () => {
     );
   });
 
+  it.each([
+    "stopped",
+    "error",
+  ] as const)("releases pending speech when the reply is %s", async (status) => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    const source = "Use ` then see [docs](https://example.com).";
+    useChatStore
+      .getState()
+      .setMessages("session-1", [assistant([{ type: "text", text: source }])]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    expect(mocks.append.mock.calls.map((call) => call[1]).join("")).toBe(
+      "Use ",
+    );
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: source }], status),
+      ]);
+    await vi.waitFor(() => expect(mocks.finish).toHaveBeenCalledOnce());
+    expect(mocks.append.mock.calls.map((call) => call[1]).join("")).toBe(
+      "Use ` then see docs.",
+    );
+    emit("completed");
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: source }], status),
+        assistant(
+          [{ type: "text", text: "Next reply." }],
+          "completed",
+          "assistant-2",
+        ),
+      ]);
+    await vi.waitFor(() => expect(mocks.finish).toHaveBeenCalledTimes(2));
+    expect(mocks.append.mock.calls.map((call) => call[1]).join("")).toBe(
+      "Use ` then see docs.Next reply.",
+    );
+  });
+
   it("keeps later text blocks behind a pending suffix through completion", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
     const content = [

@@ -1489,9 +1489,11 @@ export function startNativeAssistantSpeech(
       ).length;
       const priorToolCount = toolCountByMessage.get(message.id) ?? 0;
       const crossedToolBoundary = toolCount > priorToolCount;
+      const textFinal = ["completed", "stopped", "error"].includes(
+        message.metadata?.completionStatus ?? "",
+      );
       const completionPending =
-        message.metadata?.completionStatus === "completed" &&
-        !handledCompletionMessages.has(message.id);
+        textFinal && !handledCompletionMessages.has(message.id);
       let textOrdinal = 0;
       let pendingText = false;
       for (const content of message.content) {
@@ -1605,7 +1607,7 @@ export function startNativeAssistantSpeech(
         const speechText = speechTextSpans(
           content.text,
           appendOnly ? previous.length : 0,
-          message.metadata?.completionStatus === "completed",
+          textFinal,
         );
         consumedTextBySlot.set(
           slot,
