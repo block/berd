@@ -18,7 +18,9 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   projects: [
-    ...(process.env.GOOSE_BIN
+    ...(process.env.GOOSE_BIN &&
+    process.env.GOOSE_SOURCE_DIR &&
+    process.env.GOOSE_EXPECTED_COMMIT
       ? [
           {
             name: "capacity-errors",
