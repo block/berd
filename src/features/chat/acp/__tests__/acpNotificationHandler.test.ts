@@ -2183,39 +2183,6 @@ describe("acpNotificationHandler", () => {
     });
   });
 
-  it.each([
-    "provisional words",
-    "corrected words",
-  ])("replay exposes only the persistent final voice turn (%s)", async (finalText) => {
-    const sessionId = `early-voice-replay-${finalText}`;
-    useChatStore.setState({ loadingSessionIds: new Set([sessionId]) });
-    for (const [messageId, text, hidden] of [
-      ["provisional", "Provisional speech recognition.", true],
-      ["provisional", "provisional words", true],
-      ["final", "Final transcript, do not repeat an unchanged answer.", true],
-      ["final", finalText, false],
-    ] as const) {
-      await handleSessionNotification({
-        sessionId,
-        update: {
-          sessionUpdate: "user_message_chunk",
-          messageId,
-          content: {
-            type: "text",
-            text,
-            ...(hidden ? { annotations: { audience: ["assistant"] } } : {}),
-          },
-        },
-      } as never);
-    }
-    expect(getReplayBuffer(sessionId)).toHaveLength(1);
-    expect(getReplayBuffer(sessionId)?.[0]).toMatchObject({
-      id: "final",
-      role: "user",
-      content: [{ type: "text", text: finalText }],
-    });
-  });
-
   it("replay restores skill chips from assistant-only user chunks", async () => {
     const replaySessionId = "replay-skill-session";
     useChatStore.setState({

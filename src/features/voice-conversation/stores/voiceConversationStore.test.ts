@@ -267,53 +267,6 @@ describe("voice conversation store lifecycle ordering", () => {
     unsubscribe();
   });
 
-  it("holds speculative speech during retries but rejects it on terminal delivery failure", async () => {
-    const module = await import("./voiceConversationStore");
-    const unsubscribe = module.subscribeToVoiceConversationEvents(() =>
-      Promise.reject(new Error("chat unavailable")),
-    );
-    await module.useVoiceConversationStore.getState().init();
-    const transcript = {
-      sessionId: "session-1",
-      lifecycleId: "lifecycle-1",
-      revision: 1,
-      id: "failed-final",
-      text: "Cannot deliver",
-      deliveryAttempts: 0,
-    };
-    const key = ["session-1", "lifecycle-1", "1", "failed-final"].join("\0");
-    module.useVoiceConversationStore.setState({
-      earlyTranscriptPending: key,
-      earlyTranscriptResolution: null,
-      latestFinalizedTranscriptKey: "prior-transcript",
-    });
-    mocks.drain.mockResolvedValue([transcript]);
-    await expect(
-      module.useVoiceConversationStore
-        .getState()
-        .drainPendingTranscripts("session-1"),
-    ).rejects.toThrow("delivery was rejected");
-    expect(
-      module.useVoiceConversationStore.getState().earlyTranscriptPending,
-    ).toBe(key);
-    mocks.reject.mockResolvedValueOnce({ attempts: 3, terminal: true });
-    await expect(
-      module.useVoiceConversationStore
-        .getState()
-        .drainPendingTranscripts("session-1"),
-    ).rejects.toThrow("delivery was rejected");
-    expect(module.useVoiceConversationStore.getState()).toMatchObject({
-      earlyTranscriptPending: null,
-      earlyTranscriptResolution: {
-        key: `${key}:early`,
-        finalKey: key,
-        accepted: false,
-      },
-      latestFinalizedTranscriptKey: "prior-transcript",
-    });
-    unsubscribe();
-  });
-
   it("removes terminally rejected transcripts from pending rollback chains", async () => {
     mocks.reject.mockResolvedValue({ attempts: 3, terminal: true });
     const firstDelivery = deferred<void>();

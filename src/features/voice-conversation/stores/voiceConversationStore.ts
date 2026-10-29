@@ -58,15 +58,6 @@ interface VoiceConversationStore {
   hydrated: boolean;
   requestedStartSessionId: string | null;
   latestFinalizedTranscriptKey: string | null;
-  // Internal speech gate, not a visual state. Speculative replies cannot be
-  // spoken until their final transcript has been reconciled.
-  earlyTranscriptPending: string | null;
-  earlyTranscriptResolution: {
-    key: string;
-    finalKey: string;
-    accepted: boolean;
-    terminal?: boolean;
-  } | null;
   init: () => Promise<void>;
   refreshStatus: () => Promise<VoiceConversationStatus>;
   requestStart: (sessionId: string) => void;
@@ -246,18 +237,6 @@ async function deliverTranscriptOnce(
           ...(state.latestFinalizedTranscriptKey === finalizedKey
             ? { latestFinalizedTranscriptKey: priorKey }
             : {}),
-          ...(state.earlyTranscriptPending === finalizedKey ||
-          state.earlyTranscriptResolution?.finalKey === finalizedKey
-            ? {
-                earlyTranscriptPending: null,
-                earlyTranscriptResolution: {
-                  key: `${finalizedKey}:early`,
-                  finalKey: finalizedKey,
-                  accepted: false,
-                  terminal: true,
-                },
-              }
-            : {}),
         }));
       }
     }
@@ -332,8 +311,6 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
     hydrated: false,
     requestedStartSessionId: null,
     latestFinalizedTranscriptKey: null,
-    earlyTranscriptPending: null,
-    earlyTranscriptResolution: null,
 
     requestStart: (sessionId) => set({ requestedStartSessionId: sessionId }),
     clearRequestedStart: (sessionId) =>
@@ -464,8 +441,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                     revision: event.revision,
                   },
                   uiState: "listening",
-                  earlyTranscriptPending: null,
-                  earlyTranscriptResolution: null,
+
                   microphoneMuted: false,
                   latestFinalizedTranscriptKey: null,
                   error: null,

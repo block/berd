@@ -206,7 +206,6 @@ export function useChat(
           persona: effectivePersonaInfo,
           attachments,
           assistantPrompt: sendOptions?.assistantPrompt,
-          assistantOnlyInput: sendOptions?.assistantOnlyInput,
           displayText: sendOptions?.displayText,
           userMessageId: sendOptions?.userMessageId,
           chips: sendOptions?.chips,

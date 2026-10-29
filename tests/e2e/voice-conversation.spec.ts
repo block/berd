@@ -53,7 +53,7 @@ test("queues assistant text through native playback", async ({
       harness.emitTauriEvent("voice-conversation:event", {
         type: "startup",
         sessionId,
-        ownerWindowLabel: "voice-e2e-owner",
+        ownerWindowLabel: "main",
         line: "Voice conversation ready",
         revision: 2,
       });
@@ -120,6 +120,8 @@ test("queues assistant text through native playback", async ({
 type AcpRequest = {
   method: string;
   params?: {
+    sessionId?: string;
+    modeId?: string;
     prompt?: { text?: string; annotations?: { audience?: string[] } }[];
     _meta?: { goose?: { voiceUtteranceId?: string } };
   };
@@ -215,196 +217,218 @@ const utterance = {
   text: "Set the temperature to 10 degrees.",
 };
 
-base.describe("early voice delivery", () => {
-  base.beforeEach(async ({ page }) => {
-    await page.addInitScript({
-      content: buildInitScript({
-        holdAcpPrompts: true,
-        sessions: [
-          {
-            sessionId: SESSION_ID,
-            title: "Early voice",
-            messageCount: 1,
-            providerId: "openai",
-            modelId: "gpt-4.1",
+for (const scenario of ["complete", "stalled", "mode-rejected"] as const) {
+  base.describe(`isolated early voice (${scenario})`, () => {
+    base.beforeEach(async ({ page }) => {
+      await page.addInitScript({
+        content: buildInitScript({
+          holdAcpPrompts: true,
+          privateVoiceDraftScenario: scenario,
+          sessions: [
+            {
+              sessionId: SESSION_ID,
+              title: "Early voice",
+              messageCount: 1,
+              providerId: "openai",
+              modelId: "gpt-4.1",
+              workingDir: "/workspace",
+            },
+          ],
+          voiceConversationStatus: {
+            available: true,
+            unavailableReason: null,
+            lifecycle: "stopped",
+            sessionId: null,
+            ownerWindowLabel: null,
+            revision: 1,
           },
-        ],
-        voiceConversationStatus: {
-          available: true,
-          unavailableReason: null,
-          lifecycle: "stopped",
-          sessionId: null,
-          ownerWindowLabel: null,
-          revision: 1,
-        },
-        enabledExperiments: ["voice-conversation"],
-      }),
-    });
-    await page.goto("/");
-    await page.getByText("Early voice", { exact: true }).click();
-    await expect(page.getByRole("textbox").first()).toBeVisible();
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-        ),
-    );
-    await nativeEvent(page, {
-      type: "startup",
-      ownerWindowLabel: "main",
-      line: "Ready",
-    });
-    await assistantOutput(page, "The reply being interrupted.", "prior-run");
-    await expect
-      .poll(() => spoken(page))
-      .toEqual(["The reply being interrupted."]);
-    await nativeEvent(page, { type: "activity", activity: "user-speaking" });
-    await page.evaluate(() => {
-      const harness = (
-        window as typeof window & { __GOOSE_E2E__: VoiceHarness }
-      ).__GOOSE_E2E__;
-      harness.emitTauriEvent("pocket-voice:stream-event", {
-        streamId: harness.pocketVoiceStreamIds()[0],
-        state: "interrupted",
-        error: null,
-        delivery: { segments: [] },
+          enabledExperiments: ["voice-conversation"],
+        }),
       });
-    });
-    await page.evaluate((sessionId) => {
-      (
-        window as typeof window & { __GOOSE_E2E__: VoiceHarness }
-      ).__GOOSE_E2E__.emitAcpNotification({
-        sessionId,
-        update: {
-          sessionUpdate: "session_info_update",
-          _meta: { goose: { activeRunId: null } },
-        },
-      });
-    }, SESSION_ID);
-    await nativeEvent(page, { type: "interimUser", ...utterance });
-    await nativeEvent(page, { type: "activity", activity: "user-idle" });
-    await expect.poll(() => requests(page)).toHaveLength(1);
-    const early = (await requests(page))[0];
-    expect(early.method).toBe("session/prompt");
-    expect(
-      early.params?.prompt?.find((block) => block.text === utterance.text),
-    ).toMatchObject({ annotations: { audience: ["assistant"] } });
-    await expect(page.getByText(utterance.text, { exact: true })).toHaveCount(
-      0,
-    );
-  });
-
-  base(
-    "unchanged final is visible once and releases withheld assistant speech",
-    async ({ page }) => {
-      const answer = "The unchanged provisional answer can now be spoken.";
-      await assistantOutput(page, answer, "early-run");
-      await nativeEvent(page, { type: "microphoneMute", muted: true });
-      await expect
-        .poll(() => spoken(page))
-        .toEqual(["The reply being interrupted."]);
+      await page.goto("/");
+      await page.getByText("Early voice", { exact: true }).click();
+      await expect(page.getByRole("textbox").first()).toBeVisible();
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
       await nativeEvent(page, {
-        type: "user",
-        ...utterance,
-        deliveryAttempts: 0,
+        type: "startup",
+        ownerWindowLabel: "main",
+        line: "Ready",
       });
-      await expect.poll(() => requests(page)).toHaveLength(2);
-      expect((await requests(page))[1].method).toBe(
-        "_goose/unstable/session/steer",
-      );
-      expect(
-        (await requests(page))[1].params?.prompt?.find(
-          (block) => block.text === utterance.text,
-        )?.annotations,
-      ).toBeUndefined();
-      await expect(page.getByText(utterance.text, { exact: true })).toHaveCount(
-        1,
-      );
-      await expect
-        .poll(() => spoken(page))
-        .toEqual(["The reply being interrupted.", answer]);
-      await nativeEvent(page, {
-        type: "user",
-        ...utterance,
-        deliveryAttempts: 0,
-      });
-      await completePrompts(page);
-      await expect(page.getByText(utterance.text, { exact: true })).toHaveCount(
-        1,
-      );
-      expect(await requests(page)).toHaveLength(2);
-      expect(await spoken(page)).toEqual([
-        "The reply being interrupted.",
-        answer,
-      ]);
-    },
-  );
+    });
 
-  for (const finalText of [
-    "Set the temperature to -10 degrees.",
-    "set the temperature to 10 degrees.",
-  ])
+    for (const busy of [false, true])
+      base(
+        `final has sole tool authority, bounded delivery and later utterance (busy: ${busy})`,
+        async ({ page }) => {
+          if (busy)
+            await assistantOutput(
+              page,
+              "An unrelated running answer.",
+              "unrelated-run",
+            );
+          await nativeEvent(page, { type: "interimUser", ...utterance });
+          const allRequests = () =>
+            page.evaluate(() =>
+              (
+                window as typeof window & { __GOOSE_E2E__: VoiceHarness }
+              ).__GOOSE_E2E__.acpRequests(),
+            );
+          await expect
+            .poll(async () =>
+              (await allRequests()).filter(
+                (r) => r.method === "session/set_mode",
+              ),
+            )
+            .toHaveLength(1);
+          const mode = (await allRequests()).find(
+            (r) => r.method === "session/set_mode",
+          );
+          const privateId = mode?.params?.sessionId;
+          if (!privateId) throw new Error("Missing private fork");
+          expect(privateId).not.toBe(SESSION_ID);
+          expect(mode?.params?.modeId).toBe("chat");
+          if (scenario !== "mode-rejected") {
+            await expect.poll(() => requests(page)).toHaveLength(1);
+            expect((await requests(page))[0].params?.sessionId).toBe(privateId);
+            const wire = await allRequests();
+            expect(
+              wire.findIndex((r) => r.method === "session/set_mode"),
+            ).toBeLessThan(
+              wire.findIndex((r) => r.method === "session/prompt"),
+            );
+          } else expect(await requests(page)).toHaveLength(0);
+          await expect(
+            page.getByText(utterance.text, { exact: true }),
+          ).toHaveCount(0);
+          await expect(
+            page.getByText("PRIVATE DRAFT:", { exact: false }),
+          ).toHaveCount(0);
+          const finalText = busy
+            ? utterance.text
+            : "Set the temperature to -10 degrees.";
+          const started = Date.now();
+          await nativeEvent(page, {
+            type: "user",
+            ...utterance,
+            text: finalText,
+            deliveryAttempts: 0,
+          });
+          const mainRequests = async () =>
+            (await requests(page)).filter(
+              (r) => r.params?.sessionId === SESSION_ID,
+            );
+          await expect
+            .poll(mainRequests, { timeout: 1800, intervals: [20, 50] })
+            .toHaveLength(1);
+          expect(Date.now() - started).toBeLessThan(1800);
+          const final = (await mainRequests())[0];
+          expect(final.method).toBe(
+            busy ? "_goose/unstable/session/steer" : "session/prompt",
+          );
+          expect(
+            final.params?.prompt?.find((b) => b.text === finalText)
+              ?.annotations,
+          ).toBeUndefined();
+          const context =
+            final.params?.prompt
+              ?.filter((b) => b.annotations?.audience?.includes("assistant"))
+              .map((b) => b.text)
+              .join("\n") ?? "";
+          if (scenario === "complete") {
+            expect(context).toContain("PRIVATE DRAFT");
+            expect(context).toContain("perform any requested actions normally");
+          } else expect(context).not.toContain("PRIVATE DRAFT");
+          expect(context).not.toContain("do not repeat");
+          await expect(page.getByText(finalText, { exact: true })).toHaveCount(
+            1,
+          );
+          await nativeEvent(page, {
+            type: "user",
+            ...utterance,
+            text: finalText,
+            deliveryAttempts: 0,
+          });
+          expect(await mainRequests()).toHaveLength(1);
+          const cancellations = (await allRequests()).filter(
+            (r) => r.method === "session/cancel",
+          );
+          if (scenario !== "mode-rejected")
+            expect(cancellations.length).toBeGreaterThan(0);
+          expect(
+            cancellations.every((r) => r.params?.sessionId === privateId),
+          ).toBe(true);
+          // Late private output is fenced even after bounded cancellation/cleanup.
+          await page.evaluate(
+            (sessionId) =>
+              (
+                window as typeof window & { __GOOSE_E2E__: VoiceHarness }
+              ).__GOOSE_E2E__.emitAcpNotification({
+                sessionId,
+                update: {
+                  sessionUpdate: "agent_message_chunk",
+                  content: { type: "text", text: "LATE PRIVATE OUTPUT" },
+                },
+              }),
+            privateId,
+          );
+          await expect(
+            page.getByText("LATE PRIVATE OUTPUT", { exact: false }),
+          ).toHaveCount(0);
+          expect(
+            (await spoken(page)).every((text) => !text.includes("PRIVATE")),
+          ).toBe(true);
+          if (!busy)
+            await assistantOutput(
+              page,
+              "The final action has been performed.",
+              "final-run",
+            );
+          await nativeEvent(page, {
+            type: "user",
+            ...utterance,
+            id: "utterance-2",
+            text: "Now report the result.",
+            deliveryAttempts: 0,
+          });
+          await expect.poll(mainRequests).toHaveLength(2);
+          expect((await mainRequests())[1].method).toBe(
+            "_goose/unstable/session/steer",
+          );
+          await completePrompts(page);
+        },
+      );
+
     base(
-      `changed final (${finalText}) never speaks the old answer, including late old output`,
+      "recognition ending without final permits another private utterance",
       async ({ page }) => {
-        const oldAnswer =
-          "This obsolete provisional answer must never be spoken.";
-        await assistantOutput(page, oldAnswer, "obsolete-run");
-        await nativeEvent(page, { type: "microphoneMute", muted: true });
+        await nativeEvent(page, { type: "interimUser", ...utterance });
+        const forks = () =>
+          page.evaluate(() =>
+            (
+              window as typeof window & { __GOOSE_E2E__: VoiceHarness }
+            ).__GOOSE_E2E__
+              .acpRequests()
+              .filter((r) => r.method === "session/fork"),
+          );
+        await expect.poll(forks).toHaveLength(1);
+        await nativeEvent(page, { type: "recognitionPending", pending: false });
         await nativeEvent(page, {
-          type: "user",
+          type: "interimUser",
           ...utterance,
-          text: finalText,
-          deliveryAttempts: 0,
+          id: "utterance-2",
         });
-        await assistantOutput(
-          page,
-          " Late obsolete output must also stay unspoken.",
-          "obsolete-run",
-        );
-        expect(await requests(page)).toHaveLength(1);
-        expect(await spoken(page)).toEqual(["The reply being interrupted."]);
-        await completePrompts(page);
-        await expect.poll(() => requests(page)).toHaveLength(2);
-        expect((await requests(page))[1].method).toBe("session/prompt");
-        await expect(page.getByText(finalText, { exact: true })).toHaveCount(1);
-        await expect(
-          page.getByText(utterance.text, { exact: true }),
-        ).toHaveCount(0);
-        const correctedAnswer =
-          "Only the corrected final answer should be spoken.";
-        await assistantOutput(page, correctedAnswer, "corrected-run");
-        await completePrompts(page);
-        await expect
-          .poll(() => spoken(page))
-          .toEqual(["The reply being interrupted.", correctedAnswer]);
+        await expect.poll(forks).toHaveLength(2);
+        expect(
+          (await requests(page)).every(
+            (r) => r.params?.sessionId !== SESSION_ID,
+          ),
+        ).toBe(true);
       },
     );
-
-  base(
-    "recognition ending without a final discards speculative speech and permits the next utterance",
-    async ({ page }) => {
-      await assistantOutput(
-        page,
-        "An abandoned answer must remain unspoken.",
-        "abandoned-run",
-      );
-      await nativeEvent(page, { type: "recognitionPending", pending: false });
-      await completePrompts(page);
-      await nativeEvent(page, {
-        type: "interimUser",
-        ...utterance,
-        id: "utterance-2",
-        text: "The next utterance.",
-      });
-      await expect.poll(() => requests(page)).toHaveLength(2);
-      expect(await spoken(page)).toEqual(["The reply being interrupted."]);
-      await expect(page.getByText(utterance.text, { exact: true })).toHaveCount(
-        0,
-      );
-      await nativeEvent(page, { type: "cleanShutdown" });
-      await completePrompts(page);
-      expect(await spoken(page)).toEqual(["The reply being interrupted."]);
-    },
-  );
-});
+  });
+}

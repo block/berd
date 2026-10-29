@@ -25,6 +25,7 @@ export function buildInitScript(options?: {
   homeDir?: string;
   modelId?: string;
   holdAcpPrompts?: boolean;
+  privateVoiceDraftScenario?: "complete" | "stalled" | "mode-rejected";
   personas?: unknown[];
   skills?: unknown[];
   projects?: unknown[];
@@ -121,6 +122,7 @@ export function buildInitScript(options?: {
 
   return `
     (() => {
+      const PRIVATE_VOICE_DRAFT = ${JSON.stringify(options?.privateVoiceDraftScenario ?? null)};
       const HOLD_ACP_PROMPTS = ${options?.holdAcpPrompts ?? false};
       const ACP_REQUESTS = [];
       const PENDING_ACP_PROMPTS = new Map();
@@ -179,6 +181,7 @@ export function buildInitScript(options?: {
         lastMessageAt: session.lastMessageAt,
         workingDir: session.workingDir,
         replayText: session.replayText,
+        cwd: session.workingDir ?? "/tmp/alpha",
         providerId: session.providerId ?? "goose",
         modelId: session.modelId ?? null,
       }));
@@ -427,6 +430,7 @@ export function buildInitScript(options?: {
                 sessionId: session.sessionId,
                 title: session.title,
                 updatedAt: session.updatedAt,
+                cwd: session.cwd,
                 _meta: {
                   messageCount: session.messageCount,
                   lastMessageAt: session.lastMessageAt,
@@ -453,6 +457,7 @@ export function buildInitScript(options?: {
               providerId: source?.providerId ?? "goose",
               modelId: source?.modelId ?? null,
               conversationBefore: message.params?._meta?.conversationBefore,
+              mode: null,
             };
             ACP_SESSIONS.unshift(copy);
             return jsonRpcResult(message.id, {
@@ -482,7 +487,10 @@ export function buildInitScript(options?: {
                 update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: session.replayText } },
               });
             }
-            return jsonRpcResult(message.id, {});
+            return jsonRpcResult(message.id, { configOptions: [
+ { id: "provider", kind: { type: "select", currentValue: session?.providerId ?? "openai", options: [] } },
+ { id: "model", category: "model", kind: { type: "select", currentValue: session?.modelId ?? "gpt-4.1", options: [] } },
+ ] });
           }
           case "session/set_config_option": {
             const session = findSession(message.params?.sessionId);
@@ -496,6 +504,17 @@ export function buildInitScript(options?: {
               }
               session.updatedAt = nowIso();
             }
+            return jsonRpcResult(message.id, {});
+          }
+          case "session/set_mode": {
+            const session = findSession(message.params?.sessionId);
+            if (PRIVATE_VOICE_DRAFT === "mode-rejected") return { jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Chat mode unavailable" } };
+            if (session) session.mode = message.params.modeId;
+            return jsonRpcResult(message.id, {});
+          }
+          case "session/delete": {
+            const index = ACP_SESSIONS.findIndex((session) => session.sessionId === message.params?.sessionId);
+            if (index >= 0) ACP_SESSIONS.splice(index, 1);
             return jsonRpcResult(message.id, {});
           }
           case "_goose/unstable/session/steer":
@@ -705,6 +724,19 @@ export function buildInitScript(options?: {
         send(raw) {
           const message = JSON.parse(raw);
           ACP_REQUESTS.push(clone(message));
+          // Semantic model boundary: private inference is only accepted after
+          // a successful chat-mode transition, not merely an audience hint.
+          if (PRIVATE_VOICE_DRAFT && message.method === "session/prompt" && message.params.sessionId.startsWith("session-fork-")) {
+            const session = findSession(message.params.sessionId);
+            if (session?.mode !== "chat") throw new Error("Private model invoked with tool authority");
+            if (PRIVATE_VOICE_DRAFT === "complete") {
+              queueMicrotask(() => {
+                window.__GOOSE_E2E__.emitAcpNotification({ sessionId: session.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "PRIVATE DRAFT: I would set the temperature to 10 degrees." } } });
+                this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(jsonRpcResult(message.id, { stopReason: "end_turn" })) }));
+              });
+              return;
+            }
+          }
           if (HOLD_ACP_PROMPTS && message.method === "session/prompt") {
             PENDING_ACP_PROMPTS.set(message.id, { socket: this, sessionId: message.params.sessionId });
             return;
@@ -959,11 +991,13 @@ export function buildInitScript(options?: {
                   sessionId: session.sessionId,
                   title: session.title,
                   updatedAt: session.updatedAt,
+                cwd: session.cwd,
                   messageCount: session.messageCount,
                   lastMessageAt: session.lastMessageAt,
                   providerId: session.providerId,
                   modelId: session.modelId,
                   conversationBefore: session.conversationBefore,
+        cwd: session.workingDir ?? "/tmp/alpha",
                 })),
               );
             case "create_session":

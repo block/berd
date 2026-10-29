@@ -1,0 +1,107 @@
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { startPrivateVoiceDraft } from "./privateVoiceDraft";
+const mocks = vi.hoisted(() => ({
+  forkSession: vi.fn(),
+  setSessionMode: vi.fn(),
+  prompt: vi.fn(),
+  cancelSession: vi.fn(),
+  deleteSession: vi.fn(),
+  hide: vi.fn(),
+  intercept: vi.fn(),
+}));
+vi.mock("@/shared/api/acpApi", () => mocks);
+vi.mock("@/shared/api/acpConnection", () => ({
+  hidePrivateSessionNotifications: mocks.hide,
+  interceptSessionNotifications: mocks.intercept,
+}));
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.resetAllMocks();
+  mocks.forkSession.mockResolvedValue({ sessionId: "private" });
+  mocks.setSessionMode.mockResolvedValue(undefined);
+  mocks.prompt.mockResolvedValue(undefined);
+  mocks.cancelSession.mockResolvedValue(undefined);
+  mocks.deleteSession.mockResolvedValue(undefined);
+  mocks.intercept.mockReturnValue(vi.fn());
+});
+afterEach(() => vi.useRealTimers());
+it("awaits chat mode before first prompt and captures only private text", async () => {
+  const mode = deferred<void>();
+  mocks.setSessionMode.mockReturnValue(mode.promise);
+  mocks.prompt.mockImplementation(async () => {
+    mocks.intercept.mock.calls[0][0]({
+      sessionId: "private",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Draft" },
+      },
+    });
+  });
+  const draft = startPrivateVoiceDraft("main", "/work", "interim");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(mocks.setSessionMode).toHaveBeenCalledWith("private", "chat");
+  expect(mocks.prompt).not.toHaveBeenCalled();
+  mode.resolve();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(await draft.take()).toBe("Draft");
+  expect(mocks.forkSession).toHaveBeenCalledWith("main", "/work");
+  expect(mocks.cancelSession).toHaveBeenCalledWith("private");
+});
+it("fails closed when chat mode is rejected", async () => {
+  mocks.setSessionMode.mockRejectedValue(new Error("unsupported"));
+  const draft = startPrivateVoiceDraft("main", "/work", "interim");
+  await expect(draft.take()).resolves.toBeNull();
+  expect(mocks.prompt).not.toHaveBeenCalled();
+});
+it.each([
+  "fork",
+  "mode",
+  "prompt",
+])("bounds stalled %s and cancellation without touching main", async (stage) => {
+  const stalled = deferred<never>();
+  mocks[
+    stage === "fork"
+      ? "forkSession"
+      : stage === "mode"
+        ? "setSessionMode"
+        : "prompt"
+  ].mockReturnValue(stalled.promise);
+  mocks.cancelSession.mockReturnValue(stalled.promise);
+  mocks.deleteSession.mockReturnValue(stalled.promise);
+  const draft = startPrivateVoiceDraft("main", "/work", "interim");
+  const taken = draft.take();
+  await vi.advanceTimersByTimeAsync(750);
+  expect(await taken).toBeNull();
+  expect(mocks.cancelSession.mock.calls.every(([id]) => id === "private")).toBe(
+    true,
+  );
+  if (stage !== "prompt") expect(mocks.prompt).not.toHaveBeenCalled();
+});
+it("bounds best effort setup and cleans a fork created after disposal", async () => {
+  const fork = deferred<{ sessionId: string }>();
+  mocks.forkSession.mockReturnValue(fork.promise);
+  startPrivateVoiceDraft("main", "/work", "interim");
+  await vi.advanceTimersByTimeAsync(2000);
+  fork.resolve({ sessionId: "late-private" });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(mocks.cancelSession).toHaveBeenCalledWith("late-private");
+  expect(mocks.hide).toHaveBeenCalledWith("late-private");
+  expect(mocks.setSessionMode).not.toHaveBeenCalled();
+  expect(mocks.prompt).not.toHaveBeenCalled();
+});
+it("never prompts after a timed out mode ack", async () => {
+  const mode = deferred<void>();
+  mocks.setSessionMode.mockReturnValue(mode.promise);
+  startPrivateVoiceDraft("main", "/work", "interim");
+  await vi.advanceTimersByTimeAsync(2000);
+  mode.resolve();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(mocks.prompt).not.toHaveBeenCalled();
+});

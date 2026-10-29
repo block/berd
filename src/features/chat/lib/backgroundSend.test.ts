@@ -43,34 +43,6 @@ describe("sendPromptInBackground", () => {
     );
   });
 
-  it("preserves assistant-only input through queued background dispatch", async () => {
-    await sendPromptInBackground(
-      "session-1",
-      "provisional words",
-      "goose",
-      undefined,
-      {
-        assistantOnlyInput: true,
-        userMessageMetadata: {
-          origin: "voice_conversation",
-          userVisible: false,
-        },
-      },
-    );
-
-    expect(mocks.dispatchPrompt).toHaveBeenCalledWith(
-      "session-1",
-      "provisional words",
-      expect.objectContaining({
-        assistantOnlyInput: true,
-        userMessageMetadata: {
-          origin: "voice_conversation",
-          userVisible: false,
-        },
-      }),
-    );
-  });
-
   it.each([
     new QueuedSessionNotReadyError(),
     new QueuedMessageOwnershipLostError(),

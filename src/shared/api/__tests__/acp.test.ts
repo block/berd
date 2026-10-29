@@ -177,46 +177,6 @@ describe("acpSteerMessage", () => {
 });
 
 describe("acpSendMessage", () => {
-  it.each([
-    false,
-    true,
-  ])("uses real assistant-only audience for provisional input (steer: %s)", async (steer) => {
-    const registry = await import("../acpSessionRegistry");
-    const { acpSendMessage, acpSteerMessage } = await import("../acp");
-    registry.registerPreparedSession(
-      "early-audience",
-      "goose",
-      "/tmp/project",
-      "test-model",
-    );
-    const options = {
-      assistantOnlyInput: true,
-      assistantPrompt: "Provisional speech.",
-    };
-    if (steer)
-      await acpSteerMessage("early-audience", "run-1", "early words", options);
-    else await acpSendMessage("early-audience", "early words", options);
-    const provisional = (steer ? mockSteerSession : mockPrompt).mock.calls.at(
-      -1,
-    )?.[1];
-    expect(provisional).toEqual([
-      {
-        type: "text",
-        text: "Provisional speech.",
-        annotations: { audience: ["assistant"] },
-      },
-      {
-        type: "text",
-        text: "early words",
-        annotations: { audience: ["assistant"] },
-      },
-    ]);
-    if (steer) await acpSteerMessage("early-audience", "run-1", "final words");
-    else await acpSendMessage("early-audience", "final words");
-    expect(
-      (steer ? mockSteerSession : mockPrompt).mock.calls.at(-1)?.[1],
-    ).toEqual([{ type: "text", text: "final words" }]);
-  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
