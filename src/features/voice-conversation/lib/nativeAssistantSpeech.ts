@@ -1,3 +1,4 @@
+import { speechTextSpans } from "./speechText";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import type {
   Message,
@@ -1601,32 +1602,40 @@ export function startNativeAssistantSpeech(
         if (!utterance) break;
         consumedTextBySlot.set(slot, content.text);
         if (utterance.finishing) continue;
-        const spanStart = utterance.text.length;
-        const targetStart = appendOnly ? previous.length : 0;
-        utterance.text += delta;
-        const previousSpan = utterance.targetSpans.at(-1);
-        if (
-          previousSpan &&
-          targetKey(previousSpan) === targetKey(target) &&
-          previousSpan.end === spanStart &&
-          previousSpan.targetEnd === targetStart
-        ) {
-          previousSpan.end = utterance.text.length;
-          previousSpan.targetEnd = targetStart + delta.length;
-        } else {
-          utterance.targetSpans.push({
-            ...target,
-            start: spanStart,
-            end: utterance.text.length,
-            targetStart,
-            targetEnd: targetStart + delta.length,
-          });
+        const speechSpans = speechTextSpans(
+          content.text,
+          appendOnly ? previous.length : 0,
+        );
+        let speechDelta = "";
+        for (const span of speechSpans) {
+          const spanStart = utterance.text.length;
+          utterance.text += span.text;
+          speechDelta += span.text;
+          const previousSpan = utterance.targetSpans.at(-1);
+          if (
+            previousSpan &&
+            targetKey(previousSpan) === targetKey(target) &&
+            previousSpan.end === spanStart &&
+            previousSpan.targetEnd === span.sourceStart
+          ) {
+            previousSpan.end = utterance.text.length;
+            previousSpan.targetEnd = span.sourceEnd;
+          } else {
+            utterance.targetSpans.push({
+              ...target,
+              start: spanStart,
+              end: utterance.text.length,
+              targetStart: span.sourceStart,
+              targetEnd: span.sourceEnd,
+            });
+          }
         }
-        if (utterance.text.trim().length === 0) continue;
+        if (utterance.text.trim().length === 0 || speechDelta.length === 0)
+          continue;
         queueNativeStart(utterance);
         queueStreamCommand(
           utterance,
-          () => streamBackend.append(utterance.id, delta),
+          () => streamBackend.append(utterance.id, speechDelta),
           onFailure,
         );
         if (targetWasHeld) {

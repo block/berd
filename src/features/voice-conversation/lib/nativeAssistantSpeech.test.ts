@@ -278,6 +278,45 @@ describe("native assistant speech stream", () => {
     stopNativeAssistantSpeech();
   });
 
+  it.each([
+    "pocket",
+    "siri",
+    "openai",
+  ] as const)("sanitizes streamed Markdown in the %s client path", async (backend) => {
+    mocks.backend = backend;
+    startNativeAssistantSpeech("session-1", vi.fn());
+    const append =
+      backend === "siri"
+        ? mocks.siriAppend
+        : backend === "openai"
+          ? mocks.openAiAppend
+          : mocks.append;
+    const source = "See [the docs](https://example.com/a_(b)) now.";
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "See [the docs](https://exa" }]),
+      ]);
+    await vi.waitFor(() => expect(append).toHaveBeenCalled());
+    expect(append.mock.calls.map((call) => call[1]).join("")).toBe(
+      "See the docs",
+    );
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-1", "mple.com/a_(b)) now.");
+    await vi.waitFor(() =>
+      expect(append.mock.calls.map((call) => call[1]).join("")).toBe(
+        "See the docs now.",
+      ),
+    );
+    expect(mocks.prepareAssistantSpeech.mock.calls[0]?.[2]).toBe(
+      "See the docs",
+    );
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({ text: source });
+  });
+
   it("pushes raw assistant deltas without frontend sentence segmentation", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore
@@ -893,6 +932,57 @@ describe("native assistant speech stream", () => {
       useChatStore.getState().messagesBySession["session-1"]?.[0]?.content;
     expect(content?.[0]).toMatchObject({ speech: { status: "spoken" } });
     expect(content?.[2]).toMatchObject({ speech: { status: "spoken" } });
+  });
+
+  it("resumes Markdown speech using source offsets without repeating played prose", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    const source = "Before. [the docs](https://example.com) After.";
+    useChatStore
+      .getState()
+      .setMessages("session-1", [assistant([{ type: "text", text: source }])]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalledTimes(1));
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+    emit("started");
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: {
+        segments: [
+          {
+            text: "Before. the docs",
+            playedFrames: 1000,
+            totalFrames: 1000,
+            synthesisComplete: true,
+          },
+          {
+            text: " After.",
+            playedFrames: 0,
+            totalFrames: 1000,
+            synthesisComplete: true,
+          },
+        ],
+      },
+    });
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({
+      text: source,
+      speech: {
+        status: "interrupted",
+        spokenThrough: source.indexOf(" After."),
+      },
+    });
+    useVoiceConversationStore.setState({ userSpeaking: false });
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-1", " More.");
+    await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(2));
+    const resumed = mocks.start.mock.calls[1]?.[0] as string;
+    expect(mocks.append).toHaveBeenCalledWith(resumed, " After. More.");
+    expect(takeVoicePlaybackNotices("session-1")).toBeNull();
   });
 
   it("resumes a tool suffix from its incomplete synthesis segment", async () => {
