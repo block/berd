@@ -13,6 +13,21 @@ describe("client speech text", () => {
       expect(spoken).toBe("See café docs now.");
     }
   });
+  it("preserves trailing prose after angle-bracket destinations at every streaming boundary", () => {
+    const source =
+      "See [the page](<https://example.com/a(b>) for the next steps.";
+    for (let split = 0; split <= source.length; split++) {
+      const spans = [
+        ...speechTextSpans(source.slice(0, split)),
+        ...speechTextSpans(source, split),
+      ];
+      expect(spans.map((span) => span.text).join("")).toBe(
+        "See the page for the next steps.",
+      );
+      for (const span of spans)
+        expect(source.slice(span.sourceStart, span.sourceEnd)).toBe(span.text);
+    }
+  });
   it("maps spoken characters back to the literal source", () => {
     const source = "See [the docs](https://example.com) now.";
     const spans = speechTextSpans(source);

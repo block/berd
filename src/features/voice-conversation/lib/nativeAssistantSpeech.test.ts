@@ -317,6 +317,30 @@ describe("native assistant speech stream", () => {
     ).toMatchObject({ text: source });
   });
 
+  it("speaks trailing prose after a streamed angle-bracket Markdown destination", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([
+          { type: "text", text: "See [the page](<https://example.com/a(b" },
+        ]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    useChatStore
+      .getState()
+      .appendStreamingText(
+        "session-1",
+        "assistant-1",
+        ">) for the next steps.",
+      );
+    await vi.waitFor(() =>
+      expect(mocks.append.mock.calls.map((call) => call[1]).join("")).toBe(
+        "See the page for the next steps.",
+      ),
+    );
+  });
+
   it("pushes raw assistant deltas without frontend sentence segmentation", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore

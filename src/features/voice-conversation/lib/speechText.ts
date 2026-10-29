@@ -12,6 +12,7 @@ export function speechTextSpans(source: string, from = 0): SpeechTextSpan[] {
   let afterLabel = false;
   let destination = 0;
   let quoted = false;
+  let angleDestination = false;
   let escaped = false;
   let offset = 0;
   for (const char of source) {
@@ -20,6 +21,9 @@ export function speechTextSpans(source: string, from = 0): SpeechTextSpan[] {
     if (destination) {
       if (escaped) escaped = false;
       else if (char === "\\") escaped = true;
+      else if (angleDestination) {
+        if (char === ">") angleDestination = false;
+      } else if (!quoted && char === "<") angleDestination = true;
       else if (char === '"') quoted = !quoted;
       else if (!quoted && char === "(") destination++;
       else if (!quoted && char === ")") destination--;
