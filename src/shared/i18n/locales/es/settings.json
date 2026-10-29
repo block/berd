@@ -1074,6 +1074,7 @@
     "useVoice": "Usar {{voice}}",
     "voice": "Voz",
     "voiceLabel": "Voz de Pocket TTS",
+    "earlyDeliverySaveFailed": "No se pudo guardar la configuración de entrega anticipada.",
     "earlyDelivery": "Entrega anticipada (experimental)",
     "earlyDeliveryDescription": "Prepara un borrador privado mientras hablas para reducir el tiempo de respuesta. La transcripción final sigue siendo la definitiva.",
     "statusSounds": "Sonidos de estado",

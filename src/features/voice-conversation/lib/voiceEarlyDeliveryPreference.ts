@@ -1,146 +1,70 @@
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback } from "react";
+import { VOICE_CONVERSATION_EXPERIMENT_ID as id } from "@/features/experiments/experimentDefinitions";
+import {
+  EXPERIMENT_PREFERENCES_STORAGE_KEY,
+  getExperiment,
+  setExperimentConfigValue,
+  subscribeToExperimentChanges,
+  useExperiment,
+} from "@/features/experiments/experimentPreferences";
 
 export interface VoiceEarlyDeliveryPreference {
   enabled: boolean;
 }
 
-const STORAGE_KEY = "goose:voice-early-delivery-preference";
-const CHANGED_EVENT = "goose:voice-early-delivery-preference-changed";
-const DEFAULT_PREFERENCE: VoiceEarlyDeliveryPreference = {
-  enabled: true,
-};
-const DEFAULT_SNAPSHOT = JSON.stringify(DEFAULT_PREFERENCE);
-let volatilePreference:
-  | {
-      preference: VoiceEarlyDeliveryPreference;
-      storageValueBeforeWrite: string | null | undefined;
-    }
-  | undefined;
-let removeVolatileStorageListener: (() => void) | undefined;
-
-function normalize(value: unknown): VoiceEarlyDeliveryPreference {
-  if (!value || typeof value !== "object") return DEFAULT_PREFERENCE;
-  const candidate = value as Partial<VoiceEarlyDeliveryPreference>;
-  return {
-    enabled:
-      typeof candidate.enabled === "boolean"
-        ? candidate.enabled
-        : DEFAULT_PREFERENCE.enabled,
-  };
+// Compatibility for the briefly published standalone switch. Registry choices win.
+function migrateLegacyOff() {
+  if (typeof window === "undefined") return;
+  const legacyKey = "goose:voice-early-delivery-preference";
+  try {
+    const legacy = window.localStorage.getItem(legacyKey);
+    if (!legacy) return;
+    const stored = JSON.parse(
+      window.localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "{}",
+    );
+    if (
+      stored.experiments?.[id]?.config?.earlyDelivery === undefined &&
+      JSON.parse(legacy)?.enabled === false &&
+      !setExperimentConfigValue(id, "earlyDelivery", false)
+    )
+      return;
+    window.localStorage.removeItem(legacyKey);
+  } catch {
+    // Leave failed migrations intact for the next read.
+  }
 }
 
 export function getDefaultVoiceEarlyDeliveryPreference(): VoiceEarlyDeliveryPreference {
-  return DEFAULT_PREFERENCE;
+  return { enabled: true };
 }
 
 export function getVoiceEarlyDeliveryPreference(): VoiceEarlyDeliveryPreference {
-  if (typeof window === "undefined") return DEFAULT_PREFERENCE;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (volatilePreference) {
-      if (
-        volatilePreference.storageValueBeforeWrite === undefined ||
-        raw === volatilePreference.storageValueBeforeWrite
-      ) {
-        return volatilePreference.preference;
-      }
-      clearVolatilePreference();
-    }
-    return raw ? normalize(JSON.parse(raw)) : DEFAULT_PREFERENCE;
-  } catch {
-    return volatilePreference?.preference ?? DEFAULT_PREFERENCE;
-  }
-}
-
-function getSnapshot(): string {
-  return JSON.stringify(getVoiceEarlyDeliveryPreference());
-}
-
-const listeners = new Set<() => void>();
-let removeWindowListeners: (() => void) | undefined;
-
-function notify() {
-  for (const listener of listeners) listener();
-}
-
-function clearVolatilePreference() {
-  volatilePreference = undefined;
-  removeVolatileStorageListener?.();
-  removeVolatileStorageListener = undefined;
-}
-
-function retainVolatilePreference(
-  preference: VoiceEarlyDeliveryPreference,
-  storageValueBeforeWrite: string | null | undefined,
-) {
-  volatilePreference = { preference, storageValueBeforeWrite };
-  if (removeVolatileStorageListener || typeof window === "undefined") return;
-  const handleStorage = (event: StorageEvent) => {
-    if (event.key !== STORAGE_KEY && event.key !== null) return;
-    clearVolatilePreference();
-    notify();
-  };
-  window.addEventListener("storage", handleStorage);
-  removeVolatileStorageListener = () => {
-    window.removeEventListener("storage", handleStorage);
+  migrateLegacyOff();
+  const experiment = getExperiment(id);
+  return {
+    enabled: !!experiment?.enabled && experiment.config.earlyDelivery === true,
   };
 }
 
-export function subscribeToVoiceEarlyDeliveryPreference(listener: () => void) {
-  if (typeof window === "undefined") return () => {};
-  listeners.add(listener);
-  if (!removeWindowListeners) {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === STORAGE_KEY || event.key === null) {
-        clearVolatilePreference();
-        notify();
-      }
-    };
-    window.addEventListener(CHANGED_EVENT, notify);
-    window.addEventListener("storage", handleStorage);
-    removeWindowListeners = () => {
-      window.removeEventListener(CHANGED_EVENT, notify);
-      window.removeEventListener("storage", handleStorage);
-    };
-  }
-  return () => {
-    listeners.delete(listener);
-    if (listeners.size === 0) {
-      removeWindowListeners?.();
-      removeWindowListeners = undefined;
-    }
-  };
-}
+export const subscribeToVoiceEarlyDeliveryPreference =
+  subscribeToExperimentChanges;
 
 export function setVoiceEarlyDeliveryPreference(
   preference: VoiceEarlyDeliveryPreference,
-): void {
-  if (typeof window === "undefined") return;
-  const value = normalize(preference);
-  let storageValueBeforeWrite: string | null | undefined;
-  try {
-    storageValueBeforeWrite = window.localStorage.getItem(STORAGE_KEY);
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
-    clearVolatilePreference();
-  } catch {
-    // Keep the current in-memory renderer usable when storage is unavailable.
-    retainVolatilePreference(value, storageValueBeforeWrite);
-  }
-  window.dispatchEvent(new CustomEvent(CHANGED_EVENT, { detail: value }));
+): boolean {
+  migrateLegacyOff();
+  return setExperimentConfigValue(id, "earlyDelivery", preference.enabled);
 }
 
 export function useVoiceEarlyDeliveryPreference() {
-  const snapshot = useSyncExternalStore(
-    subscribeToVoiceEarlyDeliveryPreference,
-    getSnapshot,
-    () => DEFAULT_SNAPSHOT,
+  migrateLegacyOff();
+  const experiment = useExperiment(id);
+  const setEnabled = useCallback(
+    (enabled: boolean) => setVoiceEarlyDeliveryPreference({ enabled }),
+    [],
   );
-  const preference = normalize(JSON.parse(snapshot));
-  const setEnabled = useCallback((enabled: boolean) => {
-    setVoiceEarlyDeliveryPreference({
-      ...getVoiceEarlyDeliveryPreference(),
-      enabled,
-    });
-  }, []);
-  return { ...preference, setEnabled };
+  return {
+    enabled: !!experiment?.enabled && experiment.config.earlyDelivery === true,
+    setEnabled,
+  };
 }

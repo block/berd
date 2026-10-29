@@ -237,7 +237,8 @@ export function VoiceSettings() {
       output.setBackend(getDefaultVoiceOutputBackend());
       interruption.setMode(getDefaultVoiceInterruptionPreference().mode);
       statusSounds.update(getDefaultStatusSoundPreference());
-      earlyDelivery.setEnabled(true);
+      if (!earlyDelivery.setEnabled(true))
+        throw new Error(t("voice.earlyDeliverySaveFailed"));
       setResetDialogOpen(false);
     } finally {
       setResetting(false);
@@ -606,7 +607,13 @@ export function VoiceSettings() {
               aria-labelledby={labelId}
               aria-describedby={descriptionId}
               checked={earlyDelivery.enabled}
-              onCheckedChange={earlyDelivery.setEnabled}
+              onCheckedChange={(enabled) => {
+                setResetError(
+                  earlyDelivery.setEnabled(enabled)
+                    ? null
+                    : t("voice.earlyDeliverySaveFailed"),
+                );
+              }}
             />
           )}
         />

@@ -100,6 +100,14 @@ export const EXPERIMENT_DEFINITIONS = [
     titleKey: "experiments.voiceConversation.title",
     descriptionKey: "experiments.voiceConversation.description",
     defaultEnabled: true,
+    config: {
+      earlyDelivery: {
+        type: "boolean",
+        labelKey: "voice.earlyDelivery",
+        descriptionKey: "voice.earlyDeliveryDescription",
+        defaultValue: true,
+      },
+    },
   },
   {
     id: CHAT_ON_CANVAS_EXPERIMENT_ID,
