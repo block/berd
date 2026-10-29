@@ -719,8 +719,6 @@ struct PendingRecognitions {
     ambiguous: bool,
     /// Where each unresolved turn's speech ended, oldest first; None while it continues.
     ends: VecDeque<Option<u64>>,
-    /// Stable identities survive admission-hold expiry until recognition resolves.
-    recognition_ids: VecDeque<String>,
     /// Where the furthest final so far ended, since one can arrive before its turn ends.
     #[cfg(any(target_os = "macos", test))]
     final_end: Option<u64>,
@@ -756,8 +754,6 @@ impl PendingRecognitions {
         } else {
             self.count += 1;
             self.ends.push_back(None);
-            self.recognition_ids
-                .push_back(uuid::Uuid::new_v4().to_string());
         }
         let was_blocking = self.blocking > 0;
         self.blocking = self.blocking.saturating_add(1).min(limit);
@@ -823,10 +819,8 @@ impl PendingRecognitions {
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
     }
 
-    /// Turn-scoped backends retain the oldest final's identity after hold expiry.
-    fn show_interim(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>, text: &str) {
-        let id = self.recognition_ids.back().cloned().unwrap_or_default();
-        self.emit_interim(events, text, id);
+    fn clear_interim(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>) {
+        self.emit_interim(events, "", String::new());
     }
 
     /// Interim text is best effort: a full event queue drops it rather than stall recognition.
@@ -848,15 +842,6 @@ impl PendingRecognitions {
         }
     }
 
-    fn take_final_recognition_id(&mut self) -> String {
-        // Apple can emit several finals before one VAD turn ends. Only the
-        // first final completes its provisional; later segments need fresh IDs.
-        let next = uuid::Uuid::new_v4().to_string();
-        self.recognition_ids
-            .front_mut()
-            .map_or_else(|| next.clone(), |id| std::mem::replace(id, next.clone()))
-    }
-
     fn result_is_current(&self) -> bool {
         !self.ambiguous && self.count == self.blocking
     }
@@ -868,7 +853,6 @@ impl PendingRecognitions {
         let current = self.result_is_current();
         self.count -= 1;
         self.ends.pop_front();
-        self.recognition_ids.pop_front();
         if current {
             self.blocking -= 1;
             if self.blocking == 0 {
@@ -892,7 +876,7 @@ impl PendingRecognitions {
 
     fn reset(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>) -> Result<(), ()> {
         self.release_hold(events)?;
-        self.show_interim(events, "");
+        self.clear_interim(events);
         *self = Self::new();
         Ok(())
     }
@@ -1547,7 +1531,7 @@ fn complete_parakeet_recognition(
     if !text.is_empty() {
         let _ = send_final(
             events,
-            pending.take_final_recognition_id(),
+            uuid::Uuid::new_v4().to_string(),
             text,
             storage_deadline,
         );
@@ -1598,7 +1582,7 @@ fn forward_mac_events(
                     *settle_deadline = None;
                 }
                 if !pending.words_outstanding() {
-                    pending.show_interim(events, "");
+                    pending.clear_interim(events);
                 }
             }
             crate::mac_speech::MacSpeechRecognitionEvent::Heard(_, text) => {
@@ -1732,7 +1716,7 @@ fn mac_speech_worker(
                 return;
             }
             pending.abandon_heard_words();
-            pending.show_interim(&events, "");
+            pending.clear_interim(&events);
             settle_deadline = None;
         }
         let frame = match frames.recv_timeout(Duration::from_millis(50)) {
@@ -2011,7 +1995,7 @@ fn deliver_openai_turns(
         if !text.is_empty() {
             let _ = send_final(
                 events,
-                pending.take_final_recognition_id(),
+                uuid::Uuid::new_v4().to_string(),
                 text,
                 storage_deadline,
             );
@@ -3195,76 +3179,56 @@ mod tests {
     }
 
     #[test]
-    fn expired_recognition_keeps_identity_after_new_provisional() {
-        let (events, mut receiver) = tokio_mpsc::channel(16);
-        let mut pending = PendingRecognitions::new();
-        pending.begin(&events).unwrap();
-        pending.show_interim(&events, "old provisional");
-        pending.release_hold(&events).unwrap();
-        pending.begin(&events).unwrap();
-        pending.show_interim(&events, "new provisional");
-        complete_parakeet_recognition("old final".into(), &events, &mut pending, None);
-        assert_eq!(
-            pending.blocking, 1,
-            "old final must not release the new hold"
-        );
-        complete_parakeet_recognition("new final".into(), &events, &mut pending, None);
-        let mut provisionals = Vec::new();
-        let mut finals = Vec::new();
-        while let Ok(event) = receiver.try_recv() {
-            match event {
-                VoiceInputEvent::InterimTranscript {
-                    recognition_id,
-                    text,
-                } => {
-                    provisionals.push((recognition_id, text));
+    fn final_only_backends_generate_distinct_recognition_ids() {
+        for openai in [false, true] {
+            let (events, mut receiver) = tokio_mpsc::channel(16);
+            let mut pending = PendingRecognitions::new();
+            pending.begin(&events).unwrap();
+            pending.release_hold(&events).unwrap();
+            pending.begin(&events).unwrap();
+            for text in ["old final", "new final"] {
+                if openai {
+                    let mut committed = VecDeque::from([OpenAiCommittedTurn {
+                        item_id: text.into(),
+                        mute_epoch: 0,
+                        settle_deadline: Instant::now(),
+                    }]);
+                    let mut completed = HashMap::from([(text.into(), text.into())]);
+                    deliver_openai_turns(
+                        &mut committed,
+                        &mut completed,
+                        &events,
+                        &mut pending,
+                        None,
+                        None,
+                    );
+                } else {
+                    complete_parakeet_recognition(text.into(), &events, &mut pending, None);
                 }
-                VoiceInputEvent::FinalTranscript {
+                assert_eq!(pending.blocking, usize::from(text == "old final"));
+            }
+            let mut finals = Vec::new();
+            while let Ok(event) = receiver.try_recv() {
+                if let VoiceInputEvent::FinalTranscript {
                     recognition_id,
                     text,
                     ..
-                } => {
+                } = event
+                {
+                    assert_eq!(
+                        uuid::Uuid::parse_str(&recognition_id)
+                            .unwrap()
+                            .get_version_num(),
+                        4
+                    );
                     finals.push((recognition_id, text));
                 }
-                _ => {}
             }
+            assert_eq!(finals.len(), 2);
+            assert_ne!(finals[0].0, finals[1].0);
+            assert_eq!(finals[0].1, "old final");
+            assert_eq!(finals[1].1, "new final");
         }
-        assert_eq!(provisionals.len(), 2);
-        assert_eq!(finals.len(), 2);
-        assert_ne!(provisionals[0].0, provisionals[1].0);
-        assert_eq!(finals[0], (provisionals[0].0.clone(), "old final".into()));
-        assert_eq!(finals[1], (provisionals[1].0.clone(), "new final".into()));
-        assert_eq!(pending.blocking, 0);
-        assert!(pending.recognition_ids.is_empty());
-    }
-
-    #[test]
-    fn identical_interims_on_new_turns_keep_distinct_identities() {
-        let (events, mut receiver) = tokio_mpsc::channel(8);
-        let mut pending = PendingRecognitions::new();
-        pending.begin(&events).unwrap();
-        pending.show_interim(&events, "same words");
-        pending.release_hold(&events).unwrap();
-        pending.begin(&events).unwrap();
-        pending.show_interim(&events, "same words");
-        let mut ids = Vec::new();
-        while let Ok(event) = receiver.try_recv() {
-            if let VoiceInputEvent::InterimTranscript { recognition_id, .. } = event {
-                ids.push(recognition_id);
-            }
-        }
-        assert_eq!(ids.len(), 2);
-        assert_ne!(ids[0], ids[1]);
-    }
-
-    #[test]
-    fn several_finals_before_turn_end_do_not_reuse_the_provisional_identity() {
-        let (events, _receiver) = tokio_mpsc::channel(2);
-        let mut pending = PendingRecognitions::new();
-        pending.begin(&events).unwrap();
-        let provisional = pending.recognition_ids.front().unwrap().clone();
-        assert_eq!(pending.take_final_recognition_id(), provisional);
-        assert_ne!(pending.take_final_recognition_id(), provisional);
     }
 
     #[test]
