@@ -289,8 +289,11 @@ for (const scenario of ["complete", "stalled", "mode-rejected"] as const) {
                 window as typeof window & { __GOOSE_E2E__: VoiceHarness }
               ).__GOOSE_E2E__.acpRequests(),
             );
-          const forks = async () =>
-            (await allRequests()).filter((r) => r.method === "session/fork");
+          const hiddenSessions = async () =>
+            (await allRequests()).filter(
+              (r) =>
+                r.method === "session/new" && r.params?._meta?.hidden === true,
+            );
 
           await openSettings();
           await expect(toggle).toBeChecked();
@@ -317,7 +320,7 @@ for (const scenario of ["complete", "stalled", "mode-rejected"] as const) {
                 ),
               ),
           );
-          expect(await forks()).toHaveLength(0);
+          expect(await hiddenSessions()).toHaveLength(0);
           expect(await requests(page)).toHaveLength(0);
           await nativeEvent(page, {
             type: "user",
@@ -332,7 +335,7 @@ for (const scenario of ["complete", "stalled", "mode-rejected"] as const) {
             type: "text",
             text: utterance.text,
           });
-          expect(await forks()).toHaveLength(0);
+          expect(await hiddenSessions()).toHaveLength(0);
           await expect(
             page.getByText(utterance.text, { exact: true }),
           ).toHaveCount(1);
@@ -347,7 +350,7 @@ for (const scenario of ["complete", "stalled", "mode-rejected"] as const) {
             ...utterance,
             id: "utterance-reenabled",
           });
-          await expect.poll(forks).toHaveLength(1);
+          await expect.poll(hiddenSessions).toHaveLength(1);
           await expect
             .poll(async () =>
               (await allRequests()).filter(
@@ -360,6 +363,31 @@ for (const scenario of ["complete", "stalled", "mode-rejected"] as const) {
           );
           expect(mode?.params?.sessionId).not.toBe(SESSION_ID);
           expect(mode?.params?.modeId).toBe("chat");
+          const creationWire = await allRequests();
+          expect(
+            creationWire.filter((r) => r.method === "session/fork"),
+          ).toHaveLength(0);
+          const created = creationWire.filter(
+            (r) =>
+              r.method === "session/new" && r.params?._meta?.hidden === true,
+          );
+          expect(created).toHaveLength(1);
+          expect(created[0].params?.cwd).toBe("/workspace");
+          expect(created[0].params?._meta).toMatchObject({
+            hidden: true,
+            provider: "openai",
+          });
+          expect(creationWire).toContainEqual(
+            expect.objectContaining({
+              method: "session/set_config_option",
+              params: expect.objectContaining({
+                sessionId: mode?.params?.sessionId,
+                configId: "model",
+                value: "gpt-4.1",
+              }),
+            }),
+          );
+
           await expect
             .poll(async () =>
               (await requests(page)).filter(
@@ -407,9 +435,34 @@ for (const scenario of ["complete", "stalled", "mode-rejected"] as const) {
             (r) => r.method === "session/set_mode",
           );
           const privateId = mode?.params?.sessionId;
-          if (!privateId) throw new Error("Missing private fork");
+          if (!privateId) throw new Error("Missing hidden private session");
           expect(privateId).not.toBe(SESSION_ID);
           expect(mode?.params?.modeId).toBe("chat");
+          const creationWire = await allRequests();
+          expect(
+            creationWire.filter((r) => r.method === "session/fork"),
+          ).toHaveLength(0);
+          const created = creationWire.filter(
+            (r) =>
+              r.method === "session/new" && r.params?._meta?.hidden === true,
+          );
+          expect(created).toHaveLength(1);
+          expect(created[0].params?.cwd).toBe("/workspace");
+          expect(created[0].params?._meta).toMatchObject({
+            hidden: true,
+            provider: "openai",
+          });
+          expect(creationWire).toContainEqual(
+            expect.objectContaining({
+              method: "session/set_config_option",
+              params: expect.objectContaining({
+                sessionId: mode?.params?.sessionId,
+                configId: "model",
+                value: "gpt-4.1",
+              }),
+            }),
+          );
+
           if (scenario !== "mode-rejected") {
             await expect.poll(() => requests(page)).toHaveLength(1);
             expect((await requests(page))[0].params?.sessionId).toBe(privateId);
@@ -525,22 +578,26 @@ for (const scenario of ["complete", "stalled", "mode-rejected"] as const) {
       "recognition ending without final permits another private utterance",
       async ({ page }) => {
         await nativeEvent(page, { type: "interimUser", ...utterance });
-        const forks = () =>
+        const hiddenSessions = () =>
           page.evaluate(() =>
             (
               window as typeof window & { __GOOSE_E2E__: VoiceHarness }
             ).__GOOSE_E2E__
               .acpRequests()
-              .filter((r) => r.method === "session/fork"),
+              .filter(
+                (r) =>
+                  r.method === "session/new" &&
+                  r.params?._meta?.hidden === true,
+              ),
           );
-        await expect.poll(forks).toHaveLength(1);
+        await expect.poll(hiddenSessions).toHaveLength(1);
         await nativeEvent(page, { type: "recognitionPending", pending: false });
         await nativeEvent(page, {
           type: "interimUser",
           ...utterance,
           id: "utterance-2",
         });
-        await expect.poll(forks).toHaveLength(2);
+        await expect.poll(hiddenSessions).toHaveLength(2);
         expect(
           (await requests(page)).every(
             (r) => r.params?.sessionId !== SESSION_ID,

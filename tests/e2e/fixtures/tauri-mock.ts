@@ -218,7 +218,7 @@ export function buildInitScript(options?: {
       let nextEventId = 1;
 
       localStorage.setItem("goose:defaultProvider", "goose");
-      if (ENABLED_EXPERIMENTS.length > 0) {
+      if (ENABLED_EXPERIMENTS.length > 0 && !localStorage.getItem("goose:experimental-features")) {
         localStorage.setItem(
           "goose:experimental-features",
           JSON.stringify({
@@ -426,7 +426,7 @@ export function buildInitScript(options?: {
             });
           case "session/list":
             return jsonRpcResult(message.id, {
-              sessions: ACP_SESSIONS.map((session) => ({
+              sessions: ACP_SESSIONS.filter((session) => !session.hidden).map((session) => ({
                 sessionId: session.sessionId,
                 title: session.title,
                 updatedAt: session.updatedAt,
@@ -440,10 +440,14 @@ export function buildInitScript(options?: {
                 cwd: session.workingDir,
               })),
             });
+          case "_goose/unstable/session/info": {
+            const session = findSession(message.params?.sessionId);
+            return jsonRpcResult(message.id, { session: { sessionId: session.sessionId, cwd: session.cwd, _meta: { providerId: session.providerId, modelId: session.modelId } } });
+          }
           case "session/new": {
-            const providerId = message.params?.meta?.provider ?? "goose";
+            const providerId = message.params?._meta?.provider ?? "goose";
             const sessionId = "session-" + Math.random().toString(36).slice(2, 10);
-            ACP_SESSIONS.unshift(buildSession(sessionId, providerId));
+            ACP_SESSIONS.unshift({ ...buildSession(sessionId, providerId), hidden: message.params?._meta?.hidden === true, cwd: message.params?.cwd });
             return jsonRpcResult(message.id, { sessionId });
           }
           case "session/fork": {
@@ -726,9 +730,9 @@ export function buildInitScript(options?: {
           ACP_REQUESTS.push(clone(message));
           // Semantic model boundary: private inference is only accepted after
           // a successful chat-mode transition, not merely an audience hint.
-          if (PRIVATE_VOICE_DRAFT && message.method === "session/prompt" && message.params.sessionId.startsWith("session-fork-")) {
+          if (PRIVATE_VOICE_DRAFT && message.method === "session/prompt" && findSession(message.params.sessionId)?.hidden) {
             const session = findSession(message.params.sessionId);
-            if (session?.mode !== "chat") throw new Error("Private model invoked with tool authority");
+            if (session?.mode !== "chat" || !session.providerId || !session.modelId) throw new Error("Private model invoked without chat mode and configured model");
             if (PRIVATE_VOICE_DRAFT === "complete") {
               queueMicrotask(() => {
                 window.__GOOSE_E2E__.emitAcpNotification({ sessionId: session.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "PRIVATE DRAFT: I would set the temperature to 10 degrees." } } });
@@ -987,7 +991,7 @@ export function buildInitScript(options?: {
               return Promise.resolve(null);
             case "list_sessions":
               return Promise.resolve(
-                ACP_SESSIONS.map((session) => ({
+                ACP_SESSIONS.filter((session) => !session.hidden).map((session) => ({
                   sessionId: session.sessionId,
                   title: session.title,
                   updatedAt: session.updatedAt,

@@ -2,6 +2,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { startPrivateVoiceDraft } from "./privateVoiceDraft";
 const mocks = vi.hoisted(() => ({
   forkSession: vi.fn(),
+  newSession: vi.fn(),
+  getSessionInfo: vi.fn(),
+  setModel: vi.fn(),
   setSessionMode: vi.fn(),
   prompt: vi.fn(),
   cancelSession: vi.fn(),
@@ -24,7 +27,12 @@ function deferred<T>() {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.resetAllMocks();
-  mocks.forkSession.mockResolvedValue({ sessionId: "private" });
+  mocks.getSessionInfo.mockResolvedValue({
+    providerId: "openai",
+    modelId: "configured-model",
+  });
+  mocks.newSession.mockResolvedValue({ sessionId: "private" });
+  mocks.setModel.mockResolvedValue(undefined);
   mocks.setSessionMode.mockResolvedValue(undefined);
   mocks.prompt.mockResolvedValue(undefined);
   mocks.cancelSession.mockResolvedValue(undefined);
@@ -51,7 +59,17 @@ it("awaits chat mode before first prompt and captures only private text", async 
   mode.resolve();
   await vi.advanceTimersByTimeAsync(0);
   expect(await draft.take()).toBe("Draft");
-  expect(mocks.forkSession).toHaveBeenCalledWith("main", "/work");
+  expect(mocks.forkSession).not.toHaveBeenCalled();
+  expect(mocks.getSessionInfo).toHaveBeenCalledWith("main");
+  expect(mocks.newSession).toHaveBeenCalledWith("/work", {
+    hidden: true,
+    providerId: "openai",
+    backendId: "local",
+  });
+  expect(mocks.setModel).toHaveBeenCalledWith("private", "configured-model");
+  expect(mocks.prompt).toHaveBeenCalledWith("private", [
+    { type: "text", text: "interim" },
+  ]);
   expect(mocks.cancelSession).toHaveBeenCalledWith("private");
 });
 it("fails closed when chat mode is rejected", async () => {
@@ -61,14 +79,14 @@ it("fails closed when chat mode is rejected", async () => {
   expect(mocks.prompt).not.toHaveBeenCalled();
 });
 it.each([
-  "fork",
+  "creation",
   "mode",
   "prompt",
 ])("bounds stalled %s and cancellation without touching main", async (stage) => {
   const stalled = deferred<never>();
   mocks[
-    stage === "fork"
-      ? "forkSession"
+    stage === "creation"
+      ? "newSession"
       : stage === "mode"
         ? "setSessionMode"
         : "prompt"
@@ -86,7 +104,7 @@ it.each([
 });
 it("bounds best effort setup and cleans a fork created after disposal", async () => {
   const fork = deferred<{ sessionId: string }>();
-  mocks.forkSession.mockReturnValue(fork.promise);
+  mocks.newSession.mockReturnValue(fork.promise);
   startPrivateVoiceDraft("main", "/work", "interim");
   await vi.advanceTimersByTimeAsync(2000);
   fork.resolve({ sessionId: "late-private" });
@@ -103,5 +121,24 @@ it("never prompts after a timed out mode ack", async () => {
   await vi.advanceTimersByTimeAsync(2000);
   mode.resolve();
   await vi.advanceTimersByTimeAsync(0);
+  expect(mocks.prompt).not.toHaveBeenCalled();
+});
+
+it.each([
+  { providerId: null, modelId: "model" },
+  { providerId: "openai", modelId: null },
+])("fails closed without configured provider/model: %o", async (config) => {
+  mocks.getSessionInfo.mockResolvedValue(config);
+  const draft = startPrivateVoiceDraft("main", "/work", "interim");
+  await expect(draft.take()).resolves.toBeNull();
+  expect(mocks.newSession).not.toHaveBeenCalled();
+  expect(mocks.forkSession).not.toHaveBeenCalled();
+  expect(mocks.prompt).not.toHaveBeenCalled();
+});
+it("fails closed on model configuration failure", async () => {
+  mocks.setModel.mockRejectedValue(new Error("unavailable"));
+  await expect(
+    startPrivateVoiceDraft("main", "/work", "interim").take(),
+  ).resolves.toBeNull();
   expect(mocks.prompt).not.toHaveBeenCalled();
 });
