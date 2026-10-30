@@ -218,6 +218,26 @@ ensure_checkout_exists() {
 
 ensure_checkout_exists
 
+reconcile_checkout_remote() {
+  if ! git -C "$goose_repo" remote get-url "$remote" >/dev/null 2>&1; then
+    git -C "$goose_repo" remote add "$remote" "$clone_url" >/dev/null 2>&1 || {
+      fail_or_skip "Failed to add Goose remote $remote for managed checkout at $goose_repo."
+    }
+    return 0
+  fi
+
+  local current_url
+  current_url="$(git -C "$goose_repo" remote get-url "$remote")"
+  if [[ "$current_url" != "$clone_url" ]]; then
+    log "Updating managed goose remote $remote from $current_url to $clone_url."
+    git -C "$goose_repo" remote set-url "$remote" "$clone_url" >/dev/null 2>&1 || {
+      fail_or_skip "Failed to update Goose remote $remote for managed checkout at $goose_repo."
+    }
+  fi
+}
+
+reconcile_checkout_remote
+
 bin_path="$(resolve_bin_path)"
 
 if [[ "$allow_dirty" != "1" && -n "$(git -C "$goose_repo" status --porcelain)" ]]; then

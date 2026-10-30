@@ -21,6 +21,9 @@ import { MOCK_PERSONAS, MOCK_PROJECTS, MOCK_SKILLS } from "./mock-data";
  * empty-state or custom scenarios.
  */
 export function buildInitScript(options?: {
+  realAcpUrl?: string;
+  homeDir?: string;
+  modelId?: string;
   personas?: unknown[];
   skills?: unknown[];
   projects?: unknown[];
@@ -37,6 +40,9 @@ export function buildInitScript(options?: {
     errorMessage: string;
   };
 }): string {
+  const modelId = JSON.stringify(options?.modelId ?? "gpt-4.1");
+  const modelName = JSON.stringify(options?.modelId ?? "GPT-4.1");
+  const realAcpUrl = JSON.stringify(options?.realAcpUrl ?? null);
   const personas = JSON.stringify(options?.personas ?? MOCK_PERSONAS);
   const skills = JSON.stringify(options?.skills ?? MOCK_SKILLS);
   const projects = JSON.stringify(options?.projects ?? MOCK_PROJECTS);
@@ -123,6 +129,13 @@ export function buildInitScript(options?: {
       const ENABLED_EXPERIMENTS = ${enabledExperiments};
       const PROVIDER_CATALOG = ${providerCatalog};
       const PROVIDER_INVENTORY = ${providerInventory};
+      if (${realAcpUrl}) {
+        const openai = PROVIDER_INVENTORY.find(entry => entry.providerId === "openai");
+        if (openai) {
+          openai.defaultModel = ${modelId};
+          openai.models = [{ id: ${modelId}, name: ${modelId}, family: "OpenAI", recommended: true }];
+        }
+      }
       const AGENT_SETUP_FAILURE = ${agentSetupFailure};
       const DISTRO = {
         present: false,
@@ -135,15 +148,15 @@ export function buildInitScript(options?: {
           schemaVersion: 1,
           goose: {
             defaultModelProviderId: "openai",
-            defaultModelId: "gpt-4.1",
+            defaultModelId: ${modelId},
             modelProviders: [
               {
                 id: "openai",
                 displayName: "OpenAI",
                 models: [
                   {
-                    id: "gpt-4.1",
-                    name: "GPT-4.1",
+                    id: ${modelId},
+                    name: ${modelName},
                     recommended: true,
                   },
                 ],
@@ -214,8 +227,8 @@ export function buildInitScript(options?: {
         JSON.stringify({
           goose: {
             providerId: "openai",
-            modelId: "gpt-4.1",
-            modelName: "GPT-4.1",
+            modelId: ${modelId},
+            modelName: ${modelName},
           },
         }),
       );
@@ -683,7 +696,7 @@ export function buildInitScript(options?: {
         }
       }
 
-      window.WebSocket = MockWebSocket;
+      if (!${realAcpUrl}) window.WebSocket = MockWebSocket;
 
       window.__TAURI_INTERNALS__ = {
         metadata: {
@@ -695,7 +708,7 @@ export function buildInitScript(options?: {
           switch (cmd) {
             // ---- ACP transport ----
             case "get_goose_serve_url":
-              return Promise.resolve(FAKE_ACP_URL);
+              return Promise.resolve(${realAcpUrl} ?? FAKE_ACP_URL);
             case "get_installation_cohort":
               return Promise.resolve("established-before-landing-v1");
             case "get_running_monitors":
@@ -914,9 +927,9 @@ export function buildInitScript(options?: {
             case "search_file_mentions":
               return Promise.resolve([]);
             case "get_home_dir":
-              return Promise.resolve("/tmp/home");
+              return Promise.resolve(${JSON.stringify(options?.homeDir ?? "/tmp/home")});
             case "path_exists":
-              return Promise.resolve(false);
+              return Promise.resolve(${options?.realAcpUrl ? "true" : "false"});
             case "read_image_attachment":
               return Promise.resolve({
                 base64:
@@ -929,7 +942,7 @@ export function buildInitScript(options?: {
                 .filter((part) => typeof part === "string" && part.length > 0)
                 .join("/");
               const normalizedPath = path.startsWith("~/")
-                ? "/tmp/home/" + path.slice(2)
+                ? ${JSON.stringify(options?.homeDir ?? "/tmp/home")} + "/" + path.slice(2)
                 : path;
               return Promise.resolve({ path: normalizedPath });
             }
