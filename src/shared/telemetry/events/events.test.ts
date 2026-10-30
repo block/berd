@@ -47,6 +47,15 @@ describe("voice events", () => {
     voice_mode: "chained" as const,
   };
 
+  it("reports the selected voice only when one is known", () => {
+    expect(
+      berdVoiceConversationStarted({ ...context, tts_voice: "vera" }).parameters,
+    ).toMatchObject({ tts_voice: "vera" });
+    expect(
+      berdVoiceConversationStarted({ ...context, tts_voice: null }).parameters,
+    ).not.toHaveProperty("tts_voice");
+  });
+
   it("labels successful voice startup with its resolved backends", () => {
     expect(berdVoiceConversationStarted(context)).toEqual({
       name: "berd_voice_conversation_started",

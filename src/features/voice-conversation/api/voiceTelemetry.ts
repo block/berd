@@ -15,6 +15,7 @@ export interface VoiceConversationTelemetryContext {
   outputBackend: VoiceOutputBackend;
   voiceMode: BerdVoiceConversationMode;
   ttsRate?: number | null;
+  ttsVoice?: string | null;
 }
 
 export interface CompletedVoiceConversationTelemetry {
@@ -22,6 +23,7 @@ export interface CompletedVoiceConversationTelemetry {
   outputBackend: VoiceOutputBackend;
   voiceMode: BerdVoiceConversationMode;
   ttsRate?: number | null;
+  ttsVoice?: string | null;
   durationMs: number;
   userUtteranceCount: number;
   assistantResponseCount: number;
@@ -92,19 +94,47 @@ export function endVoiceTelemetry(
   });
 }
 
-// Read the selected backend's configured playback multiplier without changing it.
-export async function getVoiceTtsRate(
+export interface VoiceTtsSettings {
+  rate: number | null;
+  voice: string | null;
+}
+
+// Report a voice only from the backend's own catalog, so free-form overrides stay out of telemetry.
+function catalogVoice(voice: string | null | undefined, catalog: string[]) {
+  return voice ? (catalog.includes(voice) ? voice : "custom") : null;
+}
+
+// Read the selected backend's configured playback multiplier and voice without changing them.
+export async function getVoiceTtsSettings(
   backend: VoiceOutputBackend,
-): Promise<number | null> {
+): Promise<VoiceTtsSettings> {
   try {
-    const status =
-      backend === "pocket"
-        ? await getPocketVoiceStatus()
-        : backend === "siri"
-          ? await getSiriVoiceStatus("")
-          : await getOpenAiVoiceStatus();
-    return status.playbackSpeed;
+    if (backend === "pocket") {
+      const status = await getPocketVoiceStatus();
+      return {
+        rate: status.playbackSpeed,
+        voice: catalogVoice(
+          status.selectedVoice,
+          status.voices.map((voice) => voice.id),
+        ),
+      };
+    }
+    if (backend === "siri") {
+      const status = await getSiriVoiceStatus("");
+      return {
+        rate: status.playbackSpeed,
+        voice: catalogVoice(
+          status.selectedVoice?.name,
+          status.voices.map((voice) => voice.name),
+        ),
+      };
+    }
+    const status = await getOpenAiVoiceStatus();
+    return {
+      rate: status.playbackSpeed,
+      voice: catalogVoice(status.speechVoice, status.speechVoices),
+    };
   } catch {
-    return null;
+    return { rate: null, voice: null };
   }
 }
