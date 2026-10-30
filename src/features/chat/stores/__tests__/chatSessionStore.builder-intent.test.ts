@@ -58,6 +58,29 @@ describe("chat session builder metadata", () => {
     ]);
   });
 
+  it("keeps delegate sessions hidden from recent chats even after activity", () => {
+    const delegateSession = {
+      id: "delegate-session",
+      title: "Delegated task",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      messageCount: 1,
+      sessionType: "sub_agent" as const,
+    };
+    const userSession = {
+      id: "user-session",
+      title: "User chat",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      messageCount: 1,
+      sessionType: "user" as const,
+    };
+
+    expect(getVisibleSessions([delegateSession, userSession], {})).toEqual([
+      userSession,
+    ]);
+  });
+
   it("keeps unsaved empty builder drafts hidden from recent chats", () => {
     const builderSession = {
       id: "builder-session",

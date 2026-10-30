@@ -343,7 +343,7 @@ function sessionHasTerminal(
   );
 }
 
-function includeSessionListPlaceholderSessions(
+export function includeSessionListPlaceholderSessions(
   visibleSessions: ChatSession[],
   sessions: ChatSession[],
   nonEmptyDraftSessionIds: ReadonlySet<string>,
@@ -357,7 +357,12 @@ function includeSessionListPlaceholderSessions(
     visibleSessions.map((session) => session.id),
   );
   const additionalSessions = sessions.filter((session) => {
-    if (visibleSessionIds.has(session.id) || session.archivedAt) {
+    if (
+      visibleSessionIds.has(session.id) ||
+      session.archivedAt ||
+      session.sessionType === "delegate" ||
+      session.sessionType === "sub_agent"
+    ) {
       return false;
     }
 
