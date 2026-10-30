@@ -1,7 +1,7 @@
 {
-  "repo": "https://github.com/johnmatthewtennant/goose.git",
-  "ref": "jtennant/compaction-provider-integration",
-  "commit": "799aa838f5bfcff5b6763e201bd9aa0ee41db0bd",
+  "repo": "https://github.com/aaif-goose/goose.git",
+  "ref": "361003ea3263587f4241a0f906affdcc0d5c9c1f",
+  "commit": "361003ea3263587f4241a0f906affdcc0d5c9c1f",
   "package": "goose-cli",
   "bin": "goose"
 }
