@@ -1076,7 +1076,7 @@
     "voiceLabel": "Voz de Pocket TTS",
     "earlyDeliverySaveFailed": "No se pudo guardar la configuración de entrega anticipada.",
     "earlyDelivery": "Entrega anticipada (experimental)",
-    "earlyDeliveryDescription": "Prepara un borrador privado mientras hablas para reducir el tiempo de respuesta. La transcripción final sigue siendo la definitiva.",
+    "earlyDeliveryDescription": "Envía transcripciones pendientes al agente mientras hablas para que pueda empezar a preparar una respuesta. Solo la transcripción final puede activar acciones.",
     "statusSounds": "Sonidos de estado",
     "statusSoundModes": {
       "off": "Desactivados",
