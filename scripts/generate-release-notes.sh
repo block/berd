@@ -75,6 +75,24 @@ if [[ -z "$NOTES" || "$NOTES" == "null" ]]; then
   exit 1
 fi
 
+# State the goose backend this release was built with, so packagers know
+# whether a goose release can run it.
+GOOSE_LOCK="$(git -C "$REPO_ROOT" show "${TO_REF}:goose-backend.lock.json")"
+GOOSE_REPO="$(jq -er .repo <<<"$GOOSE_LOCK")"
+GOOSE_REF="$(jq -er .ref <<<"$GOOSE_LOCK")"
+GOOSE_COMMIT="$(jq -er .commit <<<"$GOOSE_LOCK")"
+GOOSE_LINK="[\`${GOOSE_COMMIT:0:9}\`](${GOOSE_REPO%.git}/commit/${GOOSE_COMMIT})"
+GOOSE_SOURCE="${GOOSE_REPO#https://github.com/}"
+GOOSE_SOURCE="${GOOSE_SOURCE%.git}"
+if [[ "$GOOSE_SOURCE" == "aaif-goose/goose" && "$GOOSE_REF" == v* ]]; then
+  GOOSE="goose release \`${GOOSE_REF}\`"
+else
+  GOOSE="${GOOSE_SOURCE} commit ${GOOSE_LINK}, which is not a goose release"
+fi
+NOTES="${NOTES}
+
+**goose**: built with ${GOOSE}."
+
 # Append the GitHub compare link. Resolve symbolic refs like HEAD to a sha so
 # the link stays stable.
 COMPARE_TO="$TO_REF"
