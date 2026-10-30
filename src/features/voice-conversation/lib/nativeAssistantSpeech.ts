@@ -1432,6 +1432,7 @@ export function startNativeAssistantSpeech(
       return;
     }
     const messages = useChatStore.getState().messagesBySession[sessionId] ?? [];
+    cacheCausalTranscriptKeys(messages);
     if (
       heldSpeech ||
       voice.userSpeaking ||

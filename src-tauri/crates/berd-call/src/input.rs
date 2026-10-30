@@ -124,10 +124,13 @@ pub enum VoiceInputEvent {
     SpeakingChanged(bool),
     /// Agent speech admission hold, which may expire before recognition finishes.
     RecognitionPendingChanged(bool),
-    /// Display only: words Apple is still transcribing, or empty once none are.
-    /// Never stored, delivered or treated as an utterance.
-    InterimTranscript(String),
+    /// Provisional words, identified by their pending recognition rather than its admission hold.
+    InterimTranscript {
+        recognition_id: String,
+        text: String,
+    },
     FinalTranscript {
+        recognition_id: String,
         text: String,
         storage_receipt: FinalTranscriptStorageReceipt,
     },
@@ -726,6 +729,10 @@ struct PendingRecognitions {
     unfinalized: bool,
     /// The interim text last shown, so repeats and clears are sent once.
     interim: String,
+    interim_recognition_id: String,
+    /// Apple recognition segments can span multiple VAD admission holds.
+    #[cfg(any(target_os = "macos", test))]
+    segment_id: Option<String>,
 }
 
 impl PendingRecognitions {
@@ -795,11 +802,43 @@ impl PendingRecognitions {
         self.unfinalized = false;
     }
 
+    /// Apple reports cumulative text until a final, independent of VAD pauses.
+    #[cfg(any(target_os = "macos", test))]
+    fn show_segment_interim(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>, text: &str) {
+        let id = self
+            .segment_id
+            .get_or_insert_with(|| uuid::Uuid::new_v4().to_string())
+            .clone();
+        self.emit_interim(events, text, id);
+    }
+
+    #[cfg(any(target_os = "macos", test))]
+    fn take_segment_recognition_id(&mut self) -> String {
+        self.segment_id
+            .take()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+    }
+
+    fn clear_interim(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>) {
+        self.emit_interim(events, "", String::new());
+    }
+
     /// Interim text is best effort: a full event queue drops it rather than stall recognition.
-    fn show_interim(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>, text: &str) {
-        if self.interim != text {
+    fn emit_interim(
+        &mut self,
+        events: &tokio_mpsc::Sender<VoiceInputEvent>,
+        text: &str,
+        recognition_id: String,
+    ) {
+        if self.interim != text
+            || (!text.is_empty() && self.interim_recognition_id != recognition_id)
+        {
             self.interim = text.to_string();
-            let _ = events.try_send(VoiceInputEvent::InterimTranscript(self.interim.clone()));
+            self.interim_recognition_id = recognition_id.clone();
+            let _ = events.try_send(VoiceInputEvent::InterimTranscript {
+                recognition_id,
+                text: self.interim.clone(),
+            });
         }
     }
 
@@ -837,7 +876,7 @@ impl PendingRecognitions {
 
     fn reset(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>) -> Result<(), ()> {
         self.release_hold(events)?;
-        self.show_interim(events, "");
+        self.clear_interim(events);
         *self = Self::new();
         Ok(())
     }
@@ -887,6 +926,7 @@ fn clamp_vad_frame(samples: &[f32]) -> Vec<f32> {
 
 fn send_final(
     events: &tokio_mpsc::Sender<VoiceInputEvent>,
+    recognition_id: String,
     text: String,
     storage_deadline: Option<Instant>,
 ) -> Result<(), ()> {
@@ -898,6 +938,7 @@ fn send_final(
     };
     events
         .blocking_send(VoiceInputEvent::FinalTranscript {
+            recognition_id,
             text,
             storage_receipt: receipt,
         })
@@ -1488,7 +1529,12 @@ fn complete_parakeet_recognition(
     storage_deadline: Option<Instant>,
 ) {
     if !text.is_empty() {
-        let _ = send_final(events, text, storage_deadline);
+        let _ = send_final(
+            events,
+            uuid::Uuid::new_v4().to_string(),
+            text,
+            storage_deadline,
+        );
     }
     let _ = pending.resolve(events);
 }
@@ -1520,8 +1566,9 @@ fn forward_mac_events(
         match event {
             crate::mac_speech::MacSpeechRecognitionEvent::Final(text, end) => {
                 let text = text.trim().to_string();
+                let recognition_id = pending.take_segment_recognition_id();
                 if !text.is_empty() {
-                    send_final(events, text, storage_deadline)?;
+                    send_final(events, recognition_id, text, storage_deadline)?;
                 }
                 // One final can span several turns split by pauses, and one turn
                 // can produce several finals, so a final with an end resolves
@@ -1535,12 +1582,12 @@ fn forward_mac_events(
                     *settle_deadline = None;
                 }
                 if !pending.words_outstanding() {
-                    pending.show_interim(events, "");
+                    pending.clear_interim(events);
                 }
             }
             crate::mac_speech::MacSpeechRecognitionEvent::Heard(_, text) => {
                 pending.unfinalized = true;
-                pending.show_interim(events, &text);
+                pending.show_segment_interim(events, &text);
             }
             crate::mac_speech::MacSpeechRecognitionEvent::Finished => {
                 if storage_deadline.is_none() {
@@ -1669,7 +1716,7 @@ fn mac_speech_worker(
                 return;
             }
             pending.abandon_heard_words();
-            pending.show_interim(&events, "");
+            pending.clear_interim(&events);
             settle_deadline = None;
         }
         let frame = match frames.recv_timeout(Duration::from_millis(50)) {
@@ -1946,7 +1993,12 @@ fn deliver_openai_turns(
             .then_some(final_storage_deadline)
             .flatten();
         if !text.is_empty() {
-            let _ = send_final(events, text, storage_deadline);
+            let _ = send_final(
+                events,
+                uuid::Uuid::new_v4().to_string(),
+                text,
+                storage_deadline,
+            );
         }
         let _ = pending.resolve(events);
     }
@@ -2760,12 +2812,13 @@ mod tests {
                 VoiceInputEvent::FinalTranscript {
                     text,
                     storage_receipt,
+                    ..
                 } => {
                     assert_eq!(text, "fixture final");
                     storage_receipt.stored();
                     observed.push("final");
                 }
-                VoiceInputEvent::InterimTranscript(_) => {}
+                VoiceInputEvent::InterimTranscript { .. } => {}
                 VoiceInputEvent::Failed(error) => panic!("unexpected input failure: {error}"),
             }
         }
@@ -3104,12 +3157,88 @@ mod tests {
     }
 
     #[test]
+    fn apple_cumulative_segment_survives_pause_turns() {
+        let (events, mut receiver) = tokio_mpsc::channel(16);
+        let mut pending = PendingRecognitions::new();
+        pending.begin(&events).unwrap();
+        pending.show_segment_interim(&events, "first words");
+        pending.end_turn(&events, 100).unwrap();
+        pending.begin(&events).unwrap();
+        pending.show_segment_interim(&events, "first words and more");
+        let mut ids = Vec::new();
+        while let Ok(event) = receiver.try_recv() {
+            if let VoiceInputEvent::InterimTranscript { recognition_id, .. } = event {
+                ids.push(recognition_id);
+            }
+        }
+        assert_eq!(ids[0], ids[1], "one Apple segment across two VAD turns");
+        pending.release_hold(&events).unwrap();
+        assert_eq!(pending.take_segment_recognition_id(), ids[1]);
+        pending.show_segment_interim(&events, "next segment");
+        assert_ne!(pending.take_segment_recognition_id(), ids[1]);
+    }
+
+    #[test]
+    fn final_only_backends_generate_distinct_recognition_ids() {
+        for openai in [false, true] {
+            let (events, mut receiver) = tokio_mpsc::channel(16);
+            let mut pending = PendingRecognitions::new();
+            pending.begin(&events).unwrap();
+            pending.release_hold(&events).unwrap();
+            pending.begin(&events).unwrap();
+            for text in ["old final", "new final"] {
+                if openai {
+                    let mut committed = VecDeque::from([OpenAiCommittedTurn {
+                        item_id: text.into(),
+                        mute_epoch: 0,
+                        settle_deadline: Instant::now(),
+                    }]);
+                    let mut completed = HashMap::from([(text.into(), text.into())]);
+                    deliver_openai_turns(
+                        &mut committed,
+                        &mut completed,
+                        &events,
+                        &mut pending,
+                        None,
+                        None,
+                    );
+                } else {
+                    complete_parakeet_recognition(text.into(), &events, &mut pending, None);
+                }
+                assert_eq!(pending.blocking, usize::from(text == "old final"));
+            }
+            let mut finals = Vec::new();
+            while let Ok(event) = receiver.try_recv() {
+                if let VoiceInputEvent::FinalTranscript {
+                    recognition_id,
+                    text,
+                    ..
+                } = event
+                {
+                    assert_eq!(
+                        uuid::Uuid::parse_str(&recognition_id)
+                            .unwrap()
+                            .get_version_num(),
+                        4
+                    );
+                    finals.push((recognition_id, text));
+                }
+            }
+            assert_eq!(finals.len(), 2);
+            assert_ne!(finals[0].0, finals[1].0);
+            assert_eq!(finals[0].1, "old final");
+            assert_eq!(finals[1].1, "new final");
+        }
+    }
+
+    #[test]
     fn final_storage_receipt_unblocks_the_bounded_sender() {
         let (events, mut receiver) = tokio_mpsc::channel(1);
         let (done_tx, done_rx) = mpsc::sync_channel(0);
         let sender = thread::spawn(move || {
             send_final(
                 &events,
+                "recognition".into(),
                 "stored words".to_string(),
                 Some(Instant::now() + Duration::from_secs(1)),
             )
@@ -3119,6 +3248,7 @@ mod tests {
         let VoiceInputEvent::FinalTranscript {
             text,
             storage_receipt,
+            ..
         } = receiver.blocking_recv().expect("final event")
         else {
             panic!("expected final transcript")
@@ -3139,6 +3269,7 @@ mod tests {
         let sender = thread::spawn(move || {
             send_final(
                 &events,
+                "recognition".into(),
                 "unstored words".to_string(),
                 Some(Instant::now() + Duration::from_secs(1)),
             )
@@ -3166,8 +3297,20 @@ mod tests {
         let (done_tx, done_rx) = mpsc::sync_channel(0);
         let deadline = Instant::now() + Duration::from_millis(100);
         let sender = thread::spawn(move || {
-            send_final(&events, "first".to_string(), Some(deadline)).unwrap();
-            send_final(&events, "second".to_string(), Some(deadline)).unwrap();
+            send_final(
+                &events,
+                "first-id".into(),
+                "first".to_string(),
+                Some(deadline),
+            )
+            .unwrap();
+            send_final(
+                &events,
+                "second-id".into(),
+                "second".to_string(),
+                Some(deadline),
+            )
+            .unwrap();
             done_tx.send(()).unwrap();
         });
         let VoiceInputEvent::FinalTranscript {

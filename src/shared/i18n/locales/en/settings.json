@@ -1075,6 +1075,9 @@
     "useVoice": "Use {{voice}}",
     "voice": "Voice",
     "voiceLabel": "Pocket TTS voice",
+    "earlyDeliverySaveFailed": "Could not save early delivery setting.",
+    "earlyDelivery": "Early delivery (experimental)",
+    "earlyDeliveryDescription": "Send pending transcripts to the agent while you speak, so it can start preparing a response. Only your final transcript can trigger actions.",
     "statusSounds": "Status sounds",
     "statusSoundModes": {
       "off": "Off",

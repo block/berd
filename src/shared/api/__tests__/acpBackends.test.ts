@@ -924,6 +924,31 @@ describe("inbound session id translation", () => {
     stop();
   });
 
+  it("fences private notifications and permissions before the normal handler", async () => {
+    const conn = await importConnection();
+    const received = vi.fn();
+    const permissions = vi.fn().mockResolvedValue({
+      outcome: { outcome: "selected", optionId: "approve" },
+    });
+    conn.setNotificationHandler({ handleSessionNotification: received });
+    conn.setPermissionHandler(permissions);
+    await conn.getBackendConnection(LOCAL_BACKEND_ID).getClient();
+    const callbacks = await latestCallbacks();
+    conn.hidePrivateSessionNotifications("private-voice");
+    await callbacks.sessionUpdate?.(sessionUpdatePayload("private-voice"));
+    expect(received).not.toHaveBeenCalled();
+    await expect(
+      callbacks.requestPermission({
+        sessionId: "private-voice",
+        toolCall: { toolCallId: "write", title: "write_file" },
+        options: [{ optionId: "approve", name: "Allow", kind: "allow_once" }],
+      }),
+    ).resolves.toEqual({ outcome: { outcome: "cancelled" } });
+    expect(permissions).not.toHaveBeenCalled();
+    await callbacks.sessionUpdate?.(sessionUpdatePayload("ordinary"));
+    expect(received).toHaveBeenCalledOnce();
+  });
+
   it("rewrites remote notification session ids to composite ids", async () => {
     const conn = await importConnection();
     const received: SessionNotification[] = [];

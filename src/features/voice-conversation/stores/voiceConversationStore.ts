@@ -233,11 +233,11 @@ async function deliverTranscriptOnce(
             priorFinalizedTranscriptKeys.set(pendingKey, priorKey);
           }
         }
-        useVoiceConversationStore.setState((state) =>
-          state.latestFinalizedTranscriptKey === finalizedKey
+        useVoiceConversationStore.setState((state) => ({
+          ...(state.latestFinalizedTranscriptKey === finalizedKey
             ? { latestFinalizedTranscriptKey: priorKey }
-            : state,
-        );
+            : {}),
+        }));
       }
     }
     return accepted ? "accepted" : deferred ? "deferred" : "rejected";
@@ -441,6 +441,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                     revision: event.revision,
                   },
                   uiState: "listening",
+
                   microphoneMuted: false,
                   latestFinalizedTranscriptKey: null,
                   error: null,
@@ -463,6 +464,9 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   uiState: activityUiState(nextState),
                 };
               }
+              case "recognitionPending":
+              case "interimUser":
+                return state;
               case "user":
                 return {
                   ...state,

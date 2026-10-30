@@ -9,6 +9,7 @@ import type { MacSpeechSetup } from "../hooks/useMacSpeechSetup";
 import type { SiriVoiceSetup } from "../hooks/useSiriVoiceSetup";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
+import { setVoiceEarlyDeliveryPreference } from "../lib/voiceEarlyDeliveryPreference";
 import { VoiceSettings } from "./VoiceSettings";
 
 if (!HTMLElement.prototype.hasPointerCapture) {
@@ -277,7 +278,32 @@ function siriSetup(): SiriVoiceSetup {
 }
 
 describe("VoiceSettings", () => {
+  it("defaults early delivery on and persists an explicit off choice", async () => {
+    const user = userEvent.setup();
+    const view = renderWithProviders(<VoiceSettings />);
+    const toggle = screen.getByRole("switch", {
+      name: "Early delivery (experimental)",
+    });
+    expect(toggle).toBeChecked();
+    await user.click(toggle);
+    expect(toggle).not.toBeChecked();
+    view.unmount();
+    renderWithProviders(<VoiceSettings />);
+    expect(
+      screen.getByRole("switch", { name: "Early delivery (experimental)" }),
+    ).not.toBeChecked();
+  });
+
+  it("honors saved early delivery off on initial render", () => {
+    setVoiceEarlyDeliveryPreference({ enabled: false });
+    renderWithProviders(<VoiceSettings />);
+    expect(
+      screen.getByRole("switch", { name: "Early delivery (experimental)" }),
+    ).not.toBeChecked();
+  });
+
   beforeEach(async () => {
+    window.localStorage.clear();
     await i18n.changeLanguage("en");
     microphonePermissionState.status = "authorized";
     microphonePermissionState.openSettingsError = false;

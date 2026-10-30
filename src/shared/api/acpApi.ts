@@ -515,6 +515,18 @@ export async function renameSession(
   });
 }
 
+/** Raw ACP mode change. Callers must await success before private inference. */
+export async function setSessionMode(
+  sessionId: string,
+  modeId: string,
+): Promise<void> {
+  const client = await getClientForSession(sessionId);
+  await client.setSessionMode({
+    sessionId: getWireSessionId(sessionId),
+    modeId,
+  });
+}
+
 export async function cancelSession(sessionId: string): Promise<void> {
   const client = await getClientForSession(sessionId);
   await client.cancel({ sessionId: getWireSessionId(sessionId) });
