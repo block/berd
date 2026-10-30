@@ -53,6 +53,7 @@
     "cronLabel": "Expresion cron de {{id}}",
     "cronHelp": "Usa cinco campos (minuto hora dia-del-mes mes dia-de-la-semana) o seis campos con segundos al inicio. Goose usa la zona horaria de este equipo; si especificas dia-del-mes y dia-de-la-semana, ambos deben coincidir. Este editor admite comodines numericos, listas, rangos, pasos y nombres de dias. Las ediciones personalizadas deben repetirse cada mes o mas frecuentemente. Usa un comodin para el mes y para dia-del-mes o dia-de-la-semana. Goose podria quitar el temporizador anterior si una actualizacion falla inesperadamente; verifica la programacion despues de un error al guardar.",
     "saving": "Guardando…",
+    "reconcilingSchedule": "Comprobando el estado actual de la programacion…",
     "updateError": "No se pudo actualizar la programacion de Goose.",
     "updateFailureCaution": "Es posible que el programador haya quitado el temporizador anterior si la actualizacion fallo inesperadamente. Verifica la programacion en Goose antes de depender de ella.",
     "refreshAfterUpdateError": "La actualizacion de la lista tambien fallo, asi que se desconoce el estado actual de la programacion.",

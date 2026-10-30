@@ -5,6 +5,7 @@ import { IconCheck, IconPencil, IconX } from "@tabler/icons-react";
 import type { ScheduledJobDto } from "@aaif/goose-sdk";
 import {
   LOCAL_SCHEDULES_QUERY_KEY,
+  listLocalSchedules,
   updateLocalScheduleCron,
 } from "@/features/automations/api/localSchedules";
 import { validateLocalScheduleCron } from "@/features/automations/lib/localScheduleCron";
@@ -30,35 +31,34 @@ export function LocalScheduleCronEditor({
   const editButtonRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
-  const shouldRestoreFocusOnSaveRef = useRef(false);
   const wasEditingRef = useRef(false);
   const restoreFocusAfterEditRef = useRef(false);
   const [failedCrons, setFailedCrons] = useState<Set<string>>(() => new Set());
+  const scheduleRefreshGenerationRef = useRef(0);
   const normalizedCron = draft.trim().replace(/[ \t\r\n\v\f]+/g, " ");
   const validationError = validateLocalScheduleCron(draft);
   const hasChanged = draft.trim() !== baselineCron.trim();
   const hasKnownCron = draft.trim() === schedule.cron.trim();
   const sameAsFailedCron = failedCrons.has(normalizedCron);
+  const errorCoversCurrentDraft = error !== null && sameAsFailedCron;
+
   const updateMutation = useMutation({
     mutationFn: ({ scheduleId, cron }: { scheduleId: string; cron: string }) =>
       updateLocalScheduleCron(scheduleId, cron),
     onMutate: async () => {
       setIsSaving(true);
-      setIsReconciling(false);
+      scheduleRefreshGenerationRef.current += 1;
       await queryClient.cancelQueries({ queryKey: LOCAL_SCHEDULES_QUERY_KEY });
     },
     onSuccess: async () => {
-      // Re-read the live scheduler after mutation instead of writing the
-      // response into cache: a newer poll may have completed while saving.
       await queryClient.invalidateQueries({
         queryKey: LOCAL_SCHEDULES_QUERY_KEY,
       });
       setError(null);
       setFailedCrons(new Set());
       setIsSaving(false);
-      setIsReconciling(false);
+      scheduleRefreshGenerationRef.current += 1;
       restoreFocusAfterEditRef.current =
-        shouldRestoreFocusOnSaveRef.current ||
         editorRef.current?.contains(document.activeElement) === true;
       setIsEditing(false);
     },
@@ -69,18 +69,27 @@ export function LocalScheduleCronEditor({
       setFailedCrons((previous) => new Set(previous).add(variables.cron));
       setIsSaving(false);
       setIsReconciling(true);
+      const reconcileGeneration = ++scheduleRefreshGenerationRef.current;
       restoreFocusAfterEditRef.current =
-        shouldRestoreFocusOnSaveRef.current ||
         editorRef.current?.contains(document.activeElement) === true ||
         document.activeElement === document.body;
+
       try {
-        await queryClient.refetchQueries(
-          {
-            queryKey: LOCAL_SCHEDULES_QUERY_KEY,
-            predicate: (query) => query.state.fetchStatus !== "paused",
-          },
-          { throwOnError: true, cancelRefetch: false },
-        );
+        await queryClient.cancelQueries({
+          queryKey: LOCAL_SCHEDULES_QUERY_KEY,
+        });
+        // Read fresh state directly; don't join a poll that may have captured
+        // the pre-update schedule while the failed mutation was in flight.
+        const refreshedSchedules = await listLocalSchedules();
+        await queryClient.cancelQueries({
+          queryKey: LOCAL_SCHEDULES_QUERY_KEY,
+        });
+        if (scheduleRefreshGenerationRef.current === reconcileGeneration) {
+          queryClient.setQueryData(
+            LOCAL_SCHEDULES_QUERY_KEY,
+            refreshedSchedules,
+          );
+        }
       } catch {
         setError((current) =>
           current
@@ -88,14 +97,15 @@ export function LocalScheduleCronEditor({
             : t("localSchedules.refreshAfterUpdateError"),
         );
       } finally {
-        setIsReconciling(false);
+        if (scheduleRefreshGenerationRef.current === reconcileGeneration) {
+          setIsReconciling(false);
+        }
       }
     },
   });
 
   const scheduleChangedElsewhere =
     isEditing &&
-    !isReconciling &&
     !updateMutation.isError &&
     !error &&
     schedule.cron !== baselineCron;
@@ -124,7 +134,6 @@ export function LocalScheduleCronEditor({
 
   function beginEditing() {
     restoreFocusAfterEditRef.current = true;
-    shouldRestoreFocusOnSaveRef.current = false;
     setBaselineCron(schedule.cron);
     setDraft(schedule.cron);
     setError(null);
@@ -132,7 +141,6 @@ export function LocalScheduleCronEditor({
   }
 
   function cancelEditing() {
-    shouldRestoreFocusOnSaveRef.current = false;
     setBaselineCron(schedule.cron);
     setDraft(schedule.cron);
     setError(null);
@@ -140,10 +148,8 @@ export function LocalScheduleCronEditor({
   }
 
   function save() {
-    shouldRestoreFocusOnSaveRef.current =
-      editorRef.current?.contains(document.activeElement) === true;
     if (
-      isReconciling ||
+      (isReconciling && !errorCoversCurrentDraft) ||
       !hasChanged ||
       (validationError && !hasKnownCron) ||
       sameAsFailedCron ||
@@ -183,7 +189,6 @@ export function LocalScheduleCronEditor({
         value={draft}
         onChange={(event) => {
           setDraft(event.target.value);
-          setError(null);
         }}
         aria-invalid={!!validationError || !!error}
         aria-describedby={`local-schedule-cron-help-${schedule.id}`}
@@ -198,7 +203,7 @@ export function LocalScheduleCronEditor({
       >
         {t("localSchedules.cronHelp")}
       </p>
-      {error ? (
+      {error && errorCoversCurrentDraft ? (
         <div role="alert" className="text-xs text-destructive">
           <p>{error}</p>
           <p className="mt-1 text-muted-foreground">
@@ -213,6 +218,17 @@ export function LocalScheduleCronEditor({
         <p role="alert" className="text-xs text-destructive">
           {t(`localSchedules.validation.${validationError}`)}
         </p>
+      ) : isReconciling ? (
+        <p role="status" className="text-xs text-muted-foreground">
+          {t("localSchedules.reconcilingSchedule")}
+        </p>
+      ) : error ? (
+        <div role="alert" className="text-xs text-destructive">
+          <p>{error}</p>
+          <p className="mt-1 text-muted-foreground">
+            {t("localSchedules.updateFailureCaution")}
+          </p>
+        </div>
       ) : sameAsFailedCron ? (
         <p role="alert" className="text-xs text-destructive">
           {t("localSchedules.failedUpdateRetry")}
@@ -236,7 +252,7 @@ export function LocalScheduleCronEditor({
             !hasChanged ||
             (!!validationError && !hasKnownCron) ||
             sameAsFailedCron ||
-            isReconciling ||
+            (isReconciling && !errorCoversCurrentDraft) ||
             scheduleChangedElsewhere ||
             schedule.currentlyRunning ||
             isSaving
@@ -244,7 +260,7 @@ export function LocalScheduleCronEditor({
           onClick={save}
         >
           <IconCheck aria-hidden="true" />
-          {updateMutation.isPending
+          {isSaving
             ? t("localSchedules.saving")
             : t("actions.save", { ns: "common" })}
         </Button>
