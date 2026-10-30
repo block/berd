@@ -138,7 +138,7 @@ describe("LocalSchedulesPanel", () => {
     await waitFor(() =>
       expect(screen.getByText("0 10 * * 1-5")).toBeInTheDocument(),
     );
-    expect(listLocalSchedules).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(listLocalSchedules).toHaveBeenCalledTimes(2));
   });
 
   it("keeps the latest list response when a mutation resolves after a newer poll", async () => {
@@ -274,16 +274,17 @@ describe("LocalSchedulesPanel", () => {
     expect(updateLocalScheduleCron).toHaveBeenCalledOnce();
   });
 
-  it("allows an expression again after another update succeeds", async () => {
+  it("waits for reconciliation before saving an alternate after rejection", async () => {
     vi.mocked(updateLocalScheduleCron)
       .mockRejectedValueOnce({
         message: "Update failed",
         data: "schedule rejected",
       })
       .mockResolvedValueOnce({ ...schedule, cron: "0 11 * * 1-5" });
+    const reconciliation = deferred<(typeof schedule)[]>();
     vi.mocked(listLocalSchedules)
       .mockResolvedValueOnce([schedule])
-      .mockResolvedValueOnce([schedule])
+      .mockReturnValueOnce(reconciliation.promise)
       .mockResolvedValueOnce([{ ...schedule, cron: "0 11 * * 1-5" }]);
     renderPanel();
 
@@ -297,11 +298,25 @@ describe("LocalSchedulesPanel", () => {
     fireEvent.change(input, { target: { value: "0 10 * * 1-5" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByText("schedule rejected")).toBeInTheDocument();
+    await waitFor(() => expect(listLocalSchedules).toHaveBeenCalledTimes(2));
 
     fireEvent.change(
       screen.getByLabelText("Cron expression for weekday-report"),
       { target: { value: "0 11 * * 1-5" } },
     );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /Save|Saving/ }),
+      ).toBeDisabled(),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Checking the schedule's current state",
+    );
+    expect(updateLocalScheduleCron).toHaveBeenCalledOnce();
+    await act(async () => {
+      reconciliation.resolve([{ ...schedule, cron: "0 10 * * 1-5" }]);
+      await reconciliation.promise;
+    });
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Save" })).toBeEnabled(),
     );
@@ -309,6 +324,7 @@ describe("LocalSchedulesPanel", () => {
     await waitFor(() =>
       expect(updateLocalScheduleCron).toHaveBeenCalledTimes(2),
     );
+    await waitFor(() => expect(listLocalSchedules).toHaveBeenCalledTimes(3));
     await waitFor(() =>
       expect(screen.getByText("0 11 * * 1-5")).toBeInTheDocument(),
     );
