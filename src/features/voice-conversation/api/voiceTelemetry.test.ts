@@ -30,7 +30,8 @@ it.each([
   mocks.invoke.mockResolvedValue({ playbackSpeed: 1.25, ...status });
   expect(await getVoiceTtsSettings(backend)).toEqual({
     rate: 1.25,
-    voice: backend === "pocket" ? "vera" : backend === "siri" ? "Samantha" : "alloy",
+    voice:
+      backend === "pocket" ? "vera" : backend === "siri" ? "Samantha" : "alloy",
   });
   expect(mocks.invoke.mock.calls[0][0]).toBe(command);
 });
@@ -41,15 +42,25 @@ it("reports a voice outside the backend catalog as custom", async () => {
     speechVoice: "my-gateway-voice",
     speechVoices: ["alloy"],
   });
-  expect(await getVoiceTtsSettings("openai")).toEqual({ rate: 1, voice: "custom" });
+  expect(await getVoiceTtsSettings("openai")).toEqual({
+    rate: 1,
+    voice: "custom",
+  });
 });
 
 it("omits the voice when none is selected", async () => {
-  mocks.invoke.mockResolvedValue({ playbackSpeed: 1, selectedVoice: null, voices: [] });
+  mocks.invoke.mockResolvedValue({
+    playbackSpeed: 1,
+    selectedVoice: null,
+    voices: [],
+  });
   expect(await getVoiceTtsSettings("siri")).toEqual({ rate: 1, voice: null });
 });
 
 it("leaves unavailable settings unknown", async () => {
   mocks.invoke.mockRejectedValue(new Error("backend unavailable"));
-  expect(await getVoiceTtsSettings("siri")).toEqual({ rate: null, voice: null });
+  expect(await getVoiceTtsSettings("siri")).toEqual({
+    rate: null,
+    voice: null,
+  });
 });

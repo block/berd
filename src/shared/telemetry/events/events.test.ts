@@ -49,7 +49,8 @@ describe("voice events", () => {
 
   it("reports the selected voice only when one is known", () => {
     expect(
-      berdVoiceConversationStarted({ ...context, tts_voice: "vera" }).parameters,
+      berdVoiceConversationStarted({ ...context, tts_voice: "vera" })
+        .parameters,
     ).toMatchObject({ tts_voice: "vera" });
     expect(
       berdVoiceConversationStarted({ ...context, tts_voice: null }).parameters,
