@@ -1455,13 +1455,12 @@ fn reject_pending_transcript(
 struct EarlyVoiceTranscript {
     utterance_id: String,
     interim_text: String,
-    user_speaking: bool,
     early_emitted: bool,
 }
 
 impl EarlyVoiceTranscript {
     fn take_ready(&mut self) -> bool {
-        if self.user_speaking || self.early_emitted || self.interim_text.is_empty() {
+        if self.early_emitted || self.interim_text.is_empty() {
             return false;
         }
         self.early_emitted = true;
@@ -1809,20 +1808,7 @@ pub async fn start_native_voice_conversation(
                     log::warn!("Voice input emitted duplicate readiness");
                 }
                 berd_call::input::VoiceInputEvent::SpeakingChanged(speaking) => {
-                    early.user_speaking = speaking;
                     admission.set_user_speaking(speaking);
-                    if early.take_ready() {
-                        let _ = event_window.emit(
-                            EVENT_NAME,
-                            NativeVoiceEvent::InterimUser {
-                                session_id: session_id.clone(),
-                                lifecycle_id: lifecycle_id.clone(),
-                                id: early.utterance_id.clone(),
-                                text: early.interim_text.clone(),
-                                revision,
-                            },
-                        );
-                    }
                     event_state.set_status_sound_input_activity(&session_id, revision, speaking);
                     let event = NativeVoiceEvent::Activity {
                         session_id: session_id.clone(),
@@ -2857,12 +2843,29 @@ mod tests {
     }
 
     #[test]
+    fn speaking_interim_is_delivered_before_final_and_vad_end() {
+        let mut early = EarlyVoiceTranscript::default();
+        early.set_interim("recognition".into(), " first words ".into());
+        assert!(
+            early.take_ready(),
+            "private preparation must start while speaking"
+        );
+        assert_eq!(early.interim_text, "first words");
+        early.set_interim("recognition".into(), "first words continued".into());
+        assert!(!early.take_ready(), "one draft per recognition segment");
+        // The final can arrive before VAD ends. Its private draft already started.
+        early.finish("recognition");
+        assert!(!early.take_ready());
+        early.set_interim("next-recognition".into(), "   ".into());
+        assert!(!early.take_ready(), "blank interims must not start drafts");
+        early.set_interim("next-recognition".into(), "next words".into());
+        assert!(early.take_ready());
+    }
+
+    #[test]
     fn recognition_resolution_allows_early_delivery_after_no_final_or_mute() {
         let mut early = EarlyVoiceTranscript::default();
-        early.user_speaking = true;
         early.set_interim("first-recognition".into(), "first words".into());
-        assert!(!early.take_ready());
-        early.user_speaking = false;
         assert!(early.take_ready());
         assert!(!early.take_ready());
         let previous_id = early.utterance_id.clone();

@@ -417,6 +417,10 @@ for (const scenario of ["complete", "stalled", "mode-rejected"] as const) {
               "An unrelated running answer.",
               "unrelated-run",
             );
+          await nativeEvent(page, {
+            type: "activity",
+            activity: "user-speaking",
+          });
           await nativeEvent(page, { type: "interimUser", ...utterance });
           const allRequests = () =>
             page.evaluate(() =>
@@ -482,6 +486,8 @@ for (const scenario of ["complete", "stalled", "mode-rejected"] as const) {
           const finalText = busy
             ? utterance.text
             : "Set the temperature to -10 degrees.";
+          // The private draft has started while speaking. The final arrives
+          // before VAD idle, and remains the sole authoritative user turn.
           const started = Date.now();
           await nativeEvent(page, {
             type: "user",
@@ -497,6 +503,10 @@ for (const scenario of ["complete", "stalled", "mode-rejected"] as const) {
             .poll(mainRequests, { timeout: 1800, intervals: [20, 50] })
             .toHaveLength(1);
           expect(Date.now() - started).toBeLessThan(1800);
+          await nativeEvent(page, {
+            type: "activity",
+            activity: "user-idle",
+          });
           const final = (await mainRequests())[0];
           expect(final.method).toBe(
             busy ? "_goose/unstable/session/steer" : "session/prompt",
