@@ -404,6 +404,29 @@ mod tests {
     }
 
     #[test]
+    fn session_create_maps_auto_mode_id_onto_the_wire() {
+        let (command, args) = wire_of(&[
+            "berdctl",
+            "session",
+            "create",
+            "--prompt",
+            "hi",
+            "--harness-id",
+            "goose",
+            "--auto-mode-id",
+            "custom-balanced",
+        ]);
+        assert_eq!(command, "sessions");
+        assert_eq!(
+            Value::Object(args),
+            serde_json::json!({
+                "action": "create", "prompt": "hi", "harness_id": "goose",
+                "auto_mode_id": "custom-balanced",
+            })
+        );
+    }
+
+    #[test]
     fn project_create_collects_repeated_working_dirs() {
         let (command, args) = wire_of(&[
             "berdctl",
@@ -628,8 +651,9 @@ mod tests {
 it. Fire-and-forget: returns the session id immediately and the session runs in
 the background without changing what the user sees; the user can open it
 themselves. Use --from to give the delegating session or tool a concise visible
-label on the initial message. Only check on it later (action "get") if the user
-asks.
+label on the initial message. Use --auto-mode-id to select a configured Goose
+Auto mode explicitly; no parent or active UI session selection is inferred. Only
+check on it later (action "get") if the user asks.
 
 Usage: berdctl session create [OPTIONS] --prompt <PROMPT>
 
@@ -643,6 +667,12 @@ Options:
 
       --model-id <MODEL_ID>
           Id of the model to use (from `berdctl info models`).
+
+      --auto-mode-id <AUTO_MODE_ID>
+          Configured Goose Auto mode id (from `berdctl info models --harness-id
+          goose`). Routes each fresh prompt; cannot combine with --model-id or a
+          non-Goose harness. With --agent-id, keeps persona instructions while
+          Auto selects the model.
 
       --agent-id <AGENT_ID>
           Id of the agent (persona) to use (from `berdctl agent list`).
@@ -674,9 +704,12 @@ Examples:
   berdctl session create --prompt "Implement the fix" \
     --project-id <project-id> --startup-name my-feature
 
+  berdctl session create --prompt "Investigate" \
+    --harness-id goose --auto-mode-id <configured-mode-id> --json
+
 Result:
   {"session_id": "...", "title": "...", "harness_id": "...",
-   "send_status": "dispatched"}
+   "auto_mode_id": "..."|null, "send_status": "dispatched"}
   The session runs in the background; the user's view does not change. Check
   progress later with `berdctl session get --session-id <session_id>`.
 "#;

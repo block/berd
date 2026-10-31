@@ -699,6 +699,198 @@ describe("command safety metadata", () => {
 });
 
 describe("sessions.create", () => {
+  function configureAutoModes() {
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          autoRouting: {
+            url: "https://router.example",
+            defaultModeId: "balanced",
+            modes: ["balanced", "custom-mode"].map((id) => ({
+              id,
+              displayName:
+                id === "balanced" ? "Auto Balanced" : "Custom routing",
+              modelProviderId: "openai",
+              fallback: {
+                modelId: `${id}-fallback`,
+                effort: "medium" as const,
+              },
+              models: [{ modelId: `${id}-fallback`, routerModel: id }],
+            })),
+          },
+        },
+      },
+    });
+  }
+
+  it.each([
+    ["balanced", undefined],
+    ["custom-mode", "goose"],
+  ])("creates with refreshed explicit mode %s on harness %s", async (modeId, harnessId) => {
+    usePendingAutoModeStore.setState({ modeId: "unrelated-ui-mode" });
+    mocks.refreshNewChat.mockImplementationOnce(async () =>
+      configureAutoModes(),
+    );
+    const result = await dispatchCommand(
+      "sessions",
+      {
+        action: "create",
+        prompt: "Investigate",
+        auto_mode_id: modeId,
+        ...(harnessId ? { harness_id: harnessId } : {}),
+      },
+      ctx,
+    );
+    expect(result).toMatchObject({ auto_mode_id: modeId, harness_id: "goose" });
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "openai",
+      "/resolved/cwd",
+      expect.objectContaining({ modelId: `${modeId}-fallback` }),
+    );
+    expect(
+      useChatSessionStore.getState().getSession("session-new"),
+    ).toMatchObject({
+      autoModeId: modeId,
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: `${modeId}-fallback`,
+      },
+    });
+  });
+
+  it.each([
+    { auto_mode_id: "missing" },
+    { auto_mode_id: "balanced", model_id: "model-a" },
+    { auto_mode_id: "balanced", harness_id: "codex-acp" },
+  ])("rejects invalid Auto selection before workspace/session side effects: %j", async (selection) => {
+    mocks.refreshNewChat.mockImplementationOnce(async () =>
+      configureAutoModes(),
+    );
+    const error = await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "create",
+          prompt: "Investigate",
+          project_id: "p-1",
+          startup_name: "child",
+          ...selection,
+        },
+        ctx,
+      ),
+      "invalid_args",
+    );
+    expect(error.message).toContain("--auto-mode-id");
+    expect(mocks.refreshNewChat).toHaveBeenCalledOnce();
+    expect(mocks.planProjectChatWorkspaces).not.toHaveBeenCalled();
+    expect(mocks.planProjectChatWorkspacesAsIs).not.toHaveBeenCalled();
+    expect(mocks.resolveSessionCwd).not.toHaveBeenCalled();
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps explicit persona instructions while Auto owns model selection", async () => {
+    configureAutoModes();
+    mocks.listPersonas.mockResolvedValue([
+      {
+        id: "reviewer",
+        displayName: "Reviewer",
+        systemPrompt: "Review carefully.",
+        provider: "codex-acp",
+        model: "persona-model",
+        isBuiltin: false,
+        writable: true,
+      },
+    ]);
+    await dispatchCommand(
+      "sessions",
+      {
+        action: "create",
+        prompt: "Review",
+        auto_mode_id: "balanced",
+        agent_id: "reviewer",
+      },
+      ctx,
+    );
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "openai",
+      "/resolved/cwd",
+      expect.objectContaining({
+        personaId: "reviewer",
+        modelId: "balanced-fallback",
+      }),
+    );
+    expect(
+      useChatSessionStore.getState().getSession("session-new"),
+    ).toMatchObject({
+      autoModeId: "balanced",
+      personaId: "reviewer",
+    });
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-new"]?.[0],
+    ).toMatchObject({
+      payload: {
+        persona: { kind: "persona", id: "reviewer", name: "Reviewer" },
+      },
+    });
+  });
+
+  it("does not apply an Auto default when only an explicit Goose harness is supplied", async () => {
+    configureAutoModes();
+    await dispatchCommand(
+      "sessions",
+      { action: "create", prompt: "Hi", harness_id: "goose" },
+      ctx,
+    );
+    expect(
+      useChatSessionStore.getState().getSession("session-new")?.autoModeId,
+    ).toBeNull();
+  });
+
+  it("discovers refreshed modes separately from concrete models only for Goose", async () => {
+    mocks.refreshNewChat.mockImplementationOnce(async () =>
+      configureAutoModes(),
+    );
+    const result = await dispatchCommand(
+      "info",
+      { action: "list_models" },
+      ctx,
+    );
+    expect(result).toMatchObject({
+      harnesses: expect.arrayContaining([
+        expect.objectContaining({
+          harness_id: "goose",
+          auto_modes: [
+            { id: "balanced", name: "Auto Balanced", is_default: true },
+            { id: "custom-mode", name: "Custom routing", is_default: false },
+          ],
+        }),
+      ]),
+    });
+    const harnesses = (
+      result as {
+        harnesses: Array<{
+          harness_id: string;
+          auto_modes?: unknown;
+          models: Array<{ model_id: string }>;
+        }>;
+      }
+    ).harnesses;
+    for (const harness of harnesses) {
+      if (harness.harness_id !== "goose")
+        expect(harness).not.toHaveProperty("auto_modes");
+      expect(harness.models.map((model) => model.model_id)).not.toContain(
+        "balanced",
+      );
+      expect(harness.models.map((model) => model.model_id)).not.toContain(
+        "custom-mode",
+      );
+    }
+    expect(mocks.refreshNewChat).toHaveBeenCalledOnce();
+  });
+
   it("preserves an explicit persona instead of applying the refreshed Auto default", async () => {
     mocks.listPersonas.mockResolvedValue([
       {
@@ -867,6 +1059,7 @@ describe("sessions.create", () => {
       session_id: "session-new",
       title: DEFAULT_CHAT_TITLE,
       harness_id: "goose",
+      auto_mode_id: null,
       send_status: "dispatched",
     });
 
@@ -2436,6 +2629,7 @@ describe("sessions.get", () => {
       harness_id: "codex-acp",
       model_id: "gpt-6",
       agent_id: null,
+      auto_mode_id: null,
       project_id: "p-1",
       working_dir: "/work",
       created_at: "2026-04-01T00:00:00.000Z",
@@ -2465,6 +2659,19 @@ describe("sessions.get", () => {
       parent_session_id: "parent-1",
     });
     expect(mocks.lastSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it("reports the selected Auto mode in session metadata", async () => {
+    mockSessionFound();
+    useChatSessionStore
+      .getState()
+      .patchSession("session-1", { autoModeId: "balanced" });
+    const result = await dispatchCommand(
+      "sessions",
+      { action: "get", session_id: "session-1" },
+      ctx,
+    );
+    expect(result).toMatchObject({ auto_mode_id: "balanced" });
   });
 
   it("reports whether the session chat is running", async () => {
@@ -5344,6 +5551,7 @@ describe("info", () => {
       ctx,
     );
 
+    expect(mocks.refreshNewChat).not.toHaveBeenCalled();
     expect(result).toEqual({
       harnesses: [
         {
@@ -5371,6 +5579,7 @@ describe("info", () => {
       harnesses: [
         {
           harness_id: "goose",
+          auto_modes: [],
           models: [
             { model_id: "model-a", name: "model-a", provider: modelProvider },
           ],
