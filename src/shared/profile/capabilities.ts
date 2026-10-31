@@ -15,6 +15,7 @@ import type { RuntimeFeatureToggleKey } from "./runtimeFeatureToggles";
 
 export type ProfileCapabilityId =
   | "automations"
+  | "localSchedules"
   | "builderbot"
   | "agentTools"
   | "telemetry"
@@ -53,6 +54,10 @@ export type ProfileCapabilityRegistry = Record<
 >;
 
 export const PROFILE_CAPABILITY_REGISTRY: ProfileCapabilityRegistry = {
+  localSchedules: {
+    kind: "buildFeature",
+    feature: "localSchedules",
+  },
   automations: {
     kind: "runtimeFeature",
     feature: "automations",

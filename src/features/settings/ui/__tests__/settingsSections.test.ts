@@ -12,6 +12,7 @@ import {
 const enabledCapabilities: ProfileCapabilityState = {
   agentTools: true,
   automations: true,
+  localSchedules: true,
   builderbot: true,
   doctor: true,
   feedback: true,

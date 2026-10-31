@@ -2,6 +2,7 @@ export type BuildFeature =
   | "authGate"
   | "agentTools"
   | "automations"
+  | "localSchedules"
   | "builderbot"
   | "byoKeyProviders"
   | "feedback"
@@ -29,6 +30,7 @@ function readBuildFeatures(): Record<BuildFeature, boolean> {
       import.meta.env.VITE_BUILDERBOT === "1",
     agentTools: import.meta.env.VITE_AGENT_TOOLS === "1",
     automations: import.meta.env.VITE_AUTOMATIONS === "1",
+    localSchedules: true,
     builderbot: import.meta.env.VITE_BUILDERBOT === "1",
     byoKeyProviders: import.meta.env.VITE_BYO_KEY_PROVIDERS !== "0",
     feedback: import.meta.env.VITE_FEEDBACK === "1",

@@ -48,6 +48,7 @@ interface AppShellContentProps {
   onLoggedOut?: (status: AuthStatus) => void;
   isPreparingContent: boolean;
   automationsEnabled: boolean;
+  companyAutomationsEnabled?: boolean;
   builderbotEnabled: boolean;
   renderedSession?: ChatSession;
   homeSessionId: string | null;
@@ -133,6 +134,7 @@ export function AppShellContent({
   authStatus,
   isPreparingContent,
   automationsEnabled,
+  companyAutomationsEnabled = automationsEnabled,
   builderbotEnabled,
   designSystemInspectorVisible,
   onCloseDesignSystem,
@@ -196,7 +198,7 @@ export function AppShellContent({
     targetLocation,
   });
 
-  const openHomeAutomation = automationsEnabled
+  const openHomeAutomation = companyAutomationsEnabled
     ? (automationId: string) =>
         onNavigateAutomations({
           surface: "detail",
@@ -205,7 +207,7 @@ export function AppShellContent({
           selectedRunKey: null,
         })
     : undefined;
-  const openHomeAutomations = automationsEnabled
+  const openHomeAutomations = companyAutomationsEnabled
     ? () => onNavigateAutomations({ surface: "overview" })
     : undefined;
   const setupRequiredContent = homeProviderSetupRequired ? (
@@ -239,6 +241,7 @@ export function AppShellContent({
   const routeContent = renderRouteContent({
     authStatus,
     automationsEnabled,
+    companyAutomationsEnabled,
     builderbotEnabled,
     chatComposerHandoffActive,
     chatComposerHandoffInProgress,
@@ -306,6 +309,7 @@ export function AppShellContent({
 interface RenderRouteContentOptions {
   authStatus?: AuthStatus;
   automationsEnabled: boolean;
+  companyAutomationsEnabled?: boolean;
   builderbotEnabled: boolean;
   chatComposerHandoffActive: boolean;
   chatComposerHandoffInProgress: boolean;
@@ -381,6 +385,7 @@ interface RenderRouteContentOptions {
 
 function renderRouteContent({
   automationsEnabled,
+  companyAutomationsEnabled = automationsEnabled,
   builderbotEnabled,
   chatComposerHandoffActive,
   chatComposerHandoffInProgress,
@@ -456,6 +461,7 @@ function renderRouteContent({
     case "automations":
       return automationsEnabled ? (
         <AutomationsWorkbench
+          companyAutomationsEnabled={companyAutomationsEnabled}
           route={location.route}
           onRouteChange={onNavigateAutomations}
           onBreadcrumbLabelChange={onAutomationsBreadcrumbLabelChange}

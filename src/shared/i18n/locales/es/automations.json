@@ -28,6 +28,26 @@
     "error": "No se pudo duplicar la automatizacion.",
     "unsupportedType": "Este tipo de automatizacion no se puede duplicar."
   },
+  "companyAutomations": {
+    "title": "Automatizaciones administradas por la empresa"
+  },
+  "localSchedules": {
+    "title": "Programaciones de Goose",
+    "description": "Se ejecutan localmente en esta instancia de Goose.",
+    "sourceLabel": "Archivo de receta: {{name}}",
+    "hubTitle": "Automatizaciones",
+    "hubDescription": "Consulta tus programaciones locales de Goose y las automatizaciones administradas por la empresa.",
+    "hubLocalOnlyDescription": "Consulta las programaciones configuradas en tu instancia local de Goose.",
+    "loading": "Cargando programaciones de Goose",
+    "loadErrorTitle": "No se pudieron cargar las programaciones de Goose",
+    "loadErrorDescription": "El programador local no esta disponible o Goose no esta conectado.",
+    "refreshError": "No se pudieron actualizar las programaciones: {{error}}. Se muestra la ultima lista cargada.",
+    "emptyTitle": "Aun no hay programaciones locales",
+    "emptyBody": "Las programaciones que crees en Goose apareceran aqui. Usa la CLI de Goose u otro cliente de Goose para programar y configurar recetas.",
+    "paused": "En pausa",
+    "running": "En ejecucion",
+    "lastRun": "Ultima ejecucion: {{time}}"
+  },
   "builder": {
     "blockedBody": "La última respuesta no fue una automatización válida. Intenta reformular lo que quieres.",
     "blockedTitle": "Automatizacion rechazada",
