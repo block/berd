@@ -5,8 +5,7 @@ import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { AgentBuilderLeaveDraftDialogProps } from "../ui/AgentBuilderLeaveDraftDialog";
 import {
   discardDraftAgentSession,
-  hasAgentBuilderSessionUserContent,
-  isDraftAgentBuilderSession,
+  discardUntouchedDraftAgentSession,
   reconcileAgentBuilderSessions,
   resolveAgentBuilderSessionId,
   saveDraftAgentSession,
@@ -127,10 +126,19 @@ export function useAgentBuilderCoordinator({
       }
 
       void (async () => {
-        const hasUserContent = await hasAgentBuilderSessionUserContent(
-          session.id,
-        );
-        if (!hasUserContent) {
+        // An untouched "New agent" draft leaves no trace — no prompt, no
+        // file, no empty chat. The helper re-checks for user content right
+        // before deleting, so a word typed while we were looking keeps the
+        // draft and gets the prompt instead.
+        const outcome = await discardUntouchedDraftAgentSession(session.id, {
+          closeSession,
+          onBeforeDiscard: next,
+        });
+        if (outcome === "discarded") {
+          return;
+        }
+        if (outcome === "nothing-to-discard") {
+          // Editing an existing agent without changes just navigates away.
           next();
           return;
         }
@@ -143,7 +151,7 @@ export function useAgentBuilderCoordinator({
 
       return false;
     },
-    [promptForNavigation],
+    [closeSession, promptForNavigation],
   );
 
   const start = useCallback(
@@ -182,16 +190,14 @@ export function useAgentBuilderCoordinator({
         }
 
         void (async () => {
-          const isDraft = await isDraftAgentBuilderSession(session.id);
-          if (
-            isDraft &&
-            !(await hasAgentBuilderSessionUserContent(session.id))
-          ) {
-            await discardDraftAgentSession(session.id, { closeSession }).catch(
-              (error) => {
-                console.error("Failed to discard empty agent draft:", error);
-              },
-            );
+          // This path is only reachable from the Agents view, so no editor for
+          // the old draft is on screen while it is discarded. Starting the
+          // replacement builder is async (it resolves a provider/model first),
+          // so it runs after the untouched draft is gone rather than racing it.
+          const outcome = await discardUntouchedDraftAgentSession(session.id, {
+            closeSession,
+          });
+          if (outcome === "discarded") {
             startBuilderSession();
             return;
           }
