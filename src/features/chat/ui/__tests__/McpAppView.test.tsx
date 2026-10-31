@@ -523,6 +523,7 @@ describe("McpAppView nested tool calls", () => {
     await waitFor(() => {
       expect(mocks.toolCall).toHaveBeenCalledWith({
         sessionId: "local-session",
+        extensionName: "mcpappbench_local_",
         name: "mcpappbench_local___get-server-time",
         arguments: { timezone: "America/New_York" },
       });
