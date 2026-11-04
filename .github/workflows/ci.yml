@@ -204,6 +204,9 @@ jobs:
         run: pnpm --filter @aaif/goose-sdk build
 
       - name: Build frontend
+        env:
+          # The build repeats the full TypeScript check with the same heap budget.
+          NODE_OPTIONS: --max-old-space-size=4096
         run: just build
 
       - name: Upload frontend build
