@@ -8,7 +8,10 @@ import {
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatDate } from "@/shared/i18n";
-import { listLocalSchedules, updateLocalScheduleCron } from "@/features/automations/api/localSchedules";
+import {
+  listLocalSchedules,
+  updateLocalScheduleCron,
+} from "@/features/automations/api/localSchedules";
 import { LocalSchedulesPanel } from "./LocalSchedulesPanel";
 
 vi.mock("@/features/automations/api/localSchedules", () => ({
@@ -28,10 +31,13 @@ function deferred<T>() {
   return { promise, resolve: resolvePromise };
 }
 
-function renderPanel() {
-  const queryClient = new QueryClient({
+function createQueryClient() {
+  return new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+}
+
+function renderPanel(queryClient = createQueryClient()) {
   return render(
     <QueryClientProvider client={queryClient}>
       <LocalSchedulesPanel />
@@ -233,11 +239,137 @@ describe("LocalSchedulesPanel", () => {
     const input = screen.getByLabelText("Cron expression for weekday-report");
     fireEvent.change(input, { target: { value: "0 0 9 1 * MON" } });
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAccessibleDescription(
+      expect.stringContaining("Use a wildcard for month"),
+    );
+    expect(
+      screen.getByText(/^Use a wildcard for month/).closest('[role="status"]'),
+    ).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByText(/^Use a wildcard for month/)).toHaveTextContent(
       "Use a wildcard for month and a wildcard in either day-of-month or weekday",
     );
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(updateLocalScheduleCron).not.toHaveBeenCalled();
+  });
+
+  it("does not mark an unchanged unsupported existing cron invalid without an error", async () => {
+    vi.mocked(listLocalSchedules).mockResolvedValue([
+      { ...schedule, cron: "0 0 1 1 *" },
+    ]);
+    renderPanel();
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Edit cron schedule for weekday-report",
+      }),
+    );
+    const input = screen.getByLabelText("Cron expression for weekday-report");
+    expect(input).toHaveAttribute("aria-invalid", "false");
+    expect(input).toHaveAttribute(
+      "aria-describedby",
+      "local-schedule-cron-help-weekday-report",
+    );
+    expect(
+      screen.queryByText(/^Use a wildcard for month/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("keeps timer uncertainty after reconciliation, cancel, navigation, and refresh until recovery succeeds", async () => {
+    const reconciliation = deferred<(typeof schedule)[]>();
+    const failed = { ...schedule, cron: "0 10 * * 1-5" };
+    const recovered = { ...schedule, cron: "0 11 * * 1-5" };
+    vi.mocked(listLocalSchedules)
+      .mockResolvedValueOnce([schedule])
+      .mockReturnValueOnce(reconciliation.promise)
+      .mockResolvedValue([failed]);
+    vi.mocked(updateLocalScheduleCron)
+      .mockRejectedValueOnce(new Error("Timer replacement failed"))
+      .mockResolvedValueOnce(recovered);
+    const client = createQueryClient();
+    const view = renderPanel(client);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Edit cron schedule for weekday-report",
+      }),
+    );
+    let input = screen.getByLabelText("Cron expression for weekday-report");
+    fireEvent.change(input, { target: { value: failed.cron } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(
+      await screen.findByText("Timer replacement failed"),
+    ).toBeInTheDocument();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAccessibleDescription(
+      expect.stringContaining("Timer replacement failed"),
+    );
+    await waitFor(() => expect(listLocalSchedules).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      reconciliation.resolve([failed]);
+      await reconciliation.promise;
+    });
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Checking the schedule's current state…"),
+      ).not.toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(
+      screen.getByText("Schedule timer needs verification"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Recover schedule for weekday-report",
+      }),
+    ).toBeInTheDocument();
+    view.unmount();
+    renderPanel(client);
+    expect(
+      await screen.findByText("Schedule timer needs verification"),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled(),
+    );
+    const readsBeforeRefresh = vi.mocked(listLocalSchedules).mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() =>
+      expect(listLocalSchedules).toHaveBeenCalledTimes(readsBeforeRefresh + 1),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Recover schedule for weekday-report",
+      }),
+    );
+    input = screen.getByLabelText("Cron expression for weekday-report");
+    expect(input).toHaveValue(failed.cron);
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(input).toHaveAccessibleDescription(
+      expect.stringContaining("This same expression already failed"),
+    );
+    fireEvent.change(input, { target: { value: recovered.cron } });
+    expect(
+      screen.getByText("Schedule timer needs verification"),
+    ).toBeInTheDocument();
+    vi.mocked(listLocalSchedules).mockResolvedValue([recovered]);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByLabelText("Cron expression for weekday-report"),
+      ).not.toBeInTheDocument(),
+    );
+    expect(updateLocalScheduleCron).toHaveBeenNthCalledWith(
+      2,
+      schedule.id,
+      recovered.cron,
+    );
+    expect(
+      screen.queryByText("Schedule timer needs verification"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Edit cron schedule for weekday-report",
+      }),
+    ).toHaveFocus();
   });
 
   it("surfaces a backend rejection and retains the user's draft", async () => {
@@ -309,9 +441,9 @@ describe("LocalSchedulesPanel", () => {
         screen.getByRole("button", { name: /Save|Saving/ }),
       ).toBeDisabled(),
     );
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Checking the schedule's current state",
-    );
+    expect(
+      screen.getByText("Checking the schedule's current state…"),
+    ).toBeInTheDocument();
     expect(updateLocalScheduleCron).toHaveBeenCalledOnce();
     await act(async () => {
       reconciliation.resolve([{ ...schedule, cron: "0 10 * * 1-5" }]);
@@ -339,6 +471,105 @@ describe("LocalSchedulesPanel", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Save" })).toBeEnabled(),
     );
+  });
+
+  it("blocks overlapping updates after navigation while the previous save is pending", async () => {
+    const pending = deferred<typeof schedule>();
+    vi.mocked(updateLocalScheduleCron).mockReturnValueOnce(pending.promise);
+    const client = createQueryClient();
+    const view = renderPanel(client);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Edit cron schedule for weekday-report",
+      }),
+    );
+    fireEvent.change(
+      screen.getByLabelText("Cron expression for weekday-report"),
+      { target: { value: "0 10 * * 1-5" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateLocalScheduleCron).toHaveBeenCalledOnce());
+    view.unmount();
+    renderPanel(client);
+    const edit = await screen.findByRole("button", {
+      name: "Edit cron schedule for weekday-report",
+    });
+    expect(edit).toBeDisabled();
+    fireEvent.click(edit);
+    expect(
+      screen.queryByLabelText("Cron expression for weekday-report"),
+    ).not.toBeInTheDocument();
+    expect(updateLocalScheduleCron).toHaveBeenCalledOnce();
+    await act(async () => {
+      pending.resolve({ ...schedule, cron: "0 10 * * 1-5" });
+      await pending.promise;
+    });
+    await waitFor(() => expect(edit).toBeEnabled());
+  });
+
+  it("does not let another row's older failure reconciliation overwrite a successful edit", async () => {
+    const other = { ...schedule, id: "other-report" };
+    const recoveredOther = { ...other, cron: "0 11 * * 1-5" };
+    const reconciliation = deferred<(typeof schedule)[]>();
+    let staleResponseDelivered = false;
+    vi.mocked(listLocalSchedules)
+      .mockResolvedValueOnce([schedule, other])
+      .mockReturnValueOnce(
+        reconciliation.promise.then((jobs) => {
+          staleResponseDelivered = true;
+          return jobs;
+        }),
+      )
+      .mockResolvedValue([schedule, recoveredOther]);
+    vi.mocked(updateLocalScheduleCron)
+      .mockRejectedValueOnce(new Error("first update failed"))
+      .mockResolvedValueOnce(recoveredOther);
+    renderPanel();
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Edit cron schedule for weekday-report",
+      }),
+    );
+    fireEvent.change(
+      screen.getByLabelText("Cron expression for weekday-report"),
+      { target: { value: "0 10 * * 1-5" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("first update failed");
+    await waitFor(() => expect(listLocalSchedules).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Edit cron schedule for other-report",
+      }),
+    );
+    fireEvent.change(
+      screen.getByLabelText("Cron expression for other-report"),
+      { target: { value: recoveredOther.cron } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(updateLocalScheduleCron).toHaveBeenNthCalledWith(
+        2,
+        other.id,
+        recoveredOther.cron,
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByLabelText("Cron expression for other-report"),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText(recoveredOther.cron)).toBeInTheDocument();
+    await act(async () => {
+      reconciliation.resolve([schedule, other]);
+      await reconciliation.promise;
+    });
+    expect(staleResponseDelivered).toBe(true);
+    expect(screen.getByText(recoveredOther.cron)).toBeInTheDocument();
+    expect(
+      screen.getByText("Schedule timer needs verification"),
+    ).toBeInTheDocument();
   });
 
   it("shows the scheduler error when the first local-schedule request fails", async () => {
