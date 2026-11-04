@@ -105,6 +105,9 @@ export interface ChatSession {
   /** Transient UI state; not a durable history or remote identity record. */
   remoteSessionUnavailable?: boolean;
   clientSessionId?: string;
+  /** ACP/goose session type. Delegate/sub_agent rows are runtime targets, not normal sidebar chats. */
+  sessionType?: string | null;
+  parentSessionId?: string | null;
   intent?: "build-agent" | null;
   agentBuilderOpen?: boolean;
   agentBuilderContextState?: "autoClosed" | "userOpened";
@@ -175,14 +178,17 @@ export function hasSessionStarted(
 export function getVisibleSessions<
   T extends Pick<
     ChatSession,
-    "id" | "messageCount" | "intent" | "targetAgentDraftSaved"
+    "id" | "messageCount" | "intent" | "targetAgentDraftSaved" | "sessionType"
   >,
 >(
   sessions: T[],
   messagesBySession: Record<string, ArrayLike<unknown> | number | undefined>,
 ): T[] {
-  return sessions.filter((session) =>
-    hasSessionStarted(session, messagesBySession[session.id]),
+  return sessions.filter(
+    (session) =>
+      session.sessionType !== "delegate" &&
+      session.sessionType !== "sub_agent" &&
+      hasSessionStarted(session, messagesBySession[session.id]),
   );
 }
 

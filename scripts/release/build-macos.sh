@@ -463,7 +463,19 @@ echo "+++ :hammer: pnpm tauri build (unsigned)"
 GOOSE_BUILD_PROFILE=release ./scripts/prepare-goose-sidecar.sh
 # ACP bridges are installed into the managed Node runtime on demand; they are
 # no longer staged as build resources.
-VITE_FEEDBACK="$VITE_FEEDBACK_VALUE" ./scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"
+# berd-call is compiled here rather than under the VITE env below, so it gets
+# the app's telemetry policy explicitly. An empty environment, the CLI's twin of
+# the renderer's VITE_TELEMETRY=0, compiles its telemetry out.
+BERD_CALL_TELEMETRY_ENVIRONMENT="$VITE_ENVIRONMENT_VALUE"
+for pair in ${VITE_EXTRA_ENV[@]+"${VITE_EXTRA_ENV[@]}"}; do
+  if [[ "$pair" == "VITE_TELEMETRY=0" ]]; then BERD_CALL_TELEMETRY_ENVIRONMENT=""; fi
+done
+BERD_CALL_TELEMETRY_CHANNEL="$(jq -r '.telemetry.channel // "public"' distro/distro.json 2>/dev/null || echo public)"
+BERD_CALL_VERSION="$RELEASE_VERSION" \
+  BERD_CALL_TELEMETRY_ENVIRONMENT="$BERD_CALL_TELEMETRY_ENVIRONMENT" \
+  BERD_CALL_TELEMETRY_CHANNEL="$BERD_CALL_TELEMETRY_CHANNEL" \
+  VITE_TELEMETRY_ENFORCED="$VITE_TELEMETRY_ENFORCED_VALUE" \
+  VITE_FEEDBACK="$VITE_FEEDBACK_VALUE" ./scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"
 if [[ "$VITE_AGENT_TOOLS_VALUE" == "1" ]]; then
   ./scripts/prepare-bb-cli-resource.sh "$TARGET_TRIPLE"
   tmp="$(mktemp)"

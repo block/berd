@@ -16,6 +16,9 @@ path = "src/main.rs"
 default = ["static"]
 static = ["sherpa-onnx/static"]
 shared = ["sherpa-onnx/shared"]
+# Internal builds report usage without a consent setting, like the app's
+# block-telemetry-enforced.
+telemetry-enforced = []
 
 [dependencies]
 audioadapter-buffers = "3.0"

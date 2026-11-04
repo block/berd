@@ -21,11 +21,18 @@ import { MOCK_PERSONAS, MOCK_PROJECTS, MOCK_SKILLS } from "./mock-data";
  * empty-state or custom scenarios.
  */
 export function buildInitScript(options?: {
+  realAcpUrl?: string;
+  homeDir?: string;
+  modelId?: string;
+  holdAcpPrompts?: boolean;
+  privateVoiceDraftScenario?: "complete" | "stalled" | "mode-rejected";
   personas?: unknown[];
   skills?: unknown[];
   projects?: unknown[];
   sessions?: unknown[];
+  runningMonitors?: unknown[];
   voiceConversationStatus?: unknown;
+  siriVoiceStatus?: unknown;
   enabledExperiments?: string[];
   providerCatalog?: unknown[];
   providerInventory?: unknown[];
@@ -35,10 +42,14 @@ export function buildInitScript(options?: {
     errorMessage: string;
   };
 }): string {
+  const modelId = JSON.stringify(options?.modelId ?? "gpt-4.1");
+  const modelName = JSON.stringify(options?.modelId ?? "GPT-4.1");
+  const realAcpUrl = JSON.stringify(options?.realAcpUrl ?? null);
   const personas = JSON.stringify(options?.personas ?? MOCK_PERSONAS);
   const skills = JSON.stringify(options?.skills ?? MOCK_SKILLS);
   const projects = JSON.stringify(options?.projects ?? MOCK_PROJECTS);
   const sessions = JSON.stringify(options?.sessions ?? []);
+  const runningMonitors = JSON.stringify(options?.runningMonitors ?? []);
   const voiceConversationStatus = JSON.stringify(
     options?.voiceConversationStatus ?? {
       available: false,
@@ -49,6 +60,7 @@ export function buildInitScript(options?: {
     },
   );
   const enabledExperiments = JSON.stringify(options?.enabledExperiments ?? []);
+  const siriVoiceStatus = JSON.stringify(options?.siriVoiceStatus ?? null);
   const providerCatalog = JSON.stringify(options?.providerCatalog ?? []);
   const providerInventory = JSON.stringify(
     options?.providerInventory ?? [
@@ -110,14 +122,26 @@ export function buildInitScript(options?: {
 
   return `
     (() => {
+      const PRIVATE_VOICE_DRAFT = ${JSON.stringify(options?.privateVoiceDraftScenario ?? null)};
+      const HOLD_ACP_PROMPTS = ${options?.holdAcpPrompts ?? false};
+      const ACP_REQUESTS = [];
+      const PENDING_ACP_PROMPTS = new Map();
       const PERSONAS = ${personas};
       const SKILLS = ${skills};
       const PROJECTS = ${projects};
       const SEED_SESSIONS = ${sessions};
+      const RUNNING_MONITORS = ${runningMonitors};
       const VOICE_CONVERSATION_STATUS = ${voiceConversationStatus};
       const ENABLED_EXPERIMENTS = ${enabledExperiments};
       const PROVIDER_CATALOG = ${providerCatalog};
       const PROVIDER_INVENTORY = ${providerInventory};
+      if (${realAcpUrl}) {
+        const openai = PROVIDER_INVENTORY.find(entry => entry.providerId === "openai");
+        if (openai) {
+          openai.defaultModel = ${modelId};
+          openai.models = [{ id: ${modelId}, name: ${modelId}, family: "OpenAI", recommended: true }];
+        }
+      }
       const AGENT_SETUP_FAILURE = ${agentSetupFailure};
       const DISTRO = {
         present: false,
@@ -130,15 +154,15 @@ export function buildInitScript(options?: {
           schemaVersion: 1,
           goose: {
             defaultModelProviderId: "openai",
-            defaultModelId: "gpt-4.1",
+            defaultModelId: ${modelId},
             modelProviders: [
               {
                 id: "openai",
                 displayName: "OpenAI",
                 models: [
                   {
-                    id: "gpt-4.1",
-                    name: "GPT-4.1",
+                    id: ${modelId},
+                    name: ${modelName},
                     recommended: true,
                   },
                 ],
@@ -154,6 +178,10 @@ export function buildInitScript(options?: {
         updatedAt: session.updatedAt ?? new Date().toISOString(),
         messageCount: session.messageCount ?? 0,
         conversationBefore: session.conversationBefore,
+        lastMessageAt: session.lastMessageAt,
+        workingDir: session.workingDir,
+        replayText: session.replayText,
+        cwd: session.workingDir ?? "/tmp/alpha",
         providerId: session.providerId ?? "goose",
         modelId: session.modelId ?? null,
       }));
@@ -162,7 +190,7 @@ export function buildInitScript(options?: {
       const ACP_SOCKETS = new Set();
       const VOICE_ENDPOINTS = JSON.parse(
         localStorage.getItem("goose:e2e:voice-endpoints") ??
-          '{"realtime":null,"stt":null,"tts":null}',
+          '{"stt":null,"tts":null}',
       );
       const LAYOUT_CONSTRAINTS = {
         minCenter: -1000000,
@@ -190,7 +218,7 @@ export function buildInitScript(options?: {
       let nextEventId = 1;
 
       localStorage.setItem("goose:defaultProvider", "goose");
-      if (ENABLED_EXPERIMENTS.length > 0) {
+      if (ENABLED_EXPERIMENTS.length > 0 && !localStorage.getItem("goose:experimental-features")) {
         localStorage.setItem(
           "goose:experimental-features",
           JSON.stringify({
@@ -206,8 +234,8 @@ export function buildInitScript(options?: {
         JSON.stringify({
           goose: {
             providerId: "openai",
-            modelId: "gpt-4.1",
-            modelName: "GPT-4.1",
+            modelId: ${modelId},
+            modelName: ${modelName},
           },
         }),
       );
@@ -292,8 +320,23 @@ export function buildInitScript(options?: {
       })();
       const SKILL_SOURCES = SKILLS.map(skillToSourceEntry);
       const POCKET_VOICE_SPOKEN_TEXTS = [];
+      const VOICE_STREAM_TEXTS = new Map();
+      let voiceSpeechId = 0;
 
       window.__GOOSE_E2E__ = {
+        acpRequests: () => clone(ACP_REQUESTS),
+        completeAcpPrompts: () => {
+          for (const [id, { socket, sessionId }] of PENDING_ACP_PROMPTS) {
+            socket.dispatchEvent(new MessageEvent("message", {
+              data: JSON.stringify(jsonRpcResult(id, { stopReason: "end_turn" })),
+            }));
+            window.__GOOSE_E2E__.emitAcpNotification({
+              sessionId,
+              update: { sessionUpdate: "session_info_update", _meta: { goose: { activeRunId: null } } },
+            });
+          }
+          PENDING_ACP_PROMPTS.clear();
+        },
         listAgentSources: () => clone(AGENT_SOURCES),
         clearAgentSources: () => {
           AGENT_SOURCES = PERSONAS.map(personaToSourceEntry);
@@ -315,6 +358,7 @@ export function buildInitScript(options?: {
         },
         emitTauriEvent,
         pocketVoiceSpokenTexts: () => clone(POCKET_VOICE_SPOKEN_TEXTS),
+        pocketVoiceStreamIds: () => [...VOICE_STREAM_TEXTS.keys()],
       };
 
       function nowIso() {
@@ -382,19 +426,27 @@ export function buildInitScript(options?: {
             });
           case "session/list":
             return jsonRpcResult(message.id, {
-              sessions: ACP_SESSIONS.map((session) => ({
+              sessions: ACP_SESSIONS.filter((session) => !session.hidden).map((session) => ({
                 sessionId: session.sessionId,
                 title: session.title,
                 updatedAt: session.updatedAt,
+                cwd: session.cwd,
                 _meta: {
                   messageCount: session.messageCount,
+                  lastMessageAt: session.lastMessageAt,
+                  providerId: session.providerId,
+                  modelId: session.modelId,
                 },
               })),
             });
+          case "_goose/unstable/session/info": {
+            const session = findSession(message.params?.sessionId);
+            return jsonRpcResult(message.id, { session: { sessionId: session.sessionId, cwd: session.cwd, _meta: { providerId: session.providerId, modelId: session.modelId } } });
+          }
           case "session/new": {
-            const providerId = message.params?.meta?.provider ?? "goose";
+            const providerId = message.params?._meta?.provider ?? "goose";
             const sessionId = "session-" + Math.random().toString(36).slice(2, 10);
-            ACP_SESSIONS.unshift(buildSession(sessionId, providerId));
+            ACP_SESSIONS.unshift({ ...buildSession(sessionId, providerId), hidden: message.params?._meta?.hidden === true, cwd: message.params?.cwd });
             return jsonRpcResult(message.id, { sessionId });
           }
           case "session/fork": {
@@ -408,6 +460,7 @@ export function buildInitScript(options?: {
               providerId: source?.providerId ?? "goose",
               modelId: source?.modelId ?? null,
               conversationBefore: message.params?._meta?.conversationBefore,
+              mode: null,
             };
             ACP_SESSIONS.unshift(copy);
             return jsonRpcResult(message.id, {
@@ -429,8 +482,19 @@ export function buildInitScript(options?: {
             }
             return jsonRpcResult(message.id, {});
           }
-          case "session/load":
-            return jsonRpcResult(message.id, {});
+          case "session/load": {
+            const session = findSession(message.params?.sessionId);
+            if (session?.replayText) {
+              window.__GOOSE_E2E__.emitAcpNotification({
+                sessionId: session.sessionId,
+                update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: session.replayText } },
+              });
+            }
+            return jsonRpcResult(message.id, { configOptions: [
+ { id: "provider", kind: { type: "select", currentValue: session?.providerId ?? "openai", options: [] } },
+ { id: "model", category: "model", kind: { type: "select", currentValue: session?.modelId ?? "gpt-4.1", options: [] } },
+ ] });
+          }
           case "session/set_config_option": {
             const session = findSession(message.params?.sessionId);
             if (session) {
@@ -445,6 +509,22 @@ export function buildInitScript(options?: {
             }
             return jsonRpcResult(message.id, {});
           }
+          case "session/set_mode": {
+            const session = findSession(message.params?.sessionId);
+            if (PRIVATE_VOICE_DRAFT === "mode-rejected") return { jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Chat mode unavailable" } };
+            if (session) session.mode = message.params.modeId;
+            return jsonRpcResult(message.id, {});
+          }
+          case "session/delete": {
+            const index = ACP_SESSIONS.findIndex((session) => session.sessionId === message.params?.sessionId);
+            if (index >= 0) ACP_SESSIONS.splice(index, 1);
+            return jsonRpcResult(message.id, {});
+          }
+          case "_goose/unstable/session/steer":
+            return jsonRpcResult(message.id, {
+              runId: message.params.expectedRunId,
+              messageId: "mock-steer-" + message.id,
+            });
           case "session/prompt": {
             const session = findSession(message.params?.sessionId);
             if (session) {
@@ -499,6 +579,10 @@ export function buildInitScript(options?: {
                 isConfigured: entry.configured,
               })),
             });
+          case "_goose/unstable/providers/secrets/list":
+            return jsonRpcResult(message.id, { secrets: [{ provider: "openai", name: "OPENAI_API_KEY", storage: "secret_store", status: "unknown", configured: true, hasSecret: true, canDelete: true, canConfigure: false }] });
+          case "_goose/unstable/defaults/read":
+          case "_goose/unstable/defaults/save":
           case "_goose/defaults/read":
           case "_goose/defaults/save":
             return jsonRpcResult(message.id, {
@@ -642,6 +726,24 @@ export function buildInitScript(options?: {
 
         send(raw) {
           const message = JSON.parse(raw);
+          ACP_REQUESTS.push(clone(message));
+          // Semantic model boundary: private inference is only accepted after
+          // a successful chat-mode transition, not merely an audience hint.
+          if (PRIVATE_VOICE_DRAFT && message.method === "session/prompt" && findSession(message.params.sessionId)?.hidden) {
+            const session = findSession(message.params.sessionId);
+            if (session?.mode !== "chat" || !session.providerId || !session.modelId) throw new Error("Private model invoked without chat mode and configured model");
+            if (PRIVATE_VOICE_DRAFT === "complete") {
+              queueMicrotask(() => {
+                window.__GOOSE_E2E__.emitAcpNotification({ sessionId: session.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "PRIVATE DRAFT: I would set the temperature to 10 degrees." } } });
+                this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(jsonRpcResult(message.id, { stopReason: "end_turn" })) }));
+              });
+              return;
+            }
+          }
+          if (HOLD_ACP_PROMPTS && message.method === "session/prompt") {
+            PENDING_ACP_PROMPTS.set(message.id, { socket: this, sessionId: message.params.sessionId });
+            return;
+          }
           const response =
             message && typeof message === "object" && "id" in message
               ? handleAcpRequest(message)
@@ -665,7 +767,7 @@ export function buildInitScript(options?: {
         }
       }
 
-      window.WebSocket = MockWebSocket;
+      if (!${realAcpUrl}) window.WebSocket = MockWebSocket;
 
       window.__TAURI_INTERNALS__ = {
         metadata: {
@@ -677,9 +779,11 @@ export function buildInitScript(options?: {
           switch (cmd) {
             // ---- ACP transport ----
             case "get_goose_serve_url":
-              return Promise.resolve(FAKE_ACP_URL);
+              return Promise.resolve(${realAcpUrl} ?? FAKE_ACP_URL);
             case "get_installation_cohort":
               return Promise.resolve("established-before-landing-v1");
+            case "get_running_monitors":
+              return Promise.resolve(clone(RUNNING_MONITORS));
             case "get_voice_conversation_status":
             case "get_native_voice_conversation_status":
               return Promise.resolve(clone(VOICE_CONVERSATION_STATUS));
@@ -713,7 +817,7 @@ export function buildInitScript(options?: {
                 revision: 1,
               });
             case "get_siri_voice_status":
-              return Promise.resolve({
+              return Promise.resolve(${siriVoiceStatus} ?? {
                 supported: true,
                 availableLanguages: ["en-US"],
                 selectedVoice: { name: "Samantha", language: "en-US" },
@@ -722,6 +826,7 @@ export function buildInitScript(options?: {
                 voices: [
                   {
                     name: "Samantha",
+                    displayName: "Samantha",
                     language: "en-US",
                     sizeBytes: 0,
                     installed: true,
@@ -768,6 +873,32 @@ export function buildInitScript(options?: {
               );
               emitTauriEvent("openai-voice:settings-changed", null);
               return Promise.resolve(null);
+            case "prepare_native_voice_assistant_speech":
+              return Promise.resolve({ outcome: "admitted", speechId: ++voiceSpeechId });
+            case "start_pocket_voice_stream":
+            case "start_siri_voice_stream":
+              VOICE_STREAM_TEXTS.set(args.streamId, "");
+              return Promise.resolve(true);
+            case "append_pocket_voice_stream":
+            case "append_siri_voice_stream": {
+              VOICE_STREAM_TEXTS.set(args.streamId, (VOICE_STREAM_TEXTS.get(args.streamId) ?? "") + args.text);
+              return Promise.resolve(null);
+            }
+            case "flush_pocket_voice_stream":
+            case "flush_siri_voice_stream":
+            case "finish_pocket_voice_stream":
+            case "finish_siri_voice_stream": {
+              const text = VOICE_STREAM_TEXTS.get(args.streamId);
+              if (text) {
+                POCKET_VOICE_SPOKEN_TEXTS.push(text);
+                VOICE_STREAM_TEXTS.set(args.streamId, "");
+              }
+              if (cmd.startsWith("finish")) queueMicrotask(() => emitTauriEvent(
+                cmd.includes("siri") ? "siri-voice:stream-event" : "pocket-voice:stream-event",
+                { streamId: args.streamId, state: "completed", error: null },
+              ));
+              return Promise.resolve(null);
+            }
             case "speak_pocket_voice":
               POCKET_VOICE_SPOKEN_TEXTS.push(args?.text);
               return new Promise((resolve) =>
@@ -842,6 +973,8 @@ export function buildInitScript(options?: {
               });
 
             // ---- Sessions / Misc ----
+            case "list_berd_app_skills":
+              return Promise.resolve({ skills: [] });
             case "get_session_window_support":
               return Promise.resolve({
                 supported: false,
@@ -857,11 +990,15 @@ export function buildInitScript(options?: {
               return Promise.resolve(null);
             case "list_sessions":
               return Promise.resolve(
-                ACP_SESSIONS.map((session) => ({
+                ACP_SESSIONS.filter((session) => !session.hidden).map((session) => ({
                   sessionId: session.sessionId,
                   title: session.title,
                   updatedAt: session.updatedAt,
+                  cwd: session.cwd,
                   messageCount: session.messageCount,
+                  lastMessageAt: session.lastMessageAt,
+                  providerId: session.providerId,
+                  modelId: session.modelId,
                   conversationBefore: session.conversationBefore,
                 })),
               );
@@ -892,9 +1029,9 @@ export function buildInitScript(options?: {
             case "search_file_mentions":
               return Promise.resolve([]);
             case "get_home_dir":
-              return Promise.resolve("/tmp/home");
+              return Promise.resolve(${JSON.stringify(options?.homeDir ?? "/tmp/home")});
             case "path_exists":
-              return Promise.resolve(false);
+              return Promise.resolve(${options?.realAcpUrl ? "true" : "false"});
             case "read_image_attachment":
               return Promise.resolve({
                 base64:
@@ -907,7 +1044,7 @@ export function buildInitScript(options?: {
                 .filter((part) => typeof part === "string" && part.length > 0)
                 .join("/");
               const normalizedPath = path.startsWith("~/")
-                ? "/tmp/home/" + path.slice(2)
+                ? ${JSON.stringify(options?.homeDir ?? "/tmp/home")} + "/" + path.slice(2)
                 : path;
               return Promise.resolve({ path: normalizedPath });
             }

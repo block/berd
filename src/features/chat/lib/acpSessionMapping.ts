@@ -71,6 +71,8 @@ export function chatSessionFromAcpInfo(
     executionTarget,
     executionTargetSource: executionTarget ? "acp" : undefined,
     personaId: session.personaId ?? undefined,
+    sessionType: session.sessionType ?? undefined,
+    parentSessionId: session.parentSessionId ?? undefined,
     workingDir: session.workingDir ?? undefined,
     // Only set the key when context or the composite id proves that the
     // session came from a remote backend, so a local row cannot gain a tag.

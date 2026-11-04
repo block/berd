@@ -33,7 +33,7 @@ release_assets="$(gh release view "$TAG" --repo "$REPOSITORY" --json assets --jq
 
 platform_assets() {
   local platform="$1"
-  local archive provenance
+  local archive provenance call_archive
   validate_release_platform "$platform" || return 1
   archive="$(release_archive_name "$VERSION" "$platform")"
   provenance="$(release_provenance_name "$VERSION" "$platform")"
@@ -42,6 +42,8 @@ platform_assets() {
       printf '%s\n' \
         "Berd_${VERSION}_${platform}.app.zip" \
         "Berd_${VERSION}_${platform}.dmg"
+      call_archive="$(release_call_archive_name "$VERSION" "$platform")"
+      printf '%s\n' "$call_archive" "$call_archive.sha256"
       ;;
     windows-*)
       release_installer_name "$VERSION" "$platform"

@@ -25,11 +25,20 @@ export async function loadAllSessionsForBerdctl(): Promise<void> {
   }
 }
 
-export async function loadSessionForBerdctl(sessionId: string): Promise<void> {
+export async function loadSessionForBerdctl(
+  sessionId: string,
+  { updateStore = true }: { updateStore?: boolean } = {},
+): Promise<ChatSession> {
   try {
     const session = await acpGetSessionInfo(sessionId);
-    useChatSessionStore.setState((state) =>
-      mergeAcpSessionInfo(state, session),
+    // Reconcile local UI intent without making a targeted read sidebar discovery.
+    const merged = mergeAcpSessionInfo(useChatSessionStore.getState(), session);
+    if (updateStore) {
+      useChatSessionStore.setState(merged);
+    }
+    return (
+      merged.sessions.find((candidate) => candidate.id === sessionId) ??
+      acpSessionToChatSession(session)
     );
   } catch (error) {
     if (isAcpResourceNotFound(error)) {
@@ -139,5 +148,7 @@ export function sessionMetadata(session: ChatSession) {
     is_open_in_window: isOpenInWindow,
     chat_state: runtime.chatState,
     message_count: session.messageCount,
+    session_type: session.sessionType ?? null,
+    parent_session_id: session.parentSessionId ?? null,
   };
 }

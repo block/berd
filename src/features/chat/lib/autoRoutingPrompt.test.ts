@@ -83,12 +83,6 @@ describe("auto routing task context", () => {
           agentVisible: false,
           origin: "voice_conversation",
         }),
-        message(
-          "replay",
-          "user",
-          "[Voice transcript; cursor 1] Spokesperson said: PRIVATE_REPLAY",
-          { origin: "voice_conversation" },
-        ),
         message("compact", "user", "/compact"),
         message("system", "system", "PRIVATE_SYSTEM"),
       ],

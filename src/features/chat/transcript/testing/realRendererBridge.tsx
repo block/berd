@@ -787,6 +787,15 @@ function RealRendererBridgeApp() {
           scrollByPixels(operation.direction, operation.pixels);
           await nextFrame();
           break;
+        case "appendMessages":
+          await commitState((previous) =>
+            updateSession(previous, operation.sessionId, (session) => ({
+              ...session,
+              messages: [...session.messages, ...operation.messages],
+              streamingMessageId: operation.streamingMessageId,
+            })),
+          );
+          break;
         case "prependMessages": {
           const beforeTop = getMessageTop(operation.anchorMessageId);
           const wasNearBottom = isNearBottom();

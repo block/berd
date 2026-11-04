@@ -2,7 +2,7 @@
 # Fail a macOS release if the signing service dropped Berd's required entitlements.
 
 set -euo pipefail
-[[ $# -eq 1 ]] || { echo "Usage: $0 <path-to-Berd.app>" >&2; exit 2; }
+[[ $# -ge 1 && $# -le 2 ]] || { echo "Usage: $0 <path-to-Berd.app> [executable-name]" >&2; exit 2; }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP_PATH="$1"
@@ -10,7 +10,7 @@ INFO_PLIST="$APP_PATH/Contents/Info.plist"
 [[ -d "$APP_PATH" ]] || { echo "missing app bundle: $APP_PATH" >&2; exit 1; }
 [[ -f "$INFO_PLIST" ]] || { echo "missing app Info.plist: $INFO_PLIST" >&2; exit 1; }
 
-EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$INFO_PLIST")"
+EXECUTABLE_NAME="${2:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$INFO_PLIST")}"
 EXECUTABLE_PATH="$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME"
 [[ -f "$EXECUTABLE_PATH" ]] || { echo "missing app executable: $EXECUTABLE_PATH" >&2; exit 1; }
 

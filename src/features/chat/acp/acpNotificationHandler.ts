@@ -234,8 +234,7 @@ export async function handleSessionNotification(
   // A newly-created session can still be hydrating when its first local prompt
   // starts. Notifications from that owned prompt are live output, even while
   // the history-loading flag is set. Routing them into the replay buffer loses
-  // them when replay has already taken its snapshot (realtime voice makes this
-  // race easy to hit because it can dispatch immediately after session start).
+  // them when replay has already taken its snapshot.
   const isReplay =
     useChatStore.getState().loadingSessionIds.has(sessionId) &&
     getSessionPromptOwner(sessionId) === null;

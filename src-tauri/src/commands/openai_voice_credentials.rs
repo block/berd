@@ -11,7 +11,6 @@ const KEYCHAIN_ACCOUNT: &str = "api-key";
 pub(crate) enum OpenAiVoiceCredential {
     SpeechToText,
     TextToSpeech,
-    SelectedRealtimeAssistant,
     DefaultRealtimeDictation,
 }
 
@@ -20,7 +19,6 @@ impl OpenAiVoiceCredential {
         match self {
             Self::SpeechToText => Some(VoiceEndpointKind::Stt),
             Self::TextToSpeech => Some(VoiceEndpointKind::Tts),
-            Self::SelectedRealtimeAssistant => Some(VoiceEndpointKind::Realtime),
             Self::DefaultRealtimeDictation => None,
         }
     }
@@ -32,9 +30,6 @@ impl OpenAiVoiceCredential {
             }
             Self::TextToSpeech => {
                 "OpenAI text-to-speech is not configured. Add an API key for the selected playback URL in Voice settings, then try again."
-            }
-            Self::SelectedRealtimeAssistant => {
-                "OpenAI Realtime voice is not configured. Add an API key for the selected Realtime URL in Voice settings, then try again."
             }
             Self::DefaultRealtimeDictation => {
                 "OpenAI Realtime dictation needs an API key for the default OpenAI endpoint"
@@ -202,13 +197,11 @@ mod tests {
         let custom = openai_voice_endpoints::VoiceEndpointSettings {
             stt: Some("wss://custom.test/realtime".into()),
             tts: Some("https://custom.test/speech".into()),
-            realtime: Some("wss://custom.test/assistant".into()),
         };
         openai_voice_endpoints::restore(&custom).unwrap();
         for credential in [
             OpenAiVoiceCredential::SpeechToText,
             OpenAiVoiceCredential::TextToSpeech,
-            OpenAiVoiceCredential::SelectedRealtimeAssistant,
         ] {
             assert!(
                 require_endpoint_with(credential, |account| {
@@ -230,10 +223,6 @@ mod tests {
             OpenAiVoiceCredential::TextToSpeech.selected_kind(),
             Some(VoiceEndpointKind::Tts)
         ));
-        assert!(matches!(
-            OpenAiVoiceCredential::SelectedRealtimeAssistant.selected_kind(),
-            Some(VoiceEndpointKind::Realtime)
-        ));
         assert_eq!(
             account(OpenAiVoiceCredential::DefaultRealtimeDictation).unwrap(),
             KEYCHAIN_ACCOUNT
@@ -243,29 +232,16 @@ mod tests {
     #[test]
     fn custom_endpoint_keys_never_alias_the_default_or_other_urls() {
         assert_eq!(
-            account_for_url(
-                VoiceEndpointKind::Realtime,
-                VoiceEndpointKind::Realtime.default_url()
-            ),
-            "api-key"
-        );
-        assert_eq!(
             account_for_url(VoiceEndpointKind::Stt, VoiceEndpointKind::Stt.default_url()),
             "api-key"
         );
         assert_ne!(
-            account_for_url(
-                VoiceEndpointKind::Realtime,
-                "wss://frankie.test/v1/realtime"
-            ),
+            account_for_url(VoiceEndpointKind::Stt, "wss://frankie.test/v1/realtime"),
             "api-key"
         );
         assert_ne!(
-            account_for_url(
-                VoiceEndpointKind::Realtime,
-                "wss://frankie.test/v1/realtime"
-            ),
-            account_for_url(VoiceEndpointKind::Realtime, "wss://other.test/v1/realtime")
+            account_for_url(VoiceEndpointKind::Stt, "wss://frankie.test/v1/realtime"),
+            account_for_url(VoiceEndpointKind::Stt, "wss://other.test/v1/realtime")
         );
     }
 
@@ -274,7 +250,6 @@ mod tests {
         for credential in [
             OpenAiVoiceCredential::SpeechToText,
             OpenAiVoiceCredential::TextToSpeech,
-            OpenAiVoiceCredential::SelectedRealtimeAssistant,
         ] {
             let message = credential.missing_message();
             assert!(message.contains("selected"));

@@ -539,6 +539,7 @@ export function McpAppView({
         const client = await getClientForSession(payload.sessionId);
         const response = await client.goose.GooseUnstableToolsCall({
           sessionId: getWireSessionId(payload.sessionId),
+          extensionName: payload.tool.extensionName,
           name: `${payload.tool.extensionName}__${name}`,
           arguments: args ?? {},
         });

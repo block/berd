@@ -278,6 +278,8 @@ describe("listSessionsPage", () => {
           providerId: "goose",
           modelId: "gpt-4.1",
           personaId: "persona-1",
+          sessionType: null,
+          parentSessionId: null,
         },
       ],
       nextCursor: "cursor-2",
@@ -285,6 +287,24 @@ describe("listSessionsPage", () => {
     expect(mocks.listSessions).toHaveBeenCalledWith({
       ...includeLastMessageSnippetMeta,
       cursor: "cursor-1",
+    });
+  });
+
+  it.each([
+    { sessionType: "sub_agent", parentSessionId: "parent-1" },
+    { session_type: "delegate", parent_session_id: "parent-1" },
+  ])("preserves task metadata %j", async (metadata) => {
+    mocks.listSessions.mockResolvedValueOnce({
+      sessions: [{ sessionId: "task-1", cwd: "/tmp/project", _meta: metadata }],
+      nextCursor: null,
+    });
+    const { listSessionsPage } = await import("../acpApi");
+
+    const result = await listSessionsPage();
+
+    expect(result.sessions[0]).toMatchObject({
+      sessionType: "sessionType" in metadata ? "sub_agent" : "delegate",
+      parentSessionId: "parent-1",
     });
   });
 
@@ -305,6 +325,8 @@ describe("listSessionsPage", () => {
             providerId: null,
             modelId: 4,
             personaId: true,
+            sessionType: 5,
+            parentSessionId: false,
           },
         },
       ],
@@ -330,6 +352,8 @@ describe("listSessionsPage", () => {
           providerId: null,
           modelId: null,
           personaId: null,
+          sessionType: null,
+          parentSessionId: null,
         },
       ],
       nextCursor: null,

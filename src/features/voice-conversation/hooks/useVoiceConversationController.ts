@@ -6,6 +6,15 @@ import type {
   ChatInputSendHandler,
   ChatInputVoiceConversation,
 } from "@/features/chat/types";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import {
+  startPrivateVoiceDraft,
+  type PrivateVoiceDraft,
+} from "../lib/privateVoiceDraft";
+import {
+  getVoiceEarlyDeliveryPreference,
+  subscribeToVoiceEarlyDeliveryPreference,
+} from "../lib/voiceEarlyDeliveryPreference";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
 import { createSystemNotificationMessage } from "@/shared/types/messages";
@@ -524,11 +533,59 @@ export function resetVoiceUiWhenRunSettles(
   queueMicrotask(check);
 }
 
+const earlyDeliveries = new Map<string, PrivateVoiceDraft>();
+const finalTranscriptsSeen = new Set<string>();
+
+function voiceEventKey(event: {
+  sessionId: string;
+  lifecycleId: string;
+  revision: number;
+  id: string;
+}): string {
+  return `${event.sessionId}\0${event.lifecycleId}\0${event.revision}\0${event.id}`;
+}
+
+function earlyEventIsCurrent(
+  event: { sessionId: string; revision: number },
+  requireMicrophone = true,
+) {
+  const { status, microphoneMuted } = useVoiceConversationStore.getState();
+  return (
+    status.lifecycle === "running" &&
+    status.sessionId === event.sessionId &&
+    status.revision === event.revision &&
+    status.ownerWindowLabel === getCurrentWindow().label &&
+    (!requireMicrophone || !microphoneMuted)
+  );
+}
+
 function ensureVoiceEventDeliveryInitialized() {
   if (deliveryInitialized) return;
   deliveryInitialized = true;
   observeChainedVoiceStatus();
-  subscribeToVoiceConversationEvents(async (event) => {
+  subscribeToVoiceEarlyDeliveryPreference(() => {
+    if (getVoiceEarlyDeliveryPreference().enabled) return;
+    for (const draft of earlyDeliveries.values()) draft.dispose();
+    earlyDeliveries.clear();
+    finalTranscriptsSeen.clear();
+  });
+  useVoiceConversationStore.subscribe((state, previous) => {
+    if (
+      state.status.revision === previous.status.revision &&
+      state.status.sessionId === previous.status.sessionId &&
+      state.status.lifecycle === previous.status.lifecycle
+    )
+      return;
+    for (const draft of earlyDeliveries.values()) draft.dispose();
+    earlyDeliveries.clear();
+    finalTranscriptsSeen.clear();
+  });
+  subscribeToVoiceConversationEvents(async (incoming) => {
+    const isEarly = incoming.type === "interimUser";
+    const event =
+      incoming.type === "interimUser"
+        ? { ...incoming, type: "user" as const, deliveryAttempts: 0 }
+        : incoming;
     if (event.type === "cleanShutdown" || event.type === "controlsDismissed") {
       return;
     }
@@ -540,6 +597,16 @@ function ensureVoiceEventDeliveryInitialized() {
         activeSendRoute = null;
       }
       addErrorNotification(sessionId ?? null, event.message);
+      return;
+    }
+    if (event.type === "recognitionPending") {
+      if (event.pending) return;
+      if (!earlyEventIsCurrent(event, false)) return;
+      for (const [key, draft] of earlyDeliveries) {
+        if (finalTranscriptsSeen.has(key)) continue;
+        draft.dispose();
+        earlyDeliveries.delete(key);
+      }
       return;
     }
     if (event.type === "activity") return;
@@ -555,9 +622,37 @@ function ensureVoiceEventDeliveryInitialized() {
       return;
     }
 
+    const eventKey = voiceEventKey(event);
     const deliveryRevision = event.revision;
     const shouldNotifyFailure = event.deliveryAttempts === 0;
+    if (isEarly) {
+      if (
+        !getVoiceEarlyDeliveryPreference().enabled ||
+        !earlyEventIsCurrent(event) ||
+        earlyDeliveries.has(eventKey) ||
+        activeRouteIsBlocked(event.sessionId) ||
+        activeSendRoute?.sessionId !== event.sessionId
+      )
+        return;
+      const session = useChatSessionStore
+        .getState()
+        .sessions.find((session) => session.id === event.sessionId);
+      if (!session?.workingDir) return;
+      for (const [key, draft] of earlyDeliveries) {
+        if (finalTranscriptsSeen.has(key)) continue;
+        draft.dispose();
+        earlyDeliveries.delete(key);
+      }
+      // Independent of the authoritative queue, even when the main run is busy.
+      earlyDeliveries.set(
+        eventKey,
+        startPrivateVoiceDraft(event.sessionId, session.workingDir, event.text),
+      );
+      return;
+    }
+    if (earlyDeliveries.has(eventKey)) finalTranscriptsSeen.add(eventKey);
     return enqueueVoiceTranscriptDelivery(event.sessionId, async () => {
+      const early = earlyDeliveries.get(eventKey);
       if (activeRouteIsBlocked(event.sessionId)) {
         throw new VoiceTranscriptDeferredError(
           "Voice transcript is waiting for its bound chat to become available.",
@@ -574,9 +669,12 @@ function ensureVoiceEventDeliveryInitialized() {
 
       const store = useVoiceConversationStore.getState();
       store.setUiState("user-speaking");
-
+      const draft = await early?.take();
+      earlyDeliveries.delete(eventKey);
+      finalTranscriptsSeen.delete(eventKey);
       const sendOptions = {
         userMessageMetadata: {
+          userVisible: true,
           origin: "voice_conversation" as const,
           voiceUtteranceId: event.id,
           voiceConversationLifecycleId: event.lifecycleId,
@@ -590,8 +688,6 @@ function ensureVoiceEventDeliveryInitialized() {
         },
       };
       try {
-        // This runs inside the per-session queue, so a prior send can change
-        // the opportunity to steer before the next transcript is evaluated.
         const opportunity = await waitForVoiceDeliveryOpportunity(
           event.sessionId,
         );
@@ -609,7 +705,14 @@ function ensureVoiceEventDeliveryInitialized() {
         const playbackNotice = takeVoicePlaybackNotices(event.sessionId);
         const displayOptions = {
           ...sendOptions,
-          ...(playbackNotice ? { assistantPrompt: playbackNotice } : {}),
+          assistantPrompt: [
+            playbackNotice,
+            draft && getVoiceEarlyDeliveryPreference().enabled
+              ? `Private provisional DRAFT (not spoken, not executed, may be wrong):\n${draft}\n\nThe user transcript in this turn is authoritative. Answer it and perform any requested actions normally. Use the draft only if it is relevant to the final transcript.`
+              : null,
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
           displayText: event.text,
         };
         store.setUiState("agent-working");

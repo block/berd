@@ -28,6 +28,10 @@ pub fn openai_key(kind_var: &'static str) -> Option<String> {
     credential(kind_var, |name| std::env::var(name).ok()).map(|(_, key)| key)
 }
 
+pub const OPENAI_VOICE_IDS: &[&str] = &[
+    "alloy", "ash", "ballad", "cedar", "coral", "echo", "marin", "sage", "shimmer", "verse",
+];
+
 #[derive(Clone, Debug)]
 pub struct OpenAiSpeechConfig {
     pub endpoint: String,
@@ -178,12 +182,9 @@ mod tests {
 
     #[test]
     fn blank_or_unset_service_key_falls_back_to_the_shared_key() {
-        let vars = [
-            ("OPENAI_API_KEY", "shared"),
-            ("OPENAI_REALTIME_API_KEY", "  "),
-        ];
+        let vars = [("OPENAI_API_KEY", "shared"), ("OPENAI_TTS_API_KEY", "  ")];
         assert_eq!(
-            credential("OPENAI_REALTIME_API_KEY", lookup(&vars)),
+            credential("OPENAI_TTS_API_KEY", lookup(&vars)),
             Some(("OPENAI_API_KEY", "shared".into()))
         );
         let blank = [("OPENAI_API_KEY", " "), ("OPENAI_STT_API_KEY", "")];

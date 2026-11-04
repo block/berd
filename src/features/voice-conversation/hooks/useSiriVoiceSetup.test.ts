@@ -43,7 +43,9 @@ function status(language: string, name: string): SiriVoiceStatus {
     selectedVoice: { name, language },
     selectedVoiceInstalled: true,
     playbackSpeed: 1,
-    voices: [{ name, language, sizeBytes: 1, installed: true }],
+    voices: [
+      { name, displayName: name, language, sizeBytes: 1, installed: true },
+    ],
   };
 }
 
@@ -173,6 +175,7 @@ describe("Siri voice locales", () => {
 
     const voice = {
       name: "Quinn",
+      displayName: "Quinn",
       language: "en-US",
       sizeBytes: 310_500_000,
       installed: false,
@@ -198,6 +201,7 @@ describe("Siri voice locales", () => {
 
     const downloadedVoice = {
       name: "Quinn",
+      displayName: "Quinn",
       language: "en-US",
       sizeBytes: 310_500_000,
       installed: false,
@@ -211,6 +215,7 @@ describe("Siri voice locales", () => {
     await act(async () => {
       await result.current.selectVoice({
         name: "Aaron",
+        displayName: "Aaron",
         language: "en-US",
         sizeBytes: 1,
         installed: true,
@@ -244,6 +249,7 @@ describe("Siri voice locales", () => {
     act(() => {
       downloadPromise = result.current.downloadVoice({
         name: "Quinn",
+        displayName: "Quinn",
         language: "en-US",
         sizeBytes: 310_500_000,
         installed: false,
@@ -259,6 +265,7 @@ describe("Siri voice locales", () => {
     await act(async () => {
       await result.current.selectVoice({
         name: "Aaron",
+        displayName: "Aaron",
         language: "en-US",
         sizeBytes: 1,
         installed: true,
@@ -299,6 +306,7 @@ describe("Siri voice locales", () => {
     act(() => {
       downloadPromise = result.current.downloadVoice({
         name: "Quinn",
+        displayName: "Quinn",
         language: "en-US",
         sizeBytes: 310_500_000,
         installed: false,
@@ -311,6 +319,7 @@ describe("Siri voice locales", () => {
     await act(async () => {
       await result.current.selectVoice({
         name: "Aaron",
+        displayName: "Aaron",
         language: "en-US",
         sizeBytes: 1,
         installed: true,
@@ -329,6 +338,7 @@ describe("Siri voice locales", () => {
     await act(async () => {
       await result.current.selectVoice({
         name: "Samantha",
+        displayName: "Samantha",
         language: "en-US",
         sizeBytes: 1,
         installed: true,
@@ -367,6 +377,7 @@ describe("Siri voice locales", () => {
     act(() => {
       downloadPromise = result.current.downloadVoice({
         name: "Quinn",
+        displayName: "Quinn",
         language: "en-US",
         sizeBytes: 310_500_000,
         installed: false,
@@ -383,6 +394,7 @@ describe("Siri voice locales", () => {
     act(() => {
       manualSelectionPromise = result.current.selectVoice({
         name: "Aaron",
+        displayName: "Aaron",
         language: "en-US",
         sizeBytes: 1,
         installed: true,
@@ -417,6 +429,7 @@ describe("Siri voice locales", () => {
     act(() => {
       downloadPromise = result.current.downloadVoice({
         name: "Quinn",
+        displayName: "Quinn",
         language: "en-US",
         sizeBytes: 310_500_000,
         installed: false,
@@ -427,6 +440,7 @@ describe("Siri voice locales", () => {
     await act(async () => {
       await result.current.selectVoice({
         name: "Aaron",
+        displayName: "Aaron",
         language: "en-US",
         sizeBytes: 1,
         installed: true,
@@ -453,6 +467,7 @@ describe("Siri voice locales", () => {
     await act(async () => {
       await result.current.downloadVoice({
         name: "Quinn",
+        displayName: "Quinn",
         language: "en-US",
         sizeBytes: 310_500_000,
         installed: false,

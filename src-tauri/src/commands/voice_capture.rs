@@ -68,6 +68,7 @@ pub struct VoiceTelemetryStartRequest {
     output_backend: VoiceTelemetryBackend,
     voice_mode: VoiceTelemetryMode,
     tts_rate: Option<f64>,
+    tts_voice: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -93,6 +94,7 @@ struct ActiveVoiceTelemetry {
     output_backend: VoiceTelemetryBackend,
     voice_mode: VoiceTelemetryMode,
     tts_rate: Option<f64>,
+    tts_voice: Option<String>,
     started_at: Instant,
     user_utterance_count: u64,
     assistant_response_count: u64,
@@ -107,6 +109,7 @@ pub struct CompletedVoiceTelemetry {
     output_backend: VoiceTelemetryBackend,
     voice_mode: VoiceTelemetryMode,
     tts_rate: Option<f64>,
+    tts_voice: Option<String>,
     duration_ms: u64,
     user_utterance_count: u64,
     assistant_response_count: u64,
@@ -419,6 +422,7 @@ impl VoiceCaptureState {
             output_backend: request.output_backend,
             voice_mode: request.voice_mode,
             tts_rate: request.tts_rate,
+            tts_voice: request.tts_voice,
             started_at: Instant::now(),
             user_utterance_count: 0,
             assistant_response_count: 0,
@@ -471,6 +475,7 @@ impl VoiceCaptureState {
                 output_backend: active.output_backend,
                 voice_mode: active.voice_mode,
                 tts_rate: active.tts_rate,
+                tts_voice: active.tts_voice,
                 duration_ms: u64::try_from(active.started_at.elapsed().as_millis())
                     .unwrap_or(u64::MAX),
                 user_utterance_count: active.user_utterance_count,
@@ -628,6 +633,7 @@ mod tests {
                     output_backend: VoiceTelemetryBackend::Siri,
                     voice_mode: VoiceTelemetryMode::Chained,
                     tts_rate: Some(1.25),
+                    tts_voice: Some("Samantha".into()),
                 },
             )
             .expect("start telemetry");
@@ -677,6 +683,7 @@ mod tests {
                     output_backend: VoiceTelemetryBackend::Siri,
                     voice_mode: VoiceTelemetryMode::Chained,
                     tts_rate: Some(1.25),
+                    tts_voice: Some("Samantha".into()),
                 },
             )
             .expect("start telemetry");
@@ -718,6 +725,7 @@ mod tests {
                     output_backend: VoiceTelemetryBackend::Siri,
                     voice_mode: VoiceTelemetryMode::Chained,
                     tts_rate: Some(1.25),
+                    tts_voice: Some("Samantha".into()),
                 },
             )
             .expect("start telemetry");
@@ -764,6 +772,7 @@ mod tests {
         assert_eq!(completed.user_utterance_count, 2);
         assert!(completed.reportable);
         assert_eq!(completed.tts_rate, Some(1.25));
+        assert_eq!(completed.tts_voice.as_deref(), Some("Samantha"));
     }
 
     #[test]
@@ -777,6 +786,7 @@ mod tests {
             output_backend: VoiceTelemetryBackend::Siri,
             voice_mode: VoiceTelemetryMode::Chained,
             tts_rate: Some(1.25),
+            tts_voice: Some("Samantha".into()),
         };
         assert!(capture
             .start_voice_telemetry("main", request("renderer-1", first_epoch))

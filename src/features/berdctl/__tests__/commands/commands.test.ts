@@ -623,18 +623,6 @@ describe("action schemas", () => {
       "sessions.create": { prompt: "hi" },
       "sessions.notify": { session_id: "s", prompt: "event" },
       "sessions.send": { session_id: "s1", prompt: "hi" },
-      "sessions.send_to_spokesperson": {
-        session_id: "s1",
-        cursor: 0,
-        message: "Status update",
-        mode: "context",
-      },
-      "sessions.dismiss_handoffs": {
-        session_id: "s1",
-        cursor: 1,
-        handoff_id: ["handoff-1"],
-        reason: "The request was superseded.",
-      },
       "sessions.open": { session_id: "s1" },
       "sessions.list": {},
       "sessions.get": { session_id: "s1" },
@@ -2769,6 +2757,24 @@ describe("sessions.get", () => {
       is_open_in_window: false,
       chat_state: "idle",
       message_count: 2,
+      session_type: null,
+      parent_session_id: null,
+    });
+    expect(mocks.lastSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it("preserves task identity and parent metadata without loading the chat", async () => {
+    mockSessionFound({ sessionType: "sub_agent", parentSessionId: "parent-1" });
+
+    const result = await dispatchCommand(
+      "sessions",
+      { action: "get", session_id: "session-1" },
+      ctx,
+    );
+
+    expect(result).toMatchObject({
+      session_type: "sub_agent",
+      parent_session_id: "parent-1",
     });
     expect(mocks.lastSessionMessages).not.toHaveBeenCalled();
   });
@@ -2881,6 +2887,52 @@ describe("sessions.get", () => {
     });
   });
 
+  it("does not add targeted reads without session-type metadata to the sidebar", async () => {
+    mocks.acpGetSessionInfo.mockResolvedValue(
+      makeAcpSession({
+        sessionId: "subagent-1",
+        title: "Delegated task",
+      }),
+    );
+
+    const result = await dispatchCommand(
+      "sessions",
+      { action: "get", session_id: "subagent-1" },
+      ctx,
+    );
+
+    expect(result).toMatchObject({
+      session_id: "subagent-1",
+      title: "Delegated task",
+    });
+    expect(
+      useChatSessionStore.getState().getSession("subagent-1"),
+    ).toBeUndefined();
+  });
+
+  it("returns fresh metadata and messages without changing existing sidebar state", async () => {
+    seedSessions(makeSession({ id: "session-1", title: "Cached title" }));
+    mocks.acpGetSessionInfo.mockResolvedValue(
+      makeAcpSession({ sessionId: "session-1", title: "Fresh title" }),
+    );
+    mocks.lastSessionMessages.mockResolvedValue([
+      { role: "assistant", text: "Delegated result" },
+    ]);
+    const before = useChatSessionStore.getState();
+
+    const result = await dispatchCommand(
+      "sessions",
+      { action: "get", session_id: "session-1", messages: 1 },
+      ctx,
+    );
+
+    expect(result).toMatchObject({
+      title: "Fresh title",
+      messages: [{ role: "assistant", text: "Delegated result" }],
+    });
+    expect(useChatSessionStore.getState()).toBe(before);
+  });
+
   it("does not finish full-list hydration after a targeted read", async () => {
     useChatSessionStore.setState({ isLoading: true });
     mocks.acpGetSessionInfo.mockResolvedValue(
@@ -2897,7 +2949,7 @@ describe("sessions.get", () => {
     );
 
     const state = useChatSessionStore.getState();
-    expect(state.getSession("session-1")?.title).toBe("Loaded Directly");
+    expect(state.getSession("session-1")).toBeUndefined();
     expect(state.hasHydratedSessions).toBe(false);
     expect(state.isLoading).toBe(true);
     expect(state.sessionPageCursor).toBeNull();

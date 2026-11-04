@@ -1342,6 +1342,34 @@ function Initialize-GooseManagedCheckout {
     return $null
 }
 
+function Sync-GooseManagedRemote {
+    param(
+        [Parameter(Mandatory = $true)]$Paths,
+        [Parameter(Mandatory = $true)]$Settings,
+        [Parameter(Mandatory = $true)][string]$Action
+    )
+
+    $current = Invoke-CaptureCommand -FilePath "git" -ArgumentList @("-C", $Paths.Repo, "remote", "get-url", $Settings.Remote)
+    if ($current.ExitCode -ne 0) {
+        $add = Invoke-CaptureCommand -FilePath "git" -ArgumentList @("-C", $Paths.Repo, "remote", "add", $Settings.Remote, $Settings.CloneUrl)
+        if ($add.ExitCode -ne 0) {
+            return (Resolve-GooseFailure -Message "Failed to add Goose remote $($Settings.Remote) for managed checkout at $($Paths.Repo)." -Action $Action -Mode $Settings.Mode)
+        }
+        return $null
+    }
+
+    $currentUrl = $current.Output.Trim()
+    if ($currentUrl -ne $Settings.CloneUrl) {
+        Write-WindowsDevInfo "Updating managed Goose remote $($Settings.Remote) from $currentUrl to $($Settings.CloneUrl)."
+        $set = Invoke-CaptureCommand -FilePath "git" -ArgumentList @("-C", $Paths.Repo, "remote", "set-url", $Settings.Remote, $Settings.CloneUrl)
+        if ($set.ExitCode -ne 0) {
+            return (Resolve-GooseFailure -Message "Failed to update Goose remote $($Settings.Remote) for managed checkout at $($Paths.Repo)." -Action $Action -Mode $Settings.Mode)
+        }
+    }
+
+    return $null
+}
+
 function Resolve-GooseManagedCommit {
     param(
         [Parameter(Mandatory = $true)]$Paths,
@@ -1428,6 +1456,11 @@ function Invoke-EnsureLocalGoose {
     $checkoutFailure = Initialize-GooseManagedCheckout -Paths $paths -Settings $settings -Action $Action
     if ($null -ne $checkoutFailure) {
         return $checkoutFailure
+    }
+
+    $remoteFailure = Sync-GooseManagedRemote -Paths $paths -Settings $settings -Action $Action
+    if ($null -ne $remoteFailure) {
+        return $remoteFailure
     }
 
     $binPath = Resolve-GooseBinaryPath -Paths $paths -Settings $settings

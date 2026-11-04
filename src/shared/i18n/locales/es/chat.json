@@ -461,8 +461,6 @@
     "sendAnyway": "Enviar de todos modos",
     "backgroundSendFailed": "No se pudo enviar el mensaje en cola. Reinténtalo o edita el mensaje.",
     "backgroundSendFailedTitle": "No se pudo enviar el mensaje en cola",
-    "voiceCoordinationFailed": "No se pudo entregar una actualización interna de voz, por lo que se detuvo la conversación de voz. Inicia la voz de nuevo para continuar.",
-    "voiceCoordinationFailedTitle": "Conversación de voz detenida",
     "configureWorktree": "¿Configurar un worktree nuevo?",
     "configureWorkspaces": "¿Configurar espacios de trabajo nuevos para el proyecto?",
     "configureWorkspacePlan": "¿Configurar {{worktreeLabel}}?",
@@ -791,5 +789,23 @@
     "openUnavailable": "Este archivo está en {{host}} y no se puede abrir desde esta máquina.",
     "viewerUnavailable": "Este archivo está en {{host}}. Ver archivos remotos todavía no es compatible."
   },
-  "archivedReadOnlyStatus": "Esta sesión está archivada y es de solo lectura."
+  "archivedReadOnlyStatus": "Esta sesión está archivada y es de solo lectura.",
+  "monitorStatus": {
+    "count_one": "1 monitor en ejecución",
+    "count_other": "{{count}} monitores en ejecución",
+    "watching": "Supervisando: {{label}}",
+    "more": "+{{count}}",
+    "inspect_one": "Inspeccionar 1 monitor en ejecución",
+    "inspect_other": "Inspeccionar {{count}} monitores en ejecución",
+    "title": "Monitores en ejecución",
+    "running": "En ejecución",
+    "stopping": "Deteniendo…",
+    "command": "Comando",
+    "started": "Inicio",
+    "detailsUnavailable": "No disponible para este monitor",
+    "stop": "Detener",
+    "confirmStop": "Detener monitor",
+    "stopDescription": "¿Detener este monitor y su comando en segundo plano? La sesión del agente seguirá en ejecución.",
+    "stopFailed": "No se pudo detener este monitor. Puede haber finalizado o sido reemplazado. Actualiza los detalles e inténtalo de nuevo."
+  }
 }

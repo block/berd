@@ -64,6 +64,7 @@ import {
 } from "@/shared/ui/ai-elements/shimmer";
 import { SidebarLeadingIcon } from "./SidebarLeadingIcon";
 import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
+import { MonitorStatus } from "@/features/monitors/MonitorStatus";
 import { useWorkingIndicatorAnimationPreference } from "@/shared/preferences/workingIndicatorAnimationPreference";
 import { useSidebarChatDrag } from "./SidebarChatDragContext";
 import { toast } from "sonner";
@@ -483,6 +484,7 @@ export function SidebarChatRow({
       aria-pressed={selectionEnabled ? selected : undefined}
     >
       {rowTitleContent}
+      {!remoteHost ? <MonitorStatus sessionId={id} variant="sidebar" /> : null}
       {remoteHost ? (
         <span
           data-sidebar-chat-remote-host
