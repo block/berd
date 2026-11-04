@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { formatDate } from "@/shared/i18n";
 import { listLocalSchedules } from "@/features/automations/api/localSchedules";
 import { LocalSchedulesPanel } from "./LocalSchedulesPanel";
 
@@ -43,6 +44,38 @@ describe("LocalSchedulesPanel", () => {
       screen.getByText("Recipe file: weekday-report.yaml"),
     ).toBeInTheDocument();
     expect(screen.getByText("0 9 * * 1-5")).toBeInTheDocument();
+    expect(screen.getByText("Active")).toBeInTheDocument();
+  });
+
+  it("labels paused schedules instead of active", async () => {
+    vi.mocked(listLocalSchedules).mockResolvedValue([
+      { ...schedule, paused: true },
+    ]);
+    renderPanel();
+    expect(await screen.findByText("Paused")).toBeInTheDocument();
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
+  });
+
+  it("formats last run with the app locale", async () => {
+    const lastRun = "2026-11-04T09:00:00Z";
+    vi.mocked(listLocalSchedules).mockResolvedValue([{ ...schedule, lastRun }]);
+    renderPanel();
+    const formatted = formatDate(lastRun, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+    expect(
+      await screen.findByText(`Last run: ${formatted}`),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(lastRun)).not.toBeInTheDocument();
+  });
+
+  it("uses a safe fallback for invalid last run values", async () => {
+    vi.mocked(listLocalSchedules).mockResolvedValue([
+      { ...schedule, lastRun: "invalid" },
+    ]);
+    renderPanel();
+    expect(await screen.findByText("Last run: Unknown")).toBeInTheDocument();
   });
 
   it("shows the empty state without hiding the Goose schedules section", async () => {
@@ -66,6 +99,9 @@ describe("LocalSchedulesPanel", () => {
     expect(
       await screen.findByText("Could not load Goose schedules"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("scheduler disabled");
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveAttribute("data-slot", "alert");
+    expect(alert).toHaveTextContent("Could not load Goose schedules");
+    expect(alert).toHaveTextContent("scheduler disabled");
   });
 });

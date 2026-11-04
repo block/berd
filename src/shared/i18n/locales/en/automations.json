@@ -44,6 +44,8 @@
     "refreshError": "Could not refresh schedules: {{error}}. Showing the last loaded list.",
     "emptyTitle": "No local schedules yet",
     "emptyBody": "Schedules you create in Goose will appear here. Use the Goose CLI or another Goose client to schedule and configure recipes.",
+    "active": "Active",
+    "unknownLastRun": "Unknown",
     "paused": "Paused",
     "running": "Running",
     "lastRun": "Last run: {{time}}"

@@ -8,6 +8,8 @@ import {
   listLocalSchedules,
 } from "@/features/automations/api/localSchedules";
 import { EmptyState } from "@/features/automations/ui/RunOutput";
+import { useLocaleFormatting } from "@/shared/i18n";
+import { Alert, AlertTitle, AlertDescription } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 
 function scheduleSourceLabel(schedule: ScheduledJobDto): string {
@@ -24,6 +26,14 @@ function localErrorMessage(error: unknown, fallback: string): string {
 
 export function LocalSchedulesPanel() {
   const { t } = useTranslation("automations");
+  const { formatDate } = useLocaleFormatting();
+
+  function lastRunLabel(value: string): string {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+      ? t("localSchedules.unknownLastRun")
+      : formatDate(date, { dateStyle: "medium", timeStyle: "short" });
+  }
   const schedulesQuery = useQuery({
     queryKey: LOCAL_SCHEDULES_QUERY_KEY,
     queryFn: listLocalSchedules,
@@ -61,21 +71,16 @@ export function LocalSchedulesPanel() {
           className="h-20 animate-pulse rounded-xl border bg-card"
         />
       ) : schedulesQuery.error && schedules.length === 0 ? (
-        <div
-          role="alert"
-          className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm"
-        >
-          <div className="flex items-center gap-2 font-medium text-destructive">
-            <IconAlertTriangle aria-hidden="true" />
-            {t("localSchedules.loadErrorTitle")}
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
+        <Alert variant="destructive">
+          <IconAlertTriangle aria-hidden="true" />
+          <AlertTitle wrap>{t("localSchedules.loadErrorTitle")}</AlertTitle>
+          <AlertDescription>
             {localErrorMessage(
               schedulesQuery.error,
               t("localSchedules.loadErrorDescription"),
             )}
-          </p>
-        </div>
+          </AlertDescription>
+        </Alert>
       ) : (
         <>
           {schedulesQuery.error ? (
@@ -109,17 +114,25 @@ export function LocalSchedulesPanel() {
                         name: scheduleSourceLabel(schedule),
                       })}
                     </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                       <span className="font-mono">{schedule.cron}</span>
-                      {schedule.paused
-                        ? ` · ${t("localSchedules.paused")}`
-                        : ""}
-                      {schedule.currentlyRunning
-                        ? ` · ${t("localSchedules.running")}`
-                        : ""}
-                      {schedule.lastRun
-                        ? ` · ${t("localSchedules.lastRun", { time: schedule.lastRun })}`
-                        : ""}
+                      <span>
+                        {t(
+                          schedule.paused
+                            ? "localSchedules.paused"
+                            : "localSchedules.active",
+                        )}
+                      </span>
+                      {schedule.currentlyRunning ? (
+                        <span>{t("localSchedules.running")}</span>
+                      ) : null}
+                      {schedule.lastRun ? (
+                        <span>
+                          {t("localSchedules.lastRun", {
+                            time: lastRunLabel(schedule.lastRun),
+                          })}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                 </article>
