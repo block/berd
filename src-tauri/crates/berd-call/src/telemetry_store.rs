@@ -86,7 +86,8 @@ fn write_atomically(dir: &Path, name: &str, body: &str) -> Result<(), String> {
     let path = dir.join(name);
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, body).map_err(|error| format!("Failed to write {}: {error}", tmp.display()))?;
-    fs::rename(&tmp, &path).map_err(|error| format!("Failed to persist {}: {error}", path.display()))
+    fs::rename(&tmp, &path)
+        .map_err(|error| format!("Failed to persist {}: {error}", path.display()))
 }
 
 #[cfg(test)]
@@ -103,7 +104,11 @@ mod tests {
             fs::read_to_string(dir.path().join(TELEMETRY_SETTINGS_FILE_NAME)).unwrap(),
             "{\n  \"schemaVersion\": 1,\n  \"enabled\": true\n}"
         );
-        for raw in ["not json", r#"{"schemaVersion":2,"enabled":true}"#, r#"{"enabled":true}"#] {
+        for raw in [
+            "not json",
+            r#"{"schemaVersion":2,"enabled":true}"#,
+            r#"{"enabled":true}"#,
+        ] {
             fs::write(dir.path().join(TELEMETRY_SETTINGS_FILE_NAME), raw).unwrap();
             assert!(load_telemetry_consent(dir.path()).is_err(), "{raw}");
         }

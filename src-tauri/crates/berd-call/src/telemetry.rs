@@ -397,7 +397,13 @@ mod tests {
     #[test]
     fn context_reports_backends_and_a_valid_rate() {
         let parakeet = context(
-            &["session", "--stt-backend", "parakeet", "--tts-backend", "pocket"],
+            &[
+                "session",
+                "--stt-backend",
+                "parakeet",
+                "--tts-backend",
+                "pocket",
+            ],
             &pocket(1.25),
         )
         .unwrap();
@@ -421,7 +427,10 @@ mod tests {
         assert_eq!(default.rate.as_deref(), Some("1"));
         assert_eq!(default.voice.as_deref(), Some("Samantha"));
         assert_eq!(
-            context(&["session"], &siri("Fred's clone")).unwrap().voice.as_deref(),
+            context(&["session"], &siri("Fred's clone"))
+                .unwrap()
+                .voice
+                .as_deref(),
             Some("custom")
         );
         assert_eq!(context(&["session"], &siri("")).unwrap().voice, None);
@@ -430,10 +439,25 @@ mod tests {
             voice: voice.into(),
             rate: 1.0,
         };
-        assert_eq!(context(&["session"], &openai("marin")).unwrap().voice.as_deref(), Some("marin"));
-        assert_eq!(context(&["session"], &openai("my-voice")).unwrap().voice.as_deref(), Some("custom"));
+        assert_eq!(
+            context(&["session"], &openai("marin"))
+                .unwrap()
+                .voice
+                .as_deref(),
+            Some("marin")
+        );
+        assert_eq!(
+            context(&["session"], &openai("my-voice"))
+                .unwrap()
+                .voice
+                .as_deref(),
+            Some("custom")
+        );
         assert_eq!(context(&["session"], &pocket(5.0)).unwrap().rate, None);
-        assert_eq!(context(&["session", "--stt-backend", "whisper"], &siri("Samantha")), None);
+        assert_eq!(
+            context(&["session", "--stt-backend", "whisper"], &siri("Samantha")),
+            None
+        );
     }
 
     #[test]
@@ -442,7 +466,11 @@ mod tests {
         let started = payload(
             production(),
             ID,
-            record("berd_voice_conversation_started", at(1_762_264_800), &context.attributes()),
+            record(
+                "berd_voice_conversation_started",
+                at(1_762_264_800),
+                &context.attributes(),
+            ),
         );
         let ended = payload(
             production(),
@@ -461,7 +489,10 @@ mod tests {
                 {"key": "tts_rate", "value": {"stringValue": "1.25"}},
                 {"key": "tts_voice", "value": {"stringValue": "anna"}},
             ]);
-            attributes.as_array_mut().unwrap().extend(extra.as_array().unwrap().clone());
+            attributes
+                .as_array_mut()
+                .unwrap()
+                .extend(extra.as_array().unwrap().clone());
             json!({"resourceLogs": [{
                 "resource": {
                     "attributes": [
@@ -488,7 +519,11 @@ mod tests {
         };
         assert_eq!(
             started,
-            fixture("berd_voice_conversation_started", "1762264800000000000", json!([]))
+            fixture(
+                "berd_voice_conversation_started",
+                "1762264800000000000",
+                json!([])
+            )
         );
         assert_eq!(
             ended,
@@ -515,10 +550,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let status = |args: &[&str]| command_in(dir.path(), args).unwrap();
         assert_eq!(status(&[]), json!({"enabled": false, "enforced": false}));
-        assert_eq!(status(&["enable"]), json!({"enabled": true, "enforced": false}));
+        assert_eq!(
+            status(&["enable"]),
+            json!({"enabled": true, "enforced": false})
+        );
         assert_eq!(store::load_telemetry_consent(dir.path()), Ok(true));
-        assert_eq!(status(&["disable"]), json!({"enabled": false, "enforced": false}));
-        assert_eq!(status(&["status"]), json!({"enabled": false, "enforced": false}));
+        assert_eq!(
+            status(&["disable"]),
+            json!({"enabled": false, "enforced": false})
+        );
+        assert_eq!(
+            status(&["status"]),
+            json!({"enabled": false, "enforced": false})
+        );
         assert!(command_in(dir.path(), &["maybe"]).is_err());
         assert!(command_in(dir.path(), &["enable", "now"]).is_err());
     }
@@ -527,7 +571,10 @@ mod tests {
     #[test]
     fn enforced_builds_are_always_enabled() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(command_in(dir.path(), &[]).unwrap(), json!({"enabled": true, "enforced": true}));
+        assert_eq!(
+            command_in(dir.path(), &[]).unwrap(),
+            json!({"enabled": true, "enforced": true})
+        );
         assert!(command_in(dir.path(), &["disable"]).is_err());
     }
 
@@ -554,7 +601,9 @@ mod tests {
                 loop {
                     let mut header = String::new();
                     reader.read_line(&mut header).unwrap();
-                    let Some((name, value)) = header.trim_end().split_once(": ") else { break };
+                    let Some((name, value)) = header.trim_end().split_once(": ") else {
+                        break;
+                    };
                     headers.push((name.to_ascii_lowercase(), value.to_string()));
                 }
                 let length = headers
@@ -602,7 +651,11 @@ mod tests {
                 &client().unwrap(),
                 build,
                 dir,
-                record("berd_voice_conversation_started", at(1), &context.attributes()),
+                record(
+                    "berd_voice_conversation_started",
+                    at(1),
+                    &context.attributes(),
+                ),
             ))
     }
 
@@ -640,7 +693,10 @@ mod tests {
         assert_eq!(header("x-berd-schema-version"), ["berd-call-otlp-logs-v1"]);
         assert_eq!(header("content-type"), ["application/json"]);
         let resource = &requests[1].body["resourceLogs"][0]["resource"]["attributes"];
-        assert_eq!(resource[4], json!({"key": "installation.id", "value": {"stringValue": id}}));
+        assert_eq!(
+            resource[4],
+            json!({"key": "installation.id", "value": {"stringValue": id}})
+        );
     }
 
     #[cfg(not(feature = "telemetry-enforced"))]
@@ -661,7 +717,13 @@ mod tests {
     #[test]
     fn ended_attributes_append_duration_counts_and_reason() {
         let context = context(&["session"], &pocket(9.0)).unwrap();
-        let attributes = ended_attributes(&context, Duration::from_millis(1_500), 0, 2, "clean-shutdown");
+        let attributes = ended_attributes(
+            &context,
+            Duration::from_millis(1_500),
+            0,
+            2,
+            "clean-shutdown",
+        );
         assert_eq!(
             &attributes[4..],
             [

@@ -264,7 +264,11 @@ fn run_session(
         )?;
         let _ = response.send(control.status());
     }
-    if let Ok(tts) = actor.session.lock().map(|session| session.tts.settings.clone()) {
+    if let Ok(tts) = actor
+        .session
+        .lock()
+        .map(|session| session.tts.settings.clone())
+    {
         crate::telemetry::start(&control.session_arguments, &tts);
     }
     let control: Arc<dyn HostControl> = control;
