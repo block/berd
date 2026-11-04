@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "Berd"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -641,7 +641,7 @@ dependencies = [
 
 [[package]]
 name = "berdctl"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "clap",
  "indexmap 2.13.1",
@@ -6682,7 +6682,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-berdctl"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "axum",
  "getrandom 0.4.3",
