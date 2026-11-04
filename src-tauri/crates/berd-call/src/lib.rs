@@ -32,6 +32,7 @@ pub mod session;
 pub mod siri;
 mod status_sounds;
 mod synthesis;
+pub mod telemetry_store;
 mod tts;
 #[cfg(target_os = "macos")]
 pub mod update_guard;
