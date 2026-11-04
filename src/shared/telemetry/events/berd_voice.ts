@@ -24,6 +24,8 @@ export interface BerdVoiceConversationContextParams {
   voice_mode: BerdVoiceConversationMode;
   /** Starting playback multiplier; omitted when the backend rate is unavailable. */
   tts_rate?: number | null;
+  /** Selected output voice id, or "custom" outside the backend's catalog; omitted when none is selected. */
+  tts_voice?: string | null;
 }
 
 export interface BerdVoiceConversationEndedParams
@@ -42,6 +44,7 @@ function contextParameters(
     output_backend: params.output_backend,
     voice_mode: params.voice_mode,
     ...(params.tts_rate == null ? {} : { tts_rate: String(params.tts_rate) }),
+    ...(params.tts_voice == null ? {} : { tts_voice: params.tts_voice }),
   };
 }
 
