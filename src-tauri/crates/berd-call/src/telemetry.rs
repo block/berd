@@ -207,6 +207,10 @@ pub(crate) fn start(session_arguments: &[String], tts: &TtsSettings) {
     if worker.is_err() {
         return;
     }
+    // Consent granted mid-call starts reporting at a later session, so the
+    // counts begin with the started event rather than with the process.
+    USER_UTTERANCES.store(0, Ordering::Relaxed);
+    ASSISTANT_RESPONSES.store(0, Ordering::Relaxed);
     let _ = records.send(record(
         "berd_voice_conversation_started",
         SystemTime::now(),
