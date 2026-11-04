@@ -437,6 +437,9 @@
         "sessionId": {
           "type": "string"
         },
+        "extensionName": {
+          "type": "string"
+        },
         "name": {
           "type": "string"
         },
@@ -444,7 +447,7 @@
           "default": null
         }
       },
-      "required": ["sessionId", "name"],
+      "required": ["sessionId", "extensionName", "name"],
       "description": "Call a tool from an extension.",
       "x-side": "agent",
       "x-method": "_goose/unstable/tools/call"
