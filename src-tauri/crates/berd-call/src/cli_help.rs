@@ -114,8 +114,9 @@ const TELEMETRY_HELP: &str = r#"Show or change usage telemetry consent.
 Usage:
   berd-call telemetry [status | enable | disable]
 
-Calls report anonymous usage (start, end, duration, turn counts and audio
-backends) only with consent. Consent is shared with Berd: enabling or disabling
+Calls report anonymous usage (start, end, duration, turn counts, end reason,
+audio backends, speech rate and voice, with the app version and a random
+installation id) only with consent. Consent is shared with Berd: enabling or disabling
 here changes Berd's telemetry setting too. Internal builds always report.
 Results are JSON with enabled and enforced."#;
 
