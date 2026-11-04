@@ -179,6 +179,10 @@ jobs:
       SOURCE_SHA: ${{ needs.setup.outputs.source_sha }}
       REPOSITORY: ${{ needs.setup.outputs.repository }}
       PLATFORM: ${{ needs.setup.outputs.macos_platform }}
+      # llama-cpp-sys-2 forwards CMAKE_* variables to llama.cpp's CMake. Goose never
+      # uses llama's HTTPS client, so keep it off rather than compiling against
+      # whatever OpenSSL the runner's Homebrew has (OpenSSL 4 breaks its httplib).
+      CMAKE_DISABLE_FIND_PACKAGE_OpenSSL: "TRUE"
       BERD_RELEASE_CHANNEL: public
       BERD_UPDATER_ENDPOINT: https://github.com/${{ needs.setup.outputs.repository }}/releases/download/${{ needs.setup.outputs.rolling_tag }}/latest.json
       BERD_UPDATER_PUBLIC_KEY: ${{ secrets.BERD_UPDATER_PUBLIC_KEY }}
