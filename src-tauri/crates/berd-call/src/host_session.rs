@@ -71,7 +71,7 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
             .unwrap_or_else(default_input_during_tts_policy),
         restarted: None,
     };
-    loop {
+    let outcome = loop {
         match run_session(
             &server,
             session,
@@ -80,32 +80,28 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
             &stop_requested,
             &status_sounds,
         ) {
-            Ok(None) => {
-                transcript.finish(CLEAN_STOP);
-                return Ok(());
-            }
+            Ok(None) => break Ok(()),
             // A stop recorded while the old session was shutting down wins
             // over the restart it would otherwise hand off to.
             Ok(Some(next)) if stop_requested.load(Ordering::SeqCst) => {
                 if let Some(response) = next.restarted {
                     let _ = response.send(Err("voice call stopped".into()));
                 }
-                transcript.finish(CLEAN_STOP);
-                return Ok(());
+                break Ok(());
             }
             Ok(Some(next)) => {
                 session = next;
             }
-            Err(_) if stop_requested.load(Ordering::SeqCst) => {
-                transcript.finish(CLEAN_STOP);
-                return Ok(());
-            }
-            Err(message) => {
-                transcript.finish(&format!("Berd Call failed: {message}"));
-                return Err(message);
-            }
+            Err(_) if stop_requested.load(Ordering::SeqCst) => break Ok(()),
+            Err(message) => break Err(message),
         }
+    };
+    match &outcome {
+        Ok(()) => transcript.finish(CLEAN_STOP),
+        Err(message) => transcript.finish(&format!("Berd Call failed: {message}")),
     }
+    crate::telemetry::end(outcome.is_err());
+    outcome
 }
 
 /// Where live transcript records go: nowhere, stdout TSV, or a Codex task.
@@ -267,6 +263,13 @@ fn run_session(
             "session restarted; transcript cursors reset",
         )?;
         let _ = response.send(control.status());
+    }
+    if let Ok(tts) = actor
+        .session
+        .lock()
+        .map(|session| session.tts.settings.clone())
+    {
+        crate::telemetry::start(&control.session_arguments, &tts);
     }
     let control: Arc<dyn HostControl> = control;
     while running.load(Ordering::SeqCst) {
@@ -758,6 +761,7 @@ impl HostControl for SessionControl {
     fn stop(&self) -> Result<Value, String> {
         // Recorded before enqueueing, so a stop that races a restart handoff
         // still ends the call even if this session never reads the command.
+        crate::telemetry::user_stopped();
         self.stop_requested.store(true, Ordering::SeqCst);
         let (tx, rx) = mpsc::sync_channel(1);
         if self
@@ -1370,6 +1374,7 @@ impl SessionActor {
                 self.stream_user_interim(token, &text)?
             }
             SessionMessage::LiveEvent { token, text } => {
+                crate::telemetry::user_utterance();
                 self.transcript.record(Some(token), "user", &text)?
             }
             SessionMessage::Pending { id, utterances } if self.pending_prepare_id() == Some(id) => {
@@ -1400,6 +1405,7 @@ impl SessionActor {
                 }
             }
             SessionMessage::SpeechCompleted { id, .. } if self.pending_prepare_id() == Some(id) => {
+                crate::telemetry::assistant_response();
                 self.respond_speak(Ok(json!({"spoke":true,"status":"completed"})));
             }
             SessionMessage::SpeechInterrupted {

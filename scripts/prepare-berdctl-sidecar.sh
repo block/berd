@@ -51,6 +51,10 @@ BUNDLE_BERD_CALL=0
 if [[ "$TRIPLE" == *apple-darwin && "${BERD_CALL_BUNDLE:-1}" == "1" ]]; then
   BUNDLE_BERD_CALL=1
   CARGO_ARGS+=(-p berd-call)
+  # The CLI's twin of the app's block-telemetry-enforced, from the same gate.
+  if [[ "${VITE_TELEMETRY_ENFORCED:-0}" == "1" ]]; then
+    CARGO_ARGS+=(--features berd-call/telemetry-enforced)
+  fi
 fi
 
 (cd src-tauri && cargo "${CARGO_ARGS[@]}")

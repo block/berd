@@ -56,6 +56,7 @@ mod session_audio;
 mod session_framing;
 #[cfg(target_os = "macos")]
 mod system_input_mute;
+mod telemetry;
 
 use session_audio::{
     AudioHostAck, AudioOutputControlRequest, AudioPipeTransport, RemotePcmAudioOutput,
@@ -551,6 +552,12 @@ fn main() {
                 .unwrap_or_else(|error| operational_error(operation, error));
             print_pretty_json(&response)
                 .unwrap_or_else(|error| operational_error(operation, error));
+        }
+        Some("telemetry") => {
+            let response = telemetry::command(&args[2..])
+                .unwrap_or_else(|error| operational_error("telemetry", error));
+            print_pretty_json(&response)
+                .unwrap_or_else(|error| operational_error("telemetry", error));
         }
         Some("settings") => {
             let (port, request) = parse_or_exit(parse_host_settings_args(&args), &args);

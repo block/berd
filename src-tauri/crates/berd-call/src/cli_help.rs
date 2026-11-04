@@ -25,6 +25,7 @@ Diagnostics:
   benchmark stt           Benchmark an STT backend
 
 Other:
+  telemetry               Show or change usage telemetry consent
   help [command]          Show help for a command
   version                 Print the installed version
 
@@ -107,6 +108,17 @@ const STOP_HELP: &str = r#"Stop the active local voice call.
 
 Usage:
   berd-call stop [--port PORT]"#;
+
+const TELEMETRY_HELP: &str = r#"Show or change usage telemetry consent.
+
+Usage:
+  berd-call telemetry [status | enable | disable]
+
+Calls report anonymous usage (start, end, duration, turn counts, end reason,
+audio backends, speech rate and voice, with the app version and a random
+installation id) only with consent. Consent is shared with Berd: enabling or disabling
+here changes Berd's telemetry setting too. Internal builds always report.
+Results are JSON with enabled and enforced."#;
 
 const SESSION_HELP: &str = r#"Run the host-facing framed voice-session protocol.
 
@@ -213,6 +225,7 @@ fn help_for(topic: &[&str]) -> Option<&'static str> {
         ["catch-up"] | ["wait-for-input"] => Some(POLL_INPUT_HELP),
         ["settings"] => Some(SETTINGS_HELP),
         ["stop"] => Some(STOP_HELP),
+        ["telemetry"] | ["telemetry", "status" | "enable" | "disable"] => Some(TELEMETRY_HELP),
         ["session"] => Some(SESSION_HELP),
         ["synthesize"] => Some(SYNTHESIZE_HELP),
         ["voices"] | ["voices", "list" | "download" | "preview"] => Some(VOICES_HELP),

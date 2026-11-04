@@ -590,6 +590,15 @@ describe("build-macos Block-service feature seam", () => {
     );
     expect(config.bundle.externalBin).toContain("binaries/berd-call");
     expect(stage).toContain("CARGO_ARGS+=(-p berd-call)");
+    expect(stage).toContain(
+      "CARGO_ARGS+=(--features berd-call/telemetry-enforced)",
+    );
+    expect(release).toContain(
+      'VITE_TELEMETRY_ENFORCED="$VITE_TELEMETRY_ENFORCED_VALUE" \\\n  VITE_FEEDBACK="$VITE_FEEDBACK_VALUE" ./scripts/prepare-berdctl-sidecar.sh',
+    );
+    expect(release).toContain(
+      'if [[ "$pair" == "VITE_TELEMETRY=0" ]]; then BERD_CALL_TELEMETRY_ENVIRONMENT=""; fi',
+    );
     expect(stage).toContain("stage_cli berd-call");
     expect(stage).toContain('out="$OUT_DIR/$name-$TRIPLE"');
     expect(release).toContain(
