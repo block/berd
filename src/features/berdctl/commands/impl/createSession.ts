@@ -145,13 +145,26 @@ Result:
     ]);
     await refreshRuntimeConfigForNewChat();
     const harnessId = args.harness_id ?? GOOSE_PROVIDER_ID;
-    const autoRouting =
-      useRuntimeConfigStore.getState().config.goose.autoRouting;
+    const runtimeState = useRuntimeConfigStore.getState();
+    const autoRouting = runtimeState.config.goose.autoRouting;
     if (args.auto_mode_id !== undefined) {
       if (args.model_id !== undefined || harnessId !== GOOSE_PROVIDER_ID) {
         throw new CommandError(
           "invalid_args",
           "--auto-mode-id requires Goose and cannot be combined with --model-id; omit --model-id and use --harness-id goose (or omit --harness-id).",
+        );
+      }
+      // Startup, failed, and app-default loads expose defaults without proving
+      // a configured mode was removed (same rule as Auto dispatch). Report the
+      // uncertainty as retryable instead of claiming the mode is unknown.
+      if (
+        !runtimeState.loaded ||
+        runtimeState.result.status !== "ready" ||
+        runtimeState.result.source === "appDefault"
+      ) {
+        throw new CommandError(
+          "config_unavailable",
+          "Auto mode configuration is not available right now; retry, then list configured modes with `berdctl info models --harness-id goose`.",
         );
       }
       if (!autoRouting?.modes.some((mode) => mode.id === args.auto_mode_id)) {
@@ -166,6 +179,19 @@ Result:
       (args.harness_id || args.model_id || args.agent_id
         ? null
         : autoRouting?.defaultModeId);
+    // Bind the selected mode to this config snapshot: a concurrent refresh
+    // may replace the routing while the later validations below run, which
+    // would otherwise persist a stale mode over a different live target.
+    // Re-verified immediately before the session is created.
+    const selectedAutoRouting = autoModeId
+      ? {
+          revision:
+            runtimeState.result.status === "ready"
+              ? runtimeState.result.autoRoutingRevision
+              : undefined,
+          routing: JSON.stringify(autoRouting),
+        }
+      : null;
     // The validation legs are independent I/O; overlap them.
     const [project, , models, persona] = await Promise.all([
       args.project_id ? findProjectOrThrow(args.project_id) : null,
@@ -236,6 +262,24 @@ Result:
       : await resolveSessionCwd(project);
     let session: ChatSession;
     try {
+      // A concurrent refresh replaced the routing snapshot the selection was
+      // validated against; fall back would silently discard the caller's
+      // requested mode, so reject with no session instead.
+      if (selectedAutoRouting) {
+        const current = useRuntimeConfigStore.getState();
+        if (
+          (current.result.status === "ready"
+            ? current.result.autoRoutingRevision
+            : undefined) !== selectedAutoRouting.revision ||
+          JSON.stringify(current.config.goose.autoRouting) !==
+            selectedAutoRouting.routing
+        ) {
+          throw new CommandError(
+            "selection_superseded",
+            "The Auto mode selection changed while the chat was being prepared; no session was created. Retry with a currently configured --auto-mode-id.",
+          );
+        }
+      }
       // Past the broker deadline the agent was already told this call failed;
       // do not create a session it cannot see. The workspace plan may already
       // have created a branch/worktree, so the catch below rolls it back.

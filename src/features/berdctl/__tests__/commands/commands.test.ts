@@ -1,5 +1,8 @@
 import { usePendingAutoModeStore } from "@/features/chat/lib/autoModelSelection";
-import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import {
+  useRuntimeConfigStore,
+  INITIAL_RUNTIME_CONFIG_RESULT,
+} from "@/shared/runtime-config/runtimeConfigStore";
 import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -363,7 +366,11 @@ async function expectCommandError(
 
 beforeEach(() => {
   usePendingAutoModeStore.setState({ modeId: undefined });
-  useRuntimeConfigStore.setState({ config: DEFAULT_RUNTIME_CONFIG });
+  useRuntimeConfigStore.setState({
+    config: DEFAULT_RUNTIME_CONFIG,
+    loaded: false,
+    result: INITIAL_RUNTIME_CONFIG_RESULT,
+  });
   mocks.refreshNewChat.mockReset().mockResolvedValue(undefined);
   resetSessionTargetCoordinatorsForTests();
   localStorage.removeItem("goose:chat-workspace-metadata");
@@ -712,27 +719,34 @@ describe("command safety metadata", () => {
 
 describe("sessions.create", () => {
   function configureAutoModes() {
-    useRuntimeConfigStore.setState({
-      config: {
-        ...DEFAULT_RUNTIME_CONFIG,
-        goose: {
-          ...DEFAULT_RUNTIME_CONFIG.goose,
-          autoRouting: {
-            url: "https://router.example",
-            defaultModeId: "balanced",
-            modes: ["balanced", "custom-mode"].map((id) => ({
-              id,
-              displayName:
-                id === "balanced" ? "Auto Balanced" : "Custom routing",
-              modelProviderId: "openai",
-              fallback: {
-                modelId: `${id}-fallback`,
-                effort: "medium" as const,
-              },
-              models: [{ modelId: `${id}-fallback`, routerModel: id }],
-            })),
-          },
+    const config = {
+      ...DEFAULT_RUNTIME_CONFIG,
+      goose: {
+        ...DEFAULT_RUNTIME_CONFIG.goose,
+        autoRouting: {
+          url: "https://router.example",
+          defaultModeId: "balanced",
+          modes: ["balanced", "custom-mode"].map((id) => ({
+            id,
+            displayName: id === "balanced" ? "Auto Balanced" : "Custom routing",
+            modelProviderId: "openai",
+            fallback: {
+              modelId: `${id}-fallback`,
+              effort: "medium" as const,
+            },
+            models: [{ modelId: `${id}-fallback`, routerModel: id }],
+          })),
         },
+      },
+    };
+    useRuntimeConfigStore.setState({
+      config,
+      loaded: true,
+      result: {
+        status: "ready",
+        source: "endpoint",
+        config,
+        autoRoutingRevision: "a".repeat(64),
       },
     });
   }
@@ -801,6 +815,110 @@ describe("sessions.create", () => {
     expect(mocks.planProjectChatWorkspacesAsIs).not.toHaveBeenCalled();
     expect(mocks.resolveSessionCwd).not.toHaveBeenCalled();
     expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects an explicit Auto mode as retryable config_unavailable before the initial load", async () => {
+    // Store default: initial app-default snapshot; the refresh is a no-op.
+    const error = await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "create", prompt: "Investigate", auto_mode_id: "balanced" },
+        ctx,
+      ),
+      "config_unavailable",
+    );
+    expect(error.message).toContain("retry");
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-new"],
+    ).toBeUndefined();
+    expect(useChatSessionStore.getState().sessions).toHaveLength(0);
+  });
+
+  it("rejects an explicit Auto mode as config_unavailable when the refresh fails", async () => {
+    mocks.refreshNewChat.mockImplementationOnce(async () => {
+      useRuntimeConfigStore.setState({
+        loaded: true,
+        result: {
+          status: "unavailable",
+          source: "endpoint",
+          reason: "endpointUnavailable",
+          message: "Runtime configuration refresh unavailable",
+        },
+        config: DEFAULT_RUNTIME_CONFIG,
+      });
+    });
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "create", prompt: "Investigate", auto_mode_id: "balanced" },
+        ctx,
+      ),
+      "config_unavailable",
+    );
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+    expect(useChatSessionStore.getState().sessions).toHaveLength(0);
+  });
+
+  it("rejects as selection_superseded when the selected mode changes before creation", async () => {
+    configureAutoModes();
+    let releaseCwd = () => {};
+    mocks.resolveSessionCwd.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        releaseCwd = resolve;
+      });
+      return "/resolved/cwd";
+    });
+    const pending = dispatchCommand(
+      "sessions",
+      { action: "create", prompt: "Investigate", auto_mode_id: "balanced" },
+      ctx,
+    );
+    await vi.waitFor(() =>
+      expect(mocks.resolveSessionCwd).toHaveBeenCalledOnce(),
+    );
+    // A concurrent refresh replaces the config without the selected mode.
+    const config = {
+      ...DEFAULT_RUNTIME_CONFIG,
+      goose: {
+        ...DEFAULT_RUNTIME_CONFIG.goose,
+        autoRouting: {
+          url: "https://router.example",
+          defaultModeId: "custom-mode",
+          modes: [
+            {
+              id: "custom-mode",
+              displayName: "Custom routing",
+              modelProviderId: "openai",
+              fallback: {
+                modelId: "custom-mode-fallback",
+                effort: "medium" as const,
+              },
+              models: [
+                { modelId: "custom-mode-fallback", routerModel: "custom-mode" },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    useRuntimeConfigStore.setState({
+      config,
+      loaded: true,
+      result: {
+        status: "ready",
+        source: "endpoint",
+        config,
+        autoRoutingRevision: "f".repeat(64),
+      },
+    });
+    releaseCwd();
+    await expectCommandError(pending, "selection_superseded");
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-new"],
+    ).toBeUndefined();
+    expect(useChatSessionStore.getState().sessions).toHaveLength(0);
   });
 
   it("keeps explicit persona instructions while Auto owns model selection", async () => {
@@ -5531,9 +5649,50 @@ describe("info", () => {
           models: [
             { model_id: "model-a", name: "model-a", provider: modelProvider },
           ],
+          // Without a refreshed authoritative config, the empty mode list is
+          // uncertainty, not a proven configuration.
+          warning:
+            "configured Auto modes may be unavailable; the mode list may be incomplete or stale",
         },
       ],
     });
+  });
+
+  it("list_models keeps serving other harnesses when the Goose Auto configuration refresh fails", async () => {
+    mocks.readinessFromReport.mockReturnValue(
+      new Map([
+        ["goose", "ready"],
+        ["codex-acp", "ready"],
+      ]),
+    );
+    seedModelCache("codex-acp", ["gpt-6"]);
+    mocks.refreshNewChat.mockRejectedValueOnce(
+      new Error("goose provider sync failed"),
+    );
+
+    const result = await dispatchCommand(
+      "info",
+      { action: "list_models" },
+      ctx,
+    );
+
+    const harnesses = result as {
+      harnesses: Array<{
+        harness_id: string;
+        models: Array<{ model_id: string }>;
+        warning?: string;
+      }>;
+    };
+    expect(harnesses.harnesses.map((h) => h.harness_id)).toEqual([
+      "goose",
+      "codex-acp",
+    ]);
+    const goose = harnesses.harnesses.find((h) => h.harness_id === "goose");
+    expect(goose?.warning).toContain("goose provider sync failed");
+    // The unaffected harness still serves its cached models with no warning.
+    const codex = harnesses.harnesses.find((h) => h.harness_id === "codex-acp");
+    expect(codex?.models.map((m) => m.model_id)).toEqual(["gpt-6"]);
+    expect(codex).not.toHaveProperty("warning");
   });
 
   it("list_models covers every ready harness when harness_id is omitted", async () => {

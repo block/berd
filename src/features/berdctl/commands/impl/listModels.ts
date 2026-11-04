@@ -59,6 +59,7 @@ Result:
   manages its model outside the app.`,
   schema: listModelsSchema,
   execute: async (args): Promise<ListModelsResult> => {
+    let gooseConfigWarning: string | null = null;
     const [
       { getProviderModelSelectionHint },
       { useProviderModelCacheStore },
@@ -85,10 +86,29 @@ Result:
           (harness) => harness.readiness === "ready",
         );
     if (targets.some((harness) => harness.id === GOOSE_PROVIDER_ID)) {
-      await refreshRuntimeConfigForNewChat();
+      try {
+        await refreshRuntimeConfigForNewChat();
+      } catch (error) {
+        // A Goose-specific sync failure must not abort discovery for the
+        // other ready harnesses; surface it on the Goose entry instead.
+        gooseConfigWarning = `auto mode configuration refresh failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+      }
     }
-    const autoRouting =
-      useRuntimeConfigStore.getState().config.goose.autoRouting;
+    const runtimeState = useRuntimeConfigStore.getState();
+    const autoRouting = runtimeState.config.goose.autoRouting;
+    if (
+      gooseConfigWarning === null &&
+      (!runtimeState.loaded ||
+        runtimeState.result.status !== "ready" ||
+        runtimeState.result.source === "appDefault")
+    ) {
+      // Startup, failed, and app-default loads expose defaults without
+      // proving the saved Auto modes are gone (same rule as Auto dispatch).
+      gooseConfigWarning =
+        "configured Auto modes may be unavailable; the mode list may be incomplete or stale";
+    }
     const harnesses = await Promise.all(
       targets.map(async (harness) => {
         const models =
@@ -105,8 +125,13 @@ Result:
           harness.id === GOOSE_PROVIDER_ID
             ? null
             : useProviderModelCacheStore.getState().getError(harness.id);
+        const warningParts = [
+          hint,
+          staleError ? `list may be stale: ${staleError}` : null,
+          harness.id === GOOSE_PROVIDER_ID ? gooseConfigWarning : null,
+        ].filter((entry): entry is string => entry !== null);
         const warning =
-          hint ?? (staleError ? `list may be stale: ${staleError}` : null);
+          warningParts.length > 0 ? warningParts.join("; ") : null;
         return {
           harness_id: harness.id,
           models,
