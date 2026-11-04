@@ -44,6 +44,8 @@
     "refreshError": "No se pudieron actualizar las programaciones: {{error}}. Se muestra la ultima lista cargada.",
     "emptyTitle": "Aun no hay programaciones locales",
     "emptyBody": "Las programaciones que crees en Goose apareceran aqui. Usa la CLI de Goose u otro cliente de Goose para programar y configurar recetas.",
+    "active": "Activa",
+    "unknownLastRun": "Desconocida",
     "paused": "En pausa",
     "running": "En ejecucion",
     "lastRun": "Ultima ejecucion: {{time}}"
