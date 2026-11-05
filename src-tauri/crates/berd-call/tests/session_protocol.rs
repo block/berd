@@ -118,7 +118,7 @@ fn spawn_audio_host(
     reader: UnixStream,
     stdin: Arc<Mutex<std::process::ChildStdin>>,
 ) -> std::thread::JoinHandle<std::io::Result<()>> {
-    spawn_audio_host_with_played_limit(reader, stdin, None, false)
+    spawn_audio_host_with_played_limit(reader, stdin, None, false, false)
 }
 
 fn spawn_audio_host_with_played_limit<W: Write + Send + 'static>(
@@ -126,6 +126,7 @@ fn spawn_audio_host_with_played_limit<W: Write + Send + 'static>(
     stdin: Arc<Mutex<W>>,
     played_frame_limit: Option<u64>,
     mut fail_at_limit: bool,
+    mut shutdown_before_ack: bool,
 ) -> std::thread::JoinHandle<std::io::Result<()>> {
     std::thread::spawn(move || {
         let mut current = None::<(u64, u64, u64)>;
@@ -169,6 +170,10 @@ fn spawn_audio_host_with_played_limit<W: Write + Send + 'static>(
                         json!({"type":"audio_chunk_accepted","speech_id":speech_id,"sequence":sequence}),
                         json!({"type":"audio_played","speech_id":speech_id,"played_frames":played_frame_limit.map_or(state.2, |limit| state.2.min(limit))}),
                     ];
+                    if shutdown_before_ack {
+                        shutdown_before_ack = false;
+                        replies.insert(0, json!({"type":"shutdown"}));
+                    }
                     if reached_limit && fail_at_limit {
                         fail_at_limit = false;
                         let played_frames = played_frame_limit.unwrap();
@@ -262,7 +267,8 @@ fn audio_fixture_truncated_payload_does_not_panic_before_shutdown_is_checked() {
     // The child exits halfway through a valid begin payload.
     audio.write_all(&1_u64.to_le_bytes()).unwrap();
     drop(audio);
-    let host = spawn_audio_host_with_played_limit(reader, Arc::new(Mutex::new(input)), None, false);
+    let host =
+        spawn_audio_host_with_played_limit(reader, Arc::new(Mutex::new(input)), None, false, false);
     let result = host
         .join()
         .expect("payload EOF panicked before child status was checked");
@@ -311,7 +317,8 @@ fn audio_fixture_can_finish_a_queued_reply_after_child_input_closes() {
     audio.write_all(&1_u64.to_le_bytes()).unwrap();
     audio.write_all(&24_000_u64.to_le_bytes()).unwrap();
     drop(audio);
-    let host = spawn_audio_host_with_played_limit(reader, Arc::new(Mutex::new(input)), None, false);
+    let host =
+        spawn_audio_host_with_played_limit(reader, Arc::new(Mutex::new(input)), None, false, false);
     host.join()
         .expect("late fixture reply panicked after child shutdown")
         .unwrap();
@@ -688,12 +695,20 @@ fn siri_remote_output_supports_consecutive_turns_and_cancellation() {
         write_session_json(&mut *stdin, &message);
         stdin.flush().unwrap();
     };
+    let usage = Mutex::new(Vec::new());
     let receive = || -> Value {
-        let line = receiver
-            .recv_timeout(Duration::from_secs(10))
-            .expect("child did not emit a bounded response")
-            .unwrap();
-        serde_json::from_str(&line).unwrap()
+        loop {
+            let line = receiver
+                .recv_timeout(Duration::from_secs(10))
+                .expect("child did not emit a bounded response")
+                .unwrap();
+            let message: Value = serde_json::from_str(&line).unwrap();
+            if message["type"] == "speech_used" {
+                usage.lock().unwrap().push(message);
+            } else {
+                return message;
+            }
+        }
     };
 
     send(json!({"type":"hello","id":1,"input_during_tts":"allow_barge_in"}));
@@ -753,6 +768,20 @@ fn siri_remote_output_supports_consecutive_turns_and_cancellation() {
     send(json!({"type":"cancel","id":5}));
     assert_eq!(receive()["type"], "cancel_result");
     assert_eq!(receive()["type"], "speech_interrupted");
+    let usage = usage.into_inner().unwrap();
+    assert_eq!(usage[0]["id"], 2);
+    assert_eq!(usage[1]["id"], 3);
+    assert!(usage
+        .iter()
+        .all(|event| [2, 3, 4].contains(&event["id"].as_u64().unwrap())));
+    assert_eq!(
+        usage
+            .iter()
+            .map(|event| event["speech_id"].as_u64().unwrap())
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        usage.len()
+    );
     send(json!({"type":"shutdown"}));
     drop(stdin);
     let mut child_process = child.0.take().unwrap();
@@ -763,6 +792,12 @@ fn siri_remote_output_supports_consecutive_turns_and_cancellation() {
 
 #[test]
 fn speech_whose_player_stops_is_interrupted_where_it_was_heard_and_the_call_goes_on() {
+    for played_frames in [0, 1_200] {
+        assert_player_stop_usage(played_frames);
+    }
+}
+
+fn assert_player_stop_usage(played_frames: u64) {
     let (speech_url, speech_requests) = spawn_speech_server();
     let (mut command, pcm_guard, host) = session_command();
     let child = command
@@ -789,21 +824,27 @@ fn speech_whose_player_stops_is_interrupted_where_it_was_heard_and_the_call_goes
     let stdin = Arc::new(Mutex::new(process.stdin.take().unwrap()));
     let output = spawn_session_message_reader(process.stdout.take().unwrap());
     // The host's player stops partway through the first speech, as when the speakers change.
-    let audio_host =
-        spawn_audio_host_with_played_limit(host, Arc::clone(&stdin), Some(1_200), true);
+    let audio_host = spawn_audio_host_with_played_limit(
+        host,
+        Arc::clone(&stdin),
+        Some(played_frames),
+        true,
+        false,
+    );
     let send = |message: Value| {
         let mut stdin = stdin.lock().unwrap();
         write_session_json(&mut *stdin, &message);
         stdin.flush().unwrap();
     };
-    let started = Mutex::new(Vec::new());
+    let used = Mutex::new(Vec::new());
     let terminal = |id: u64| loop {
         let message = output.recv_timeout(Duration::from_secs(5)).unwrap();
         match message["type"].as_str() {
             Some("admitted") => send(json!({
                 "type":"output_ready","id":id,"speech_id":message["speech_id"]
             })),
-            Some("speech_started") => started.lock().unwrap().push(message["tts"].clone()),
+            Some("speech_used") => used.lock().unwrap().push(message["tts"].clone()),
+            Some("speech_started") => {}
             Some("output_ready_result") => {}
             _ => break message,
         }
@@ -821,10 +862,12 @@ fn speech_whose_player_stops_is_interrupted_where_it_was_heard_and_the_call_goes
         json!({"type":"prepare_speak","id":3,"acknowledgement":null,"text":"Still here.","voice":"marin"}),
     );
     assert_eq!(terminal(3)["type"], "speech_completed");
-    let started = started.into_inner().unwrap();
-    assert_eq!(started.len(), 2);
-    assert_eq!(started[0]["voice"], "alloy");
-    assert_eq!(started[1]["voice"], "marin");
+    let used = used.into_inner().unwrap();
+    assert_eq!(used.len(), if played_frames > 0 { 2 } else { 1 });
+    if played_frames > 0 {
+        assert_eq!(used[0]["voice"], "alloy");
+    }
+    assert_eq!(used.last().unwrap()["voice"], "marin");
     for expected in ["alloy", "marin"] {
         assert_eq!(
             speech_requests
@@ -837,6 +880,81 @@ fn speech_whose_player_stops_is_interrupted_where_it_was_heard_and_the_call_goes
     drop(stdin);
     assert!(child.0.take().unwrap().wait().unwrap().success());
     audio_host.join().unwrap().unwrap();
+}
+
+#[test]
+fn shutdown_before_first_chunk_ack_reports_only_confirmed_usage() {
+    for played_frames in [0, 64] {
+        let (speech_url, _speech_requests) = spawn_speech_server();
+        let (mut command, pcm_guard, host) = session_command();
+        let child = command
+            .args([
+                "--tts-backend",
+                "openai",
+                "--tts-url",
+                &speech_url,
+                "--stt-backend",
+                "openai",
+                "--stt-url",
+                &spawn_transcription_server(),
+            ])
+            .env("OPENAI_API_KEY", "test-key")
+            .env("OPENAI_TTS_VOICE", "alloy")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        drop(pcm_guard);
+        let mut child = ChildGuard(Some(child));
+        let process = child.0.as_mut().unwrap();
+        let stdin = Arc::new(Mutex::new(process.stdin.take().unwrap()));
+        let output = spawn_session_message_reader(process.stdout.take().unwrap());
+        let host = spawn_audio_host_with_played_limit(
+            host,
+            Arc::clone(&stdin),
+            Some(played_frames),
+            false,
+            true,
+        );
+        let send = |message: Value| {
+            let mut stdin = stdin.lock().unwrap();
+            write_session_json(&mut *stdin, &message);
+            stdin.flush().unwrap();
+        };
+        send(json!({"type":"hello","id":1,"input_during_tts":"allow_barge_in"}));
+        assert_eq!(
+            output.recv_timeout(Duration::from_secs(5)).unwrap()["type"],
+            "ready"
+        );
+        send(
+            json!({"type":"prepare_speak","id":2,"acknowledgement":null,"text":"A reply stopped before its first acknowledgement."}),
+        );
+        let mut usage = Vec::new();
+        loop {
+            let message = output.recv_timeout(Duration::from_secs(5)).unwrap();
+            match message["type"].as_str() {
+                Some("admitted") => {
+                    send(json!({"type":"output_ready","id":2,"speech_id":message["speech_id"]}))
+                }
+                Some("speech_used") => usage.push(message["tts"].clone()),
+                Some("output_ready_result") => {}
+                Some("speech_interrupted") => break,
+                Some("speech_failed")
+                    if message["message"] == "remote PCM output was cancelled" =>
+                {
+                    break
+                }
+                _ => panic!("unexpected shutdown event: {message}"),
+            }
+        }
+        assert_eq!(usage.len(), usize::from(played_frames > 0));
+        if let Some(settings) = usage.first() {
+            assert_eq!(settings["voice"], "alloy");
+        }
+        assert!(child.0.take().unwrap().wait().unwrap().success());
+        host.join().unwrap().unwrap();
+    }
 }
 
 /// Accepts one OpenAI transcription session that never hears anything.

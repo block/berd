@@ -358,7 +358,7 @@ cancellation and shutdown terminals.
 {"type":"not_admitted","id":u64,"reason":"paused"|"in_progress"|"cancelled"|"empty_text"|"invalid_voice"}
 {"type":"state","id":u64,"confirmed_token":u64,"utterances_after":[{"token":u64,"text":string}]}
 {"type":"cancel_result","id":u64,"outcome":"cancelled"|"stale","speech_id":u64|null}
-{"type":"speech_started","id":u64,"speech_id":u64,"tts":TtsSettings}
+{"type":"speech_started","id":u64,"speech_id":u64}
 {"type":"speech_used","id":u64,"speech_id":u64,"tts":TtsSettings}
 {"type":"speech_completed","id":u64,"speech_id":u64}
 {"type":"speech_interrupted","id":u64,"speech_id":u64,"spoken_through_utf8":u64}
@@ -377,12 +377,12 @@ names the targeted speech. The result is emitted before the runtime requests
 the host's quiescent `audio_cancelled` barrier.
 Every speech event carries the originating prepare ID. `speech_started` appears
 only after the first PCM Chunk is accepted by the host, and exactly one terminal
-message follows every admission. When available, its `tts` object contains the sanitized settings held by that speech's synthesis lease, including any per-request voice override. This has the same backend-specific fields as `session.tts` without a revision. It does not change the session default; a resumed speech does not emit another start.
+message follows every admission. A resumed speech does not emit another start.
 
-`speech_used` reports confirmed playback when cancellation suppressed `speech_started`. It precedes the terminal event and carries the synthesis lease settings. A speech emits either its start or this fallback usage event, so hosts can count used voices without announcing a late playback start.
+`speech_used` appears once when the host confirms positive played frames. Its `tts` object contains the sanitized settings held by that speech's synthesis lease, including per-request voice overrides, with the same backend-specific fields as `session.tts` without a revision. It does not change the session default. Accepting a chunk without playing any frames does not emit usage, and resuming the same speech does not emit it twice.
 
 On `shutdown`, all complete earlier frames are processed in order. The parent
-keeps stdin open while the child cancels and drains output. The child then
+keeps stdin open while the child cancels and drains output. The child continues handling audio acknowledgements while waiting for playback to settle. The child then
 finishes the input runtime while continuing to drain events and storage
 receipts, flushes, and exits. The parent drains stdout through EOF before finalizing call telemetry. EOF, malformed framing, fatal
 input failure, or process death cancels both authorities without transparent

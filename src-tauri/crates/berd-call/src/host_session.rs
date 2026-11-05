@@ -1328,12 +1328,8 @@ impl SessionActor {
                     }
                 }
             }
-            SessionMessage::SpeechStarted {
-                tts: Some(settings),
-                ..
-            }
-            | SessionMessage::SpeechUsed { tts: settings, .. } => {
-                crate::telemetry::speech_started(&settings);
+            SessionMessage::SpeechUsed { tts: settings, .. } => {
+                crate::telemetry::speech_used(&settings);
             }
             SessionMessage::TtsSettingsResult {
                 id,

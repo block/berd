@@ -159,7 +159,7 @@ struct VoiceRequests {
 }
 
 impl VoiceRequests {
-    fn started(&mut self, settings: &TtsSettings) {
+    fn used(&mut self, settings: &TtsSettings) {
         let name = match settings {
             TtsSettings::Siri {
                 voice, language, ..
@@ -233,10 +233,10 @@ pub(crate) fn assistant_response() {
 
 /// Session playback reports the settings held by its actual synthesis lease.
 /// No per-speech record is exported; the call accumulates counts until end.
-pub(crate) fn speech_started(settings: &TtsSettings) {
+pub(crate) fn speech_used(settings: &TtsSettings) {
     if let Ok(mut call) = CALL.lock() {
         if let Some(call) = call.as_mut() {
-            call.voices.started(settings);
+            call.voices.used(settings);
         }
     }
 }
@@ -583,9 +583,9 @@ mod tests {
             voice: voice.into(),
             rate: 1.0,
         };
-        requests.started(&openai("alloy"));
-        requests.started(&openai("alloy"));
-        requests.started(&openai("marin"));
+        requests.used(&openai("alloy"));
+        requests.used(&openai("alloy"));
+        requests.used(&openai("marin"));
         let ended = payload(
             production(),
             ID,
@@ -849,12 +849,12 @@ mod tests {
             language: language.into(),
             rate: 1.0,
         };
-        requests.started(&siri("en-US"));
-        requests.started(&siri("en-US"));
-        requests.started(&siri("en_US"));
-        requests.started(&pocket(1.0));
-        requests.started(&siri("en-AU")); // Same code in a different locale is not this identity.
-        requests.started(&TtsSettings::OpenAi {
+        requests.used(&siri("en-US"));
+        requests.used(&siri("en-US"));
+        requests.used(&siri("en_US"));
+        requests.used(&pocket(1.0));
+        requests.used(&siri("en-AU")); // Same code in a different locale is not this identity.
+        requests.used(&TtsSettings::OpenAi {
             model: "test".into(),
             voice: "private override".into(),
             rate: 1.0,
