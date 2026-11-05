@@ -33,9 +33,9 @@ use berd_call::{
         LocalAssetLockError, LocalAssetRoots, LocalInstallError, LocalInstallErrorKind,
         LocalInstallPhase, LocalInstallProgress,
     },
-    ConfiguredTtsSlot, DeliveryProgress, TtsBackend, TtsConfiguration, TtsConfigurationLease,
-    TtsConfigurationRejection, TtsConfigurationRejectionKind, TtsSettings, WavSynthesisErrorKind,
-    DEFAULT_VAD_THRESHOLD,
+    ConfiguredTtsSlot, DeliveryProgress, PcmAudioOutput, TtsBackend, TtsConfiguration,
+    TtsConfigurationLease, TtsConfigurationRejection, TtsConfigurationRejectionKind, TtsSettings,
+    WavSynthesisErrorKind, DEFAULT_VAD_THRESHOLD,
 };
 use serde::Serialize;
 
@@ -4559,6 +4559,28 @@ fn finish_playback(
     message: SessionMessage,
     writer: &mut impl Write,
 ) -> Result<(), String> {
+    if let Some(current) = active
+        .as_ref()
+        .filter(|current| current.speech_id == speech_id)
+    {
+        // Cancellation can suppress SpeechStarted after audio has already played.
+        // Marking it here deduplicates usage without publishing a late start.
+        if current
+            .output
+            .as_ref()
+            .is_some_and(|output| output.played_frames() > 0)
+            && core.mark_started(speech_id)
+        {
+            write_message(
+                writer,
+                &SessionMessage::SpeechUsed {
+                    id: current.prepare_id,
+                    speech_id,
+                    tts: current.tts.snapshot().settings.clone(),
+                },
+            )?;
+        }
+    }
     if core.finish(speech_id) {
         if active
             .as_ref()
@@ -5187,7 +5209,7 @@ fn synthesize_to_output_with_finish(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use berd_call::{PcmAudioOutput, TtsOutcome, TtsPcmSpec};
+    use berd_call::{TtsOutcome, TtsPcmSpec};
     use serde_json::{json, Value};
     use std::io::{Cursor, Read, Write};
     use std::os::fd::IntoRawFd;
@@ -5817,6 +5839,89 @@ mod tests {
             input_during_tts: test_input_policy(),
             tts: test_tts_lease(),
             suspension_requested: false,
+        }
+    }
+
+    #[test]
+    fn cancelled_playback_reports_used_voice_without_a_late_start() {
+        for (already_started, played_frames) in [(false, 64), (true, 64), (false, 0)] {
+            let mut core = SessionCore::default();
+            let mut current = active_playback(&mut core);
+            let speech_id = current.speech_id;
+            let settings = current.tts.snapshot().settings.clone();
+            let (child, mut host) = UnixStream::pair().unwrap();
+            let transport =
+                unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap();
+            let (control_sender, _control_receiver) = mpsc::channel();
+            let authority = current.active.as_ref().unwrap().clone();
+            let output = Arc::new(
+                RemotePcmAudioOutput::new(
+                    speech_id,
+                    LongRemoteTts.pcm_spec(),
+                    Arc::new(transport),
+                    Arc::clone(&authority),
+                    control_sender,
+                )
+                .unwrap(),
+            );
+            current.output = Some(Arc::clone(&output));
+            let worker_output = Arc::clone(&output);
+            let worker = thread::spawn(move || {
+                worker_output.start()?;
+                worker_output.write(&[0.1; 4096])
+            });
+            assert_eq!(
+                read_audio_record(&mut host).0,
+                session_audio::AUDIO_BEGIN_KIND
+            );
+            output.handle_ack(AudioHostAck::BeginAccepted).unwrap();
+            assert_eq!(
+                read_audio_record(&mut host).0,
+                session_audio::AUDIO_CHUNK_KIND
+            );
+            let mut messages_out = Vec::new();
+            if already_started {
+                publish_speech_started(speech_id, &mut core, Some(&current), &mut messages_out)
+                    .unwrap();
+            }
+            authority.store(false, Ordering::SeqCst);
+            output.notify_cancel_requested();
+            assert_eq!(
+                read_audio_record(&mut host).0,
+                session_audio::AUDIO_CANCEL_KIND
+            );
+            assert!(!output
+                .handle_ack(AudioHostAck::ChunkAccepted { sequence: 1 })
+                .unwrap());
+            output
+                .handle_ack(AudioHostAck::Cancelled { played_frames })
+                .unwrap();
+            assert!(worker.join().unwrap().is_err());
+            let mut active = Some(current);
+            handle_playback_event(
+                PlaybackEvent::Interrupted(speech_id, 0),
+                &mut core,
+                &mut active,
+                &mut messages_out,
+            )
+            .unwrap();
+            let rows = messages(&messages_out);
+            if !already_started && played_frames == 0 {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0]["type"], "speech_interrupted");
+                continue;
+            }
+            assert_eq!(rows.len(), 2);
+            assert_eq!(
+                rows[0]["type"],
+                if already_started {
+                    "speech_started"
+                } else {
+                    "speech_used"
+                }
+            );
+            assert_eq!(rows[0]["tts"], serde_json::to_value(settings).unwrap());
+            assert_eq!(rows[1]["type"], "speech_interrupted");
         }
     }
 

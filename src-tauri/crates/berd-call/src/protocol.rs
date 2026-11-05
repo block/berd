@@ -244,6 +244,11 @@ pub enum SessionMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tts: Option<TtsSettings>,
     },
+    SpeechUsed {
+        id: u64,
+        speech_id: u64,
+        tts: TtsSettings,
+    },
     SpeechCompleted {
         id: u64,
         speech_id: u64,
