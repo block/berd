@@ -960,6 +960,7 @@ describe("inbound session id translation", () => {
     ["creates", (api: Api) => api.newSession("/tmp")],
     ["forks", (api: Api) => api.forkSession("source", "/tmp")],
     ["imports", (api: Api) => api.importSession("{}")],
+    ["loads", (api: Api) => api.loadSession("session-1", "/tmp")],
   ])("lifts the private fence when it %s a session with a deleted private id", async (_, allocate) => {
     const conn = await importConnection();
     const api = await import("../acpApi");
