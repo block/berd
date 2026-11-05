@@ -80,11 +80,12 @@ async function runInference(
 
     // The session otherwise inherits the user's default thinking effort, and at
     // high or max the model can think past INFERENCE_TIMEOUT_MS before it
-    // writes any text. Models without the option keep their own default.
+    // writes any text. Low rather than off, which always-on thinking models
+    // treat as high. Models without the option keep their own default.
     await setSessionConfigOption(
       session.sessionId,
       "thinking_effort",
-      "off",
+      "low",
     ).catch(() => {});
 
     // Remove ALL extensions from this session so the model has zero tools.
