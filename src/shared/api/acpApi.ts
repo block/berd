@@ -588,6 +588,8 @@ export async function loadSession(
   const tClient = performance.now();
   const client = await getClientForSession(sessionId);
   assertActive?.();
+  // Another client can create a session with a deleted private session's id.
+  revealSessionNotifications(sessionId);
   const tCall = performance.now();
   const response = await client.loadSession({
     sessionId: getWireSessionId(sessionId),
