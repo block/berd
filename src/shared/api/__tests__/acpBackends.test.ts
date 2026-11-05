@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   initialize: vi.fn(),
   sessionInfo: vi.fn(),
   loadSession: vi.fn(),
+  newSession: vi.fn(),
   setSessionConfigOption: vi.fn(),
   updateWorkingDir: vi.fn(),
   clientCallbackFactories: [] as Array<() => Client>,
@@ -62,6 +63,7 @@ vi.mock("@aaif/goose-sdk", () => ({
       GooseUnstableSessionWorkingDirUpdate: mocks.updateWorkingDir,
     };
     loadSession = mocks.loadSession;
+    newSession = mocks.newSession;
     setSessionConfigOption = mocks.setSessionConfigOption;
     closed: Promise<void>;
     resolveClosed!: () => void;
@@ -947,6 +949,29 @@ describe("inbound session id translation", () => {
     expect(permissions).not.toHaveBeenCalled();
     await callbacks.sessionUpdate?.(sessionUpdatePayload("ordinary"));
     expect(received).toHaveBeenCalledOnce();
+  });
+
+  it("lifts the private fence when a new session reuses a deleted private id", async () => {
+    const conn = await importConnection();
+    const { newSession } = await import("../acpApi");
+    const received = vi.fn();
+    const permissions = vi.fn().mockResolvedValue(approval);
+    conn.setNotificationHandler({ handleSessionNotification: received });
+    conn.setPermissionHandler(permissions);
+    await conn.getBackendConnection(LOCAL_BACKEND_ID).getClient();
+    const callbacks = await latestCallbacks();
+    conn.hidePrivateSessionNotifications("session-1");
+    // Goose allocates ids from the highest remaining one, so deleting the
+    // private session lets the next chat take its id.
+    mocks.newSession.mockResolvedValueOnce({ sessionId: "session-1" });
+    await newSession("/tmp");
+
+    await callbacks.sessionUpdate?.(sessionUpdatePayload("session-1"));
+    expect(received).toHaveBeenCalledOnce();
+    await expect(
+      callbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(approval);
+    expect(permissions).toHaveBeenCalledOnce();
   });
 
   it("rewrites remote notification session ids to composite ids", async () => {
