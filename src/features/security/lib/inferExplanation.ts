@@ -3,9 +3,12 @@ import {
   newSession,
   promptForText,
   setModel,
+  setSessionConfigOption,
   setSessionSystemPrompt,
 } from "@/shared/api/acpApi";
 import { getClient } from "@/shared/api/acpConnection";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
+import { logRendererEvent } from "@/shared/api/rendererTelemetry";
 
 const INFERENCE_TIMEOUT_MS = 20000;
 
@@ -44,10 +47,19 @@ export async function inferSecurityExplanation(
   ].join("\n");
 
   try {
-    return await runInference(userPrompt, provider);
-  } catch {
+    const explanation = await runInference(userPrompt, provider);
+    if (explanation === null) {
+      logFailure(`no reply text within ${INFERENCE_TIMEOUT_MS} ms`);
+    }
+    return explanation;
+  } catch (error) {
+    logFailure(formatAcpErrorMessage(error));
     return null;
   }
+}
+
+function logFailure(reason: string): void {
+  void logRendererEvent("warn", `security explanation failed: ${reason}`);
 }
 
 async function runInference(
@@ -65,6 +77,15 @@ async function runInference(
     if (provider.modelId) {
       await setModel(session.sessionId, provider.modelId);
     }
+
+    // The session otherwise inherits the user's default thinking effort, and at
+    // high or max the model can think past INFERENCE_TIMEOUT_MS before it
+    // writes any text. Models without the option keep their own default.
+    await setSessionConfigOption(
+      session.sessionId,
+      "thinking_effort",
+      "off",
+    ).catch(() => {});
 
     // Remove ALL extensions from this session so the model has zero tools.
     // Even if the adversarial command contains prompt injection that
