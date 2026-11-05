@@ -1407,7 +1407,7 @@ impl SessionActor {
                 )));
             }
             SessionMessage::Admitted { id, speech_id, .. }
-                if self.pending_prepare_id() == Some(id) =>
+                if !self.stopping && self.pending_prepare_id() == Some(id) =>
             {
                 send_request(&self.writer, &SessionRequest::OutputReady { id, speech_id })?;
             }
@@ -3112,6 +3112,43 @@ mod tests {
             actor.input_speaking,
             "final stdout events must reach the actor before telemetry ends"
         );
+    }
+
+    #[test]
+    fn stopping_drains_admission_without_writing_to_the_exited_child() {
+        let mut process = Command::new("/usr/bin/true")
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(process.stdin.take().unwrap()));
+        assert!(process.wait().unwrap().success());
+        let (sender, events) = mpsc::sync_channel(1);
+        sender
+            .send(SessionMessage::Admitted {
+                id: 2,
+                speech_id: 3,
+                confirmed_token: 0,
+            })
+            .unwrap();
+        drop(sender);
+        let (_commands, commands) = mpsc::sync_channel(1);
+        let (audio, _audio) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        actor.pending_speak = Some(PendingSpeak {
+            prepare_id: 2,
+            text: "test".into(),
+            non_blocking: false,
+            response: None,
+        });
+        actor.stopping = true;
+        let mut child = SessionProcess {
+            child: process,
+            stdin: None,
+            stdout: None,
+            audio: None,
+            reaped: true,
+        };
+        actor.finish_child(&mut child).unwrap();
     }
 
     #[test]
