@@ -8587,7 +8587,7 @@ mod tests {
             Duration::from_millis(100),
         )
         .unwrap();
-        // Release the worker even on the unfixed path, so a failing test leaves no blocked thread.
+        // Release the worker if shutdown leaves acknowledgements unprocessed, so a failing test cannot leave a blocked thread.
         if audio.played_frames() == 0 {
             audio
                 .handle_ack(AudioHostAck::ChunkAccepted { sequence: 1 })
