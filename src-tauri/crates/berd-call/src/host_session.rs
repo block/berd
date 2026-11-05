@@ -296,7 +296,7 @@ fn run_session(
         thread::sleep(Duration::from_millis(2));
     }
     drop(capture);
-    child.wait_for_exit()?;
+    actor.finish_child(&mut child)?;
     let restart = actor.restart.take();
     actor.finish_pending(if restart.is_some() {
         "voice session restarted"
@@ -989,6 +989,23 @@ impl SessionActor {
         }
     }
 
+    fn finish_child(&mut self, child: &mut SessionProcess) -> Result<(), String> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match self
+                .events
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            {
+                Ok(event) => self.handle_event(event)?,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    return Err("voice session event stream did not close within 5 seconds".into());
+                }
+            }
+        }
+        child.wait_for_exit()
+    }
+
     fn poll(&mut self) -> Result<(), String> {
         if !self.stopping {
             if let Some(muted) = self
@@ -1314,7 +1331,8 @@ impl SessionActor {
             SessionMessage::SpeechStarted {
                 tts: Some(settings),
                 ..
-            } => {
+            }
+            | SessionMessage::SpeechUsed { tts: settings, .. } => {
                 crate::telemetry::speech_started(&settings);
             }
             SessionMessage::TtsSettingsResult {
@@ -3063,6 +3081,41 @@ mod tests {
         );
         drop(actor);
         assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn stopping_drains_events_delivered_after_the_final_poll() {
+        let mut process = Command::new("/bin/sh")
+            .args([
+                "-c",
+                "read -r signal; echo '{\"type\":\"input_speaking\",\"active\":true}'",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(process.stdin.take().unwrap()));
+        let (sender, events) = mpsc::sync_channel(1);
+        spawn_stdout_reader(process.stdout.take().unwrap(), sender).unwrap();
+        let (_commands, commands) = mpsc::sync_channel(1);
+        let (audio, _audio) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        actor.stopping = true;
+        actor.poll().unwrap();
+        assert!(!actor.input_speaking);
+        writeln!(actor.writer.lock().unwrap(), "finish").unwrap();
+        let mut child = SessionProcess {
+            child: process,
+            stdin: None,
+            stdout: None,
+            audio: None,
+            reaped: false,
+        };
+        actor.finish_child(&mut child).unwrap();
+        assert!(
+            actor.input_speaking,
+            "final stdout events must reach the actor before telemetry ends"
+        );
     }
 
     #[test]
