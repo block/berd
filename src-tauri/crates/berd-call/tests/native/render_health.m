@@ -13,6 +13,7 @@
 @property(nonatomic, strong) TestAudioNode *mainMixerNode;
 @property(nonatomic, weak) BerdPocketAudioPlayer *player;
 @property(nonatomic, assign) BOOL running;
+@property(nonatomic, copy) void (^onStop)(void);
 - (BOOL)isRunning;
 - (void)stop;
 @end
@@ -28,8 +29,56 @@
         dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0);
     return self.running;
 }
-- (void)stop {}
+- (void)stop {
+    if (self.onStop) self.onStop();
+    self.running = NO;
+}
 @end
+
+@interface TestRenderUnit : NSObject
+@property(nonatomic, weak) TestRunningEngine *engine;
+@property(nonatomic, copy) AURenderObserver observer;
+- (NSInteger)tokenByAddingRenderObserver:(AURenderObserver)observer;
+- (void)removeRenderObserver:(NSInteger)token;
+@end
+@implementation TestRenderUnit
+- (NSInteger)tokenByAddingRenderObserver:(AURenderObserver)observer {
+    self.observer = observer;
+    return 1;
+}
+- (void)removeRenderObserver:(NSInteger)token {
+    assert(!self.engine.running && "render observers must outlive active output");
+    assert(token == 1 && self.observer);
+    self.observer = nil;
+}
+@end
+
+static void observersSurviveEngineShutdown(void) {
+    TestRunningEngine *engine = [TestRunningEngine new];
+    engine.running = YES;
+    NSMutableArray<TestRenderUnit *> *units = [NSMutableArray new];
+    TestAudioNode *nodes[3];
+    for (NSUInteger i = 0; i < 3; i++) {
+        TestRenderUnit *unit = [TestRenderUnit new];
+        unit.engine = engine;
+        [units addObject:unit];
+        nodes[i] = [TestAudioNode new];
+        nodes[i].AUAudioUnit = (AUAudioUnit *)unit;
+    }
+    engine.outputNode = nodes[0];
+    engine.mainMixerNode = nodes[2];
+    engine.onStop = ^{
+        // Output may finish a render callback while the engine is stopping.
+        for (TestRenderUnit *unit in units) assert(unit.observer);
+    };
+    BerdPocketAudioPlayer *player = [BerdPocketAudioPlayer new];
+    player.engine = (AVAudioEngine *)engine;
+    player.timePitch = (AVAudioUnitTimePitch *)nodes[1];
+    [player observeRenderErrors];
+    [player stop];
+    for (TestRenderUnit *unit in units) assert(!unit.observer);
+    [player stop];
+}
 
 static AUAudioUnit *offlineUnit(void) {
     AudioComponentDescription description = {
@@ -49,6 +98,7 @@ static AUAudioUnit *offlineUnit(void) {
 
 int main(void) {
     @autoreleasepool {
+        observersSurviveEngineShutdown();
         for (NSUInteger failedNode = 0; failedNode < 3; failedNode++) {
             AUAudioUnit *units[] = {offlineUnit(), offlineUnit(), offlineUnit()};
             TestAudioNode *nodes[3];

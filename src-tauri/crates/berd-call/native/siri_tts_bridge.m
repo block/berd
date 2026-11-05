@@ -906,13 +906,15 @@ static void BerdSetSiriRequestRate(id request, float rate) {
         self.stopped = YES;
         self.pendingBuffers = 0;
     }
+    // Render-notify callbacks copy these blocks on the audio thread. Stop
+    // output before unregistering them so no callback can copy a freed block.
+    [self.player stop];
+    [self.engine stop];
     for (NSUInteger i = 0; i < self.renderObserverTokens.count; i++) {
         [self.renderUnits[i] removeRenderObserver:self.renderObserverTokens[i].integerValue];
     }
     self.renderObserverTokens = nil;
     self.renderUnits = nil;
-    [self.player stop];
-    [self.engine stop];
 }
 
 - (void)dealloc { [self stop]; }
