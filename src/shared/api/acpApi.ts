@@ -19,6 +19,7 @@ import {
   getBackendClient,
   getClient,
   interceptSessionNotifications,
+  revealSessionNotifications,
 } from "./acpConnection";
 import {
   getClientForSession,
@@ -567,6 +568,7 @@ export async function newSession(
   // the wire id for outbound translation.
   const sessionId = compositeSessionId(backendId, response.sessionId);
   registerSessionBackend(sessionId, backendId, response.sessionId);
+  revealSessionNotifications(sessionId);
   const sid = sessionId.slice(0, 8);
   perfLog(
     `[perf:api] ${sid} newSession getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,
