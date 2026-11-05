@@ -955,10 +955,11 @@ describe("inbound session id translation", () => {
     expect(received).toHaveBeenCalledOnce();
   });
 
+  type Api = typeof import("../acpApi");
   it.each([
-    ["creates", (api: typeof import("../acpApi")) => api.newSession("/tmp")],
-    ["forks", (api: typeof import("../acpApi")) => api.forkSession("source", "/tmp")],
-    ["imports", (api: typeof import("../acpApi")) => api.importSession("{}")],
+    ["creates", (api: Api) => api.newSession("/tmp")],
+    ["forks", (api: Api) => api.forkSession("source", "/tmp")],
+    ["imports", (api: Api) => api.importSession("{}")],
   ])("lifts the private fence when it %s a session with a deleted private id", async (_, allocate) => {
     const conn = await importConnection();
     const api = await import("../acpApi");

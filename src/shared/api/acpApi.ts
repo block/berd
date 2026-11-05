@@ -251,7 +251,9 @@ export async function importSession(json: string): Promise<AcpSessionInfo> {
     input: json,
     source: "json",
   });
-  return result as unknown as AcpSessionInfo;
+  const session = result as unknown as AcpSessionInfo;
+  revealSessionNotifications(session.sessionId);
+  return session;
 }
 
 export interface AcpForkSessionOptions {
@@ -283,6 +285,7 @@ export async function forkSession(
   // composite of that backend and the returned wire id.
   const forkedSessionId = compositeSessionId(backendId, response.sessionId);
   registerSessionBackend(forkedSessionId, backendId, response.sessionId);
+  revealSessionNotifications(forkedSessionId);
   return {
     sessionId: forkedSessionId,
     title: null,
