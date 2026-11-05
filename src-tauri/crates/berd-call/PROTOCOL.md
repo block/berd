@@ -58,12 +58,12 @@ initial policy; a host-specific `auto` mode must be resolved before the request.
 {"type":"hello","id":1,"input_during_tts":"allow_barge_in","status_sound_output_device":"MacBook Pro Speakers"}
 ```
 
-The response uses `protocol:6` as the exact session message-set version. The
+The response uses `protocol:7` as the exact session message-set version. The
 parent must reject a version it does not support; the JSON version is independent
 of the fixed binary framing marker described below:
 
 ```json
-{"type":"ready","id":1,"protocol":6,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
+{"type":"ready","id":1,"protocol":7,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
 ```
 
 The `session.tts` object is the authoritative, sanitized TTS configuration.
@@ -358,7 +358,7 @@ cancellation and shutdown terminals.
 {"type":"not_admitted","id":u64,"reason":"paused"|"in_progress"|"cancelled"|"empty_text"|"invalid_voice"}
 {"type":"state","id":u64,"confirmed_token":u64,"utterances_after":[{"token":u64,"text":string}]}
 {"type":"cancel_result","id":u64,"outcome":"cancelled"|"stale","speech_id":u64|null}
-{"type":"speech_started","id":u64,"speech_id":u64}
+{"type":"speech_started","id":u64,"speech_id":u64,"tts":TtsSettings}
 {"type":"speech_completed","id":u64,"speech_id":u64}
 {"type":"speech_interrupted","id":u64,"speech_id":u64,"spoken_through_utf8":u64}
 {"type":"speech_failed","id":u64,"speech_id":u64,"message":string}
@@ -376,7 +376,7 @@ names the targeted speech. The result is emitted before the runtime requests
 the host's quiescent `audio_cancelled` barrier.
 Every speech event carries the originating prepare ID. `speech_started` appears
 only after the first PCM Chunk is accepted by the host, and exactly one terminal
-message follows every admission.
+message follows every admission. When available, its `tts` object contains the sanitized settings held by that speech's synthesis lease, including any per-request voice override. This has the same backend-specific fields as `session.tts` without a revision. It does not change the session default; a resumed speech does not emit another start.
 
 On `shutdown`, all complete earlier frames are processed in order. The parent
 keeps stdin open while the child cancels and drains output. The child then

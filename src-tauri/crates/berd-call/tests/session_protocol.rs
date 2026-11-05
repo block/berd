@@ -763,7 +763,7 @@ fn siri_remote_output_supports_consecutive_turns_and_cancellation() {
 
 #[test]
 fn speech_whose_player_stops_is_interrupted_where_it_was_heard_and_the_call_goes_on() {
-    let (speech_url, _speech_requests) = spawn_speech_server();
+    let (speech_url, speech_requests) = spawn_speech_server();
     let (mut command, pcm_guard, host) = session_command();
     let child = command
         .args([
@@ -777,6 +777,7 @@ fn speech_whose_player_stops_is_interrupted_where_it_was_heard_and_the_call_goes
             &spawn_transcription_server(),
         ])
         .env("OPENAI_API_KEY", "test-key")
+        .env("OPENAI_TTS_VOICE", "alloy")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -795,13 +796,15 @@ fn speech_whose_player_stops_is_interrupted_where_it_was_heard_and_the_call_goes
         write_session_json(&mut *stdin, &message);
         stdin.flush().unwrap();
     };
+    let started = Mutex::new(Vec::new());
     let terminal = |id: u64| loop {
         let message = output.recv_timeout(Duration::from_secs(5)).unwrap();
         match message["type"].as_str() {
             Some("admitted") => send(json!({
                 "type":"output_ready","id":id,"speech_id":message["speech_id"]
             })),
-            Some("output_ready_result" | "speech_started") => {}
+            Some("speech_started") => started.lock().unwrap().push(message["tts"].clone()),
+            Some("output_ready_result") => {}
             _ => break message,
         }
     };
@@ -814,8 +817,22 @@ fn speech_whose_player_stops_is_interrupted_where_it_was_heard_and_the_call_goes
     assert_eq!(interrupted["type"], "speech_interrupted", "{interrupted}");
     let heard = interrupted["spoken_through_utf8"].as_u64().unwrap();
     assert!(heard < text.len() as u64, "{interrupted}");
-    send(json!({"type":"prepare_speak","id":3,"acknowledgement":null,"text":"Still here."}));
+    send(
+        json!({"type":"prepare_speak","id":3,"acknowledgement":null,"text":"Still here.","voice":"marin"}),
+    );
     assert_eq!(terminal(3)["type"], "speech_completed");
+    let started = started.into_inner().unwrap();
+    assert_eq!(started.len(), 2);
+    assert_eq!(started[0]["voice"], "alloy");
+    assert_eq!(started[1]["voice"], "marin");
+    for expected in ["alloy", "marin"] {
+        assert_eq!(
+            speech_requests
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()["voice"],
+            expected
+        );
+    }
     send(json!({"type":"shutdown"}));
     drop(stdin);
     assert!(child.0.take().unwrap().wait().unwrap().success());

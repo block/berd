@@ -4543,7 +4543,11 @@ fn publish_speech_started(
 ) -> Result<(), String> {
     if core.mark_started(speech_id) {
         let id = active.map_or(0, |current| current.prepare_id);
-        write_message(writer, &SessionMessage::SpeechStarted { id, speech_id })?;
+        let tts = active.map(|current| current.tts.snapshot().settings.clone());
+        write_message(
+            writer,
+            &SessionMessage::SpeechStarted { id, speech_id, tts },
+        )?;
     }
     Ok(())
 }
@@ -5814,6 +5818,31 @@ mod tests {
             tts: test_tts_lease(),
             suspension_requested: false,
         }
+    }
+
+    #[test]
+    fn speech_start_reports_its_lease_once_even_after_resume() {
+        let mut core = SessionCore::default();
+        let current = active_playback(&mut core);
+        let settings = current.tts.snapshot().settings.clone();
+        let mut messages = Vec::new();
+        publish_speech_started(current.speech_id, &mut core, Some(&current), &mut messages)
+            .unwrap();
+        publish_speech_started(current.speech_id, &mut core, Some(&current), &mut messages)
+            .unwrap();
+        let records: Vec<SessionMessage> = String::from_utf8(messages)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(
+            records,
+            vec![SessionMessage::SpeechStarted {
+                id: current.prepare_id,
+                speech_id: current.speech_id,
+                tts: Some(settings),
+            }]
+        );
     }
 
     fn read_audio_record(reader: &mut impl Read) -> (u8, Vec<u8>) {

@@ -1311,6 +1311,12 @@ impl SessionActor {
                     }
                 }
             }
+            SessionMessage::SpeechStarted {
+                tts: Some(settings),
+                ..
+            } => {
+                crate::telemetry::speech_started(&settings);
+            }
             SessionMessage::TtsSettingsResult {
                 id,
                 outcome,
