@@ -33,8 +33,6 @@
   about: Query Datadog metrics, logs, monitors, and dashboards.
 - name: datadog-tidal
   about: Datadog API access scoped to the Tidal org.
-- name: docebo
-  about: Search Block Academy courses and learning content.
 - name: emergetools
   about: Compare mobile app build sizes and inspect build metadata via Emerge Tools for binary-size triage.
 - name: envoy
