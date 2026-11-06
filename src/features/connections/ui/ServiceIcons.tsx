@@ -268,26 +268,6 @@ export const TodoistIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-export const DoceboIcon = (props: SVGProps<SVGSVGElement>) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    aria-hidden="true"
-    {...props}
-  >
-    <rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1.2" />
-    <rect x="9.25" y="1.5" width="5.5" height="5.5" rx="1.2" />
-    <rect x="17" y="1.5" width="5.5" height="5.5" rx="1.2" />
-    <rect x="1.5" y="9.25" width="5.5" height="5.5" rx="1.2" />
-    <rect x="9.25" y="9.25" width="5.5" height="5.5" rx="1.2" />
-    <rect x="17" y="9.25" width="5.5" height="5.5" rx="1.2" />
-    <rect x="1.5" y="17" width="5.5" height="5.5" rx="1.2" />
-    <rect x="9.25" y="17" width="5.5" height="5.5" rx="1.2" />
-    <rect x="17" y="17" width="5.5" height="5.5" rx="1.2" />
-  </svg>
-);
-
 export const AsanaIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
