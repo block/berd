@@ -14,6 +14,7 @@ import {
 } from "@/features/automations/api/kgooseAutomations";
 import {
   AUTOMATION_TILES_QUERY_KEY,
+  AUTOMATION_TILES_STALE_TIME_MS,
   AUTOMATIONS_REFETCH_INTERVAL_MS,
   automationTileQueryKey,
   fetchAutomationTileDetail,
@@ -30,6 +31,7 @@ import type { AutomationBuilderLeaveAction } from "@/features/automations/ui/Aut
 import { AutomationDetailPage } from "@/features/automations/ui/AutomationDetailPage";
 import { AutomationHistoryFeed } from "@/features/automations/ui/AutomationHistoryFeed";
 import { AutomationsOverview } from "@/features/automations/ui/AutomationsOverview";
+import { LocalSchedulesPanel } from "@/features/automations/ui/LocalSchedulesPanel";
 import { EmptyState } from "@/features/automations/ui/RunOutput";
 import { Badge } from "@/shared/ui/badge";
 import { PageHeaderButton } from "@/shared/ui/page-header-button";
@@ -68,6 +70,7 @@ function errorMessage(error: unknown, fallback: string): string {
 type AutomationSurfaceMode = "overview" | "history";
 
 interface AutomationsWorkbenchProps {
+  companyAutomationsEnabled?: boolean;
   route?: AutomationNavigationRoute;
   onRouteChange?: (
     route: AutomationNavigationRoute,
@@ -80,6 +83,7 @@ interface AutomationsWorkbenchProps {
 }
 
 export function AutomationsWorkbench({
+  companyAutomationsEnabled = true,
   route,
   onRouteChange,
   onBreadcrumbLabelChange,
@@ -92,8 +96,12 @@ export function AutomationsWorkbench({
     { surface: "overview" },
   );
   const currentRoute = route ?? internalRoute;
+  const companyAutomationsEnabledRef = useRef(companyAutomationsEnabled);
+  companyAutomationsEnabledRef.current = companyAutomationsEnabled;
   const surfaceMode: AutomationSurfaceMode =
-    currentRoute.surface === "history" ? "history" : "overview";
+    companyAutomationsEnabled && currentRoute.surface === "history"
+      ? "history"
+      : "overview";
   const detailAutomationId =
     currentRoute.surface === "detail" ? currentRoute.automationId : null;
   const detailTab =
@@ -133,13 +141,31 @@ export function AutomationsWorkbench({
     refetch: refetchAutomations,
   } = useQuery({
     queryKey: AUTOMATION_TILES_QUERY_KEY,
-    queryFn: fetchAutomationTilesList,
-    refetchInterval: AUTOMATIONS_REFETCH_INTERVAL_MS,
+    queryFn: () =>
+      companyAutomationsEnabledRef.current
+        ? fetchAutomationTilesList()
+        : Promise.resolve([]),
+    enabled: companyAutomationsEnabled,
+    retry: (failureCount) =>
+      companyAutomationsEnabledRef.current && failureCount < 1,
+    staleTime: AUTOMATION_TILES_STALE_TIME_MS,
+    refetchInterval: companyAutomationsEnabled
+      ? AUTOMATIONS_REFETCH_INTERVAL_MS
+      : false,
   });
 
   const automations = useMemo(() => automationsData ?? [], [automationsData]);
 
   useEffect(() => {
+    if (!companyAutomationsEnabled) {
+      if (delayedRefetchTimeoutRef.current) {
+        clearTimeout(delayedRefetchTimeoutRef.current);
+        delayedRefetchTimeoutRef.current = null;
+      }
+      setDeleteAutomationId(null);
+      setMutationError(null);
+      return;
+    }
     if (!automations.length) {
       if (
         !isAutomationsLoading &&
@@ -176,6 +202,7 @@ export function AutomationsWorkbench({
     }
   }, [
     automations,
+    companyAutomationsEnabled,
     isAutomationsLoading,
     currentRoute.surface,
     detailAutomationId,
@@ -197,9 +224,17 @@ export function AutomationsWorkbench({
     refetch: refetchDetail,
   } = useQuery({
     queryKey: automationTileQueryKey(detailAutomationId),
-    queryFn: () => fetchAutomationTileDetail(detailAutomationId ?? ""),
-    enabled: Boolean(detailAutomationId),
-    refetchInterval: AUTOMATIONS_REFETCH_INTERVAL_MS,
+    queryFn: () =>
+      companyAutomationsEnabledRef.current && detailAutomationId
+        ? fetchAutomationTileDetail(detailAutomationId)
+        : Promise.resolve({ tileInfo: undefined }),
+    enabled: companyAutomationsEnabled && Boolean(detailAutomationId),
+    retry: (failureCount) =>
+      companyAutomationsEnabledRef.current && failureCount < 1,
+    staleTime: AUTOMATIONS_REFETCH_INTERVAL_MS,
+    refetchInterval: companyAutomationsEnabled
+      ? AUTOMATIONS_REFETCH_INTERVAL_MS
+      : false,
   });
 
   const detailTile = detailData?.tileInfo ?? detailAutomation;
@@ -209,6 +244,10 @@ export function AutomationsWorkbench({
     : t("fallbacks.untitledAutomation");
 
   useEffect(() => {
+    if (!companyAutomationsEnabled) {
+      onBreadcrumbLabelChange?.(null);
+      return;
+    }
     if (currentRoute.surface === "builder") {
       onBreadcrumbLabelChange?.(t("builder.title"));
       return;
@@ -233,6 +272,7 @@ export function AutomationsWorkbench({
     detailTile,
     onBreadcrumbLabelChange,
     t,
+    companyAutomationsEnabled,
   ]);
 
   useEffect(() => {
@@ -260,8 +300,10 @@ export function AutomationsWorkbench({
     // kgoose list propagation can lag tile creation, so refetch once more
     // after the immediate refresh.
     delayedRefetchTimeoutRef.current = setTimeout(() => {
-      void refetchAutomations();
       delayedRefetchTimeoutRef.current = null;
+      if (companyAutomationsEnabledRef.current) {
+        void refetchAutomations();
+      }
     }, 1_500);
   };
 
@@ -290,6 +332,7 @@ export function AutomationsWorkbench({
   const updateMutation = useMutation({
     mutationFn: updateAutomationTile,
     onSuccess: async (response) => {
+      if (!companyAutomationsEnabledRef.current) return;
       if (response.success === false) {
         setMutationError(response.errorMsg ?? t("edit.saveError"));
         return;
@@ -298,6 +341,7 @@ export function AutomationsWorkbench({
       await invalidateAutomationQueries();
     },
     onError: (error) => {
+      if (!companyAutomationsEnabledRef.current) return;
       setMutationError(errorMessage(error, t("edit.saveError")));
     },
   });
@@ -305,6 +349,7 @@ export function AutomationsWorkbench({
   const deleteMutation = useMutation({
     mutationFn: deleteAutomationTile,
     onSuccess: async (response) => {
+      if (!companyAutomationsEnabledRef.current) return;
       if (response.success === false) {
         setMutationError(response.errorMsg ?? t("delete.error"));
         return;
@@ -315,6 +360,7 @@ export function AutomationsWorkbench({
       await invalidateAutomationQueries();
     },
     onError: (error) => {
+      if (!companyAutomationsEnabledRef.current) return;
       setMutationError(errorMessage(error, t("delete.error")));
     },
   });
@@ -322,6 +368,7 @@ export function AutomationsWorkbench({
   const refreshMutation = useMutation({
     mutationFn: refreshAutomationTile,
     onSuccess: async (response, automationId) => {
+      if (!companyAutomationsEnabledRef.current) return;
       if (response.success === false) {
         toast.error(t("run.error"), {
           description: response.errorMsg ?? t("run.errorDescription"),
@@ -337,11 +384,13 @@ export function AutomationsWorkbench({
       });
       await invalidateAutomationQueries();
       window.setTimeout(() => {
+        if (!companyAutomationsEnabledRef.current) return;
         void refetchAutomations();
         void refetchDetail();
       }, 250);
     },
     onError: (error) => {
+      if (!companyAutomationsEnabledRef.current) return;
       toast.error(t("run.error"), {
         description: errorMessage(error, t("run.errorDescription")),
       });
@@ -360,9 +409,11 @@ export function AutomationsWorkbench({
       return createAutomationTile(request);
     },
     onMutate: () => {
+      if (!companyAutomationsEnabledRef.current) return;
       setMutationError(null);
     },
     onSuccess: async (response) => {
+      if (!companyAutomationsEnabledRef.current) return;
       if (response.success === false) {
         setMutationError(response.errorMsg ?? t("duplicate.error"));
         return;
@@ -377,6 +428,7 @@ export function AutomationsWorkbench({
       }
     },
     onError: (error) => {
+      if (!companyAutomationsEnabledRef.current) return;
       setMutationError(errorMessage(error, t("duplicate.error")));
     },
   });
@@ -415,7 +467,7 @@ export function AutomationsWorkbench({
       : t("common:actions.pinToHome");
 
   useEffect(() => {
-    if (currentRoute.surface === "builder") {
+    if (!companyAutomationsEnabled || currentRoute.surface === "builder") {
       setTopBarActions(null);
       return;
     }
@@ -461,24 +513,28 @@ export function AutomationsWorkbench({
 
     setTopBarActions(
       <>
-        <PageHeaderButton
-          type="button"
-          onClick={() => refetchAutomations()}
-          aria-label={t("actions.refresh")}
-          tooltip={t("actions.refresh")}
-          leftIcon={<IconRefresh aria-hidden="true" />}
-        >
-          {t("actions.refreshShort")}
-        </PageHeaderButton>
-        <PageHeaderButton
-          type="button"
-          onClick={openBuilder}
-          aria-label={t("actions.add")}
-          tooltip={t("actions.add")}
-          leftIcon={<IconPlus aria-hidden="true" />}
-        >
-          {t("actions.add")}
-        </PageHeaderButton>
+        {companyAutomationsEnabled ? (
+          <PageHeaderButton
+            type="button"
+            onClick={() => refetchAutomations()}
+            aria-label={t("actions.refresh")}
+            tooltip={t("actions.refresh")}
+            leftIcon={<IconRefresh aria-hidden="true" />}
+          >
+            {t("actions.refreshShort")}
+          </PageHeaderButton>
+        ) : null}
+        {companyAutomationsEnabled ? (
+          <PageHeaderButton
+            type="button"
+            onClick={openBuilder}
+            aria-label={t("actions.add")}
+            tooltip={t("actions.add")}
+            leftIcon={<IconPlus aria-hidden="true" />}
+          >
+            {t("actions.add")}
+          </PageHeaderButton>
+        ) : null}
       </>,
     );
     return () => setTopBarActions(null);
@@ -493,26 +549,30 @@ export function AutomationsWorkbench({
     refreshMutate,
     setTopBarActions,
     t,
+    companyAutomationsEnabled,
   ]);
 
-  if (currentRoute.surface === "builder") {
+  if (currentRoute.surface === "builder" && companyAutomationsEnabled) {
     return (
       <AutomationBuilderView
         automationId={currentRoute.automationId}
         onAutomationCreated={(automationId) => {
+          if (!companyAutomationsEnabledRef.current) return;
           if (automationId) {
             selectCreatedAutomation(automationId);
           }
           void refetchAutomations().then(() => {
-            if (!automationId) return;
+            if (!companyAutomationsEnabledRef.current || !automationId) return;
             scheduleDelayedAutomationsRefetch();
           });
         }}
         onAutomationUpdated={(automationId) => {
+          if (!companyAutomationsEnabledRef.current) return;
           if (automationId) {
             selectCreatedAutomation(automationId);
           }
           void refetchAutomations().then(() => {
+            if (!companyAutomationsEnabledRef.current) return;
             void refetchDetail();
           });
         }}
@@ -524,7 +584,23 @@ export function AutomationsWorkbench({
   return (
     <>
       <PageShell contentClassName="gap-6" contentWidth="default">
-        {detailAutomationId ? (
+        {!companyAutomationsEnabled ||
+        currentRoute.surface === "overview" ||
+        currentRoute.surface === "history" ? (
+          <header className="space-y-1">
+            <h1 className="text-xl font-medium">
+              {t("localSchedules.hubTitle")}
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {t(
+                companyAutomationsEnabled
+                  ? "localSchedules.hubDescription"
+                  : "localSchedules.hubLocalOnlyDescription",
+              )}
+            </p>
+          </header>
+        ) : null}
+        {detailAutomationId && companyAutomationsEnabled ? (
           isDetailLoading && !detailTile ? (
             <div className="space-y-4">
               <div className="h-7 w-64 rounded-md bg-muted" />
@@ -618,86 +694,109 @@ export function AutomationsWorkbench({
               <TabsTrigger value="overview" variant="weight">
                 {t("tabs.overview")}
               </TabsTrigger>
-              <TabsTrigger value="history" variant="weight">
-                {t("tabs.history")}
-              </TabsTrigger>
+              {companyAutomationsEnabled ? (
+                <TabsTrigger value="history" variant="weight">
+                  {t("tabs.history")}
+                </TabsTrigger>
+              ) : null}
             </TabsList>
 
-            <TabsContent value="overview" className="mt-6">
-              {isAutomationsLoading ? (
-                <div className="space-y-3">
-                  <div className="h-[86px] rounded-md bg-card" />
-                  <div className="h-[86px] rounded-md bg-card" />
-                  <div className="h-[86px] rounded-md bg-card" />
-                </div>
-              ) : automationsError ? (
-                <EmptyState
-                  title={t("list.loadErrorTitle")}
-                  body={errorMessage(
-                    automationsError,
-                    t("list.loadErrorTitle"),
+            <TabsContent value="overview" className="mt-6 space-y-6">
+              <LocalSchedulesPanel />
+              {companyAutomationsEnabled ? (
+                <section aria-labelledby="company-automations-heading">
+                  <h2
+                    id="company-automations-heading"
+                    className="text-sm font-medium"
+                  >
+                    {t("companyAutomations.title")}
+                  </h2>
+                  {isAutomationsLoading ? (
+                    <div className="mt-3 space-y-3">
+                      <div className="h-[86px] rounded-md bg-card" />
+                      <div className="h-[86px] rounded-md bg-card" />
+                      <div className="h-[86px] rounded-md bg-card" />
+                    </div>
+                  ) : automationsError ? (
+                    <div className="mt-3">
+                      <EmptyState
+                        title={t("list.loadErrorTitle")}
+                        body={errorMessage(
+                          automationsError,
+                          t("list.loadErrorTitle"),
+                        )}
+                      />
+                    </div>
+                  ) : automations.length ? (
+                    <div className="mt-3">
+                      <AutomationsOverview
+                        automations={automations}
+                        onOpenDetail={openDetail}
+                      />
+                    </div>
+                  ) : (
+                    <div className="mt-3">
+                      <EmptyState
+                        title={t("list.emptyTitle")}
+                        body={t("list.emptyBody")}
+                      />
+                    </div>
                   )}
-                />
-              ) : automations.length ? (
-                <AutomationsOverview
-                  automations={automations}
-                  onOpenDetail={openDetail}
-                />
-              ) : (
-                <EmptyState
-                  title={t("list.emptyTitle")}
-                  body={t("list.emptyBody")}
-                />
-              )}
+                </section>
+              ) : null}
             </TabsContent>
 
-            <TabsContent value="history" className="mt-6">
-              {automations.length ? (
-                <AutomationHistoryFeed
-                  automations={automations}
-                  selectedRun={selectedGlobalRun}
-                  onSelectRun={(selectedRun) =>
-                    setNavigationRoute({
-                      surface: "history",
-                      selectedRun,
-                    })
-                  }
-                  onOpenAutomation={({ automationId, runKey }) =>
-                    openRunDetail(automationId, runKey)
-                  }
-                />
-              ) : (
-                <EmptyState
-                  title={t("history.emptyTitle")}
-                  body={t("history.emptyBody")}
-                />
-              )}
-            </TabsContent>
+            {companyAutomationsEnabled ? (
+              <TabsContent value="history" className="mt-6">
+                {automations.length ? (
+                  <AutomationHistoryFeed
+                    automations={automations}
+                    selectedRun={selectedGlobalRun}
+                    onSelectRun={(selectedRun) =>
+                      setNavigationRoute({
+                        surface: "history",
+                        selectedRun,
+                      })
+                    }
+                    onOpenAutomation={({ automationId, runKey }) =>
+                      openRunDetail(automationId, runKey)
+                    }
+                  />
+                ) : (
+                  <EmptyState
+                    title={t("history.emptyTitle")}
+                    body={t("history.emptyBody")}
+                  />
+                )}
+              </TabsContent>
+            ) : null}
           </Tabs>
         )}
       </PageShell>
 
-      <ConfirmDialog
-        open={Boolean(deleteAutomationId)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setDeleteAutomationId(null);
-          }
-        }}
-        title={t("delete.title")}
-        description={t("delete.description", {
-          name: deleteAutomationName,
-        })}
-        cancelLabel={t("actions.cancel")}
-        confirmLabel={t("actions.delete")}
-        loadingLabel={t("actions.deleting")}
-        isLoading={deleteMutation.isPending}
-        onConfirm={() => {
-          if (deleteAutomationId) {
-            deleteMutation.mutate(deleteAutomationId);
-          }
-        }}
-      />
+      {companyAutomationsEnabled ? (
+        <ConfirmDialog
+          open={Boolean(deleteAutomationId)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setDeleteAutomationId(null);
+            }
+          }}
+          title={t("delete.title")}
+          description={t("delete.description", {
+            name: deleteAutomationName,
+          })}
+          cancelLabel={t("actions.cancel")}
+          confirmLabel={t("actions.delete")}
+          loadingLabel={t("actions.deleting")}
+          isLoading={deleteMutation.isPending}
+          onConfirm={() => {
+            if (deleteAutomationId) {
+              deleteMutation.mutate(deleteAutomationId);
+            }
+          }}
+        />
+      ) : null}
     </>
   );
 }

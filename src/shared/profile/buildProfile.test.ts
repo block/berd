@@ -19,6 +19,7 @@ describe("buildProfile", () => {
       authGate: false,
       agentTools: false,
       automations: false,
+      localSchedules: true,
       builderbot: false,
       byoKeyProviders: true,
       feedback: false,
