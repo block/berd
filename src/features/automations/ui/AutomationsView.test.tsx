@@ -269,7 +269,8 @@ describe("AutomationsView", () => {
     ).toBeInTheDocument();
     expect(getAutomationTiles).not.toHaveBeenCalled();
     expect(getAutomationTile).not.toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: "History" })).toBeNull();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add automation" })).toBeNull();
   });
 
@@ -427,6 +428,11 @@ describe("AutomationsView", () => {
       screen.getByRole("region", { name: "Company-managed automations" }),
     ).toBeInTheDocument();
     expect(screen.getByText("local-daily-report")).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "My automations" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "History" })).toBeInTheDocument();
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
     expect(
       screen.getByRole("button", { name: "Daily revenue digest" }),
     ).toBeInTheDocument();

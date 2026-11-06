@@ -678,6 +678,8 @@ export function AutomationsWorkbench({
               body={t("details.selectBody")}
             />
           )
+        ) : !companyAutomationsEnabled ? (
+          <LocalSchedulesPanel />
         ) : (
           <Tabs
             value={surfaceMode}
