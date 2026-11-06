@@ -7,6 +7,7 @@
 //! only cost to a call is the bounded flush when it ends.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
@@ -17,7 +18,7 @@ use berd_call::telemetry_store as store;
 use berd_call::TtsSettings;
 use serde_json::{json, Value};
 
-const SCHEMA_VERSION: &str = "berd-call-otlp-logs-v1";
+const SCHEMA_VERSION: &str = "berd-call-otlp-logs-v2";
 const ENFORCED: bool = cfg!(feature = "telemetry-enforced");
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -149,8 +150,69 @@ impl Context {
     }
 }
 
+/// Only catalog display names leave the process. Capture the catalog once per
+/// Siri session startup so speech-start handling never waits for enumeration.
+#[derive(Default)]
+struct VoiceRequests {
+    siri: Vec<berd_call::siri::SiriVoice>,
+    counts: BTreeMap<String, u64>,
+}
+
+impl VoiceRequests {
+    fn used(&mut self, settings: &TtsSettings) {
+        let name = match settings {
+            TtsSettings::Siri {
+                voice, language, ..
+            } => self
+                .siri
+                .iter()
+                .find(|known| {
+                    berd_call::siri::SiriVoiceIdentity::new(voice, language)
+                        .is_ok_and(|identity| known.matches(&identity))
+                })
+                .map(|known| known.display_name.as_str()),
+            TtsSettings::Pocket { voice, .. } => berd_call::pocket_assets::voices()
+                .iter()
+                .find(|known| known.id == voice)
+                .map(|known| known.name),
+            TtsSettings::OpenAi { voice, .. } => berd_call::openai::OPENAI_VOICE_IDS
+                .contains(&voice.as_str())
+                .then_some(voice.as_str()),
+        }
+        .filter(|name| valid_voice_name(name))
+        .unwrap_or("custom");
+        // Bound the wire map even if a native catalog grows unexpectedly.
+        let name = if self.counts.len() >= 511 && !self.counts.contains_key(name) {
+            "custom"
+        } else {
+            name
+        };
+        let count = self.counts.entry(name.to_string()).or_default();
+        *count = count.saturating_add(1).min(i64::MAX as u64);
+    }
+
+    fn attribute(&self) -> Value {
+        let values: Vec<_> = self
+            .counts
+            .iter()
+            .map(|(name, count)| json!({"key": name, "value": {"intValue": count.to_string()}}))
+            .collect();
+        json!({"key": "tts_voice_requests", "value": {"kvlistValue": {"values": values}}})
+    }
+}
+
+fn valid_voice_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().count() <= 64
+        && name.chars().next().is_some_and(char::is_alphanumeric)
+        && name
+            .chars()
+            .all(|ch| ch.is_alphanumeric() || " ._()'-".contains(ch))
+}
+
 struct Call {
     context: Context,
+    voices: VoiceRequests,
     started: Instant,
     records: mpsc::Sender<Value>,
     sent: mpsc::Receiver<()>,
@@ -169,6 +231,16 @@ pub(crate) fn assistant_response() {
     ASSISTANT_RESPONSES.fetch_add(1, Ordering::Relaxed);
 }
 
+/// Session playback reports the settings held by its actual synthesis lease.
+/// No per-speech record is exported; the call accumulates counts until end.
+pub(crate) fn speech_used(settings: &TtsSettings) {
+    if let Ok(mut call) = CALL.lock() {
+        if let Some(call) = call.as_mut() {
+            call.voices.used(settings);
+        }
+    }
+}
+
 pub(crate) fn user_stopped() {
     USER_STOPPED.store(true, Ordering::Relaxed);
 }
@@ -179,13 +251,32 @@ pub(crate) fn start(session_arguments: &[String], tts: &TtsSettings) {
         return;
     };
     let Ok(mut call) = CALL.lock() else { return };
-    if call.is_some() || !consented(&dir) {
+    if !consented(&dir) {
         return;
     }
-    let Some(context) = Context::new(session_arguments, tts, || {
+    // Backend changes restart the session within the same call. Refresh the
+    // Siri catalog there, while retaining all counts and the starting default.
+    let siri = || {
         berd_call::siri::load_voice_catalog(None)
-            .map(|catalog| catalog.voices.into_iter().map(|voice| voice.name).collect())
+            .map(|catalog| catalog.voices)
             .unwrap_or_default()
+    };
+    if let Some(call) = call.as_mut() {
+        if matches!(tts, TtsSettings::Siri { .. }) && call.voices.siri.is_empty() {
+            call.voices.siri = siri();
+        }
+        return;
+    }
+    let voices = VoiceRequests {
+        siri: if matches!(tts, TtsSettings::Siri { .. }) {
+            siri()
+        } else {
+            Vec::new()
+        },
+        ..VoiceRequests::default()
+    };
+    let Some(context) = Context::new(session_arguments, tts, || {
+        voices.siri.iter().map(|voice| voice.name.clone()).collect()
     }) else {
         return;
     };
@@ -218,6 +309,7 @@ pub(crate) fn start(session_arguments: &[String], tts: &TtsSettings) {
     ));
     *call = Some(Call {
         context,
+        voices,
         started: Instant::now(),
         records,
         sent,
@@ -236,8 +328,8 @@ pub(crate) fn end(failed: bool) {
     } else {
         "clean-shutdown"
     };
-    let _ = call.records.send(record(
-        "berd_voice_conversation_ended",
+    let _ = call.records.send(ended_record(
+        &call.voices,
         SystemTime::now(),
         &ended_attributes(
             &call.context,
@@ -249,6 +341,19 @@ pub(crate) fn end(failed: bool) {
     ));
     drop(call.records);
     let _ = call.sent.recv_timeout(FLUSH_TIMEOUT);
+}
+
+fn ended_record(
+    voices: &VoiceRequests,
+    at: SystemTime,
+    event_attributes: &[(&'static str, String)],
+) -> Value {
+    let mut record = record("berd_voice_conversation_ended", at, event_attributes);
+    record["attributes"]
+        .as_array_mut()
+        .unwrap()
+        .push(voices.attribute());
+    record
 }
 
 fn ended_attributes(
@@ -472,11 +577,20 @@ mod tests {
                 &context.attributes(),
             ),
         );
+        let mut requests = VoiceRequests::default();
+        let openai = |voice: &str| TtsSettings::OpenAi {
+            model: "test".into(),
+            voice: voice.into(),
+            rate: 1.0,
+        };
+        requests.used(&openai("alloy"));
+        requests.used(&openai("alloy"));
+        requests.used(&openai("marin"));
         let ended = payload(
             production(),
             ID,
-            record(
-                "berd_voice_conversation_ended",
+            ended_record(
+                &requests,
                 at(1_762_265_100),
                 &ended_attributes(&context, Duration::from_millis(300_250), 4, 3, "user"),
             ),
@@ -535,6 +649,10 @@ mod tests {
                     {"key": "user_utterance_count", "value": {"stringValue": "4"}},
                     {"key": "assistant_response_count", "value": {"stringValue": "3"}},
                     {"key": "end_reason", "value": {"stringValue": "user"}},
+                    {"key": "tts_voice_requests", "value": {"kvlistValue": {"values": [
+                        {"key": "alloy", "value": {"intValue": "2"}},
+                        {"key": "marin", "value": {"intValue": "1"}},
+                    ]}}},
                 ])
             )
         );
@@ -690,7 +808,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(header("authorization"), ["Bearer token-1"]);
-        assert_eq!(header("x-berd-schema-version"), ["berd-call-otlp-logs-v1"]);
+        assert_eq!(header("x-berd-schema-version"), ["berd-call-otlp-logs-v2"]);
         assert_eq!(header("content-type"), ["application/json"]);
         let resource = &requests[1].body["resourceLogs"][0]["resource"]["attributes"];
         assert_eq!(
@@ -712,6 +830,54 @@ mod tests {
         let requests = requests.lock().unwrap();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].line, "POST /v1/bootstrap HTTP/1.1");
+    }
+
+    #[test]
+    fn requests_use_catalog_display_names_and_reset_for_each_call() {
+        let mut requests = VoiceRequests {
+            siri: vec![berd_call::siri::SiriVoice {
+                name: "en-US-F".into(),
+                display_name: "Zack".into(),
+                language: "en-US".into(),
+                size_bytes: 0,
+                installed: true,
+            }],
+            ..VoiceRequests::default()
+        };
+        let siri = |language: &str| TtsSettings::Siri {
+            voice: "en-US-F".into(),
+            language: language.into(),
+            rate: 1.0,
+        };
+        requests.used(&siri("en-US"));
+        requests.used(&siri("en-US"));
+        requests.used(&siri("en_US"));
+        requests.used(&pocket(1.0));
+        requests.used(&siri("en-AU")); // Same code in a different locale is not this identity.
+        requests.used(&TtsSettings::OpenAi {
+            model: "test".into(),
+            voice: "private override".into(),
+            rate: 1.0,
+        });
+        assert_eq!(
+            requests.counts,
+            BTreeMap::from([("Zack".into(), 3), ("Anna".into(), 1), ("custom".into(), 2),])
+        );
+        let ended = ended_record(&requests, UNIX_EPOCH, &[]);
+        assert_eq!(
+            ended["attributes"],
+            json!([{
+                "key": "tts_voice_requests", "value": {"kvlistValue": {"values": [
+                    {"key": "Anna", "value": {"intValue": "1"}},
+                    {"key": "Zack", "value": {"intValue": "3"}},
+                    {"key": "custom", "value": {"intValue": "2"}},
+                ]}}
+            }])
+        );
+        assert!(VoiceRequests::default().counts.is_empty());
+        assert!(!serde_json::to_string(&ended)
+            .unwrap()
+            .contains("private override"));
     }
 
     #[test]

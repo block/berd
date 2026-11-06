@@ -33,9 +33,9 @@ use berd_call::{
         LocalAssetLockError, LocalAssetRoots, LocalInstallError, LocalInstallErrorKind,
         LocalInstallPhase, LocalInstallProgress,
     },
-    ConfiguredTtsSlot, DeliveryProgress, TtsBackend, TtsConfiguration, TtsConfigurationLease,
-    TtsConfigurationRejection, TtsConfigurationRejectionKind, TtsSettings, WavSynthesisErrorKind,
-    DEFAULT_VAD_THRESHOLD,
+    ConfiguredTtsSlot, DeliveryProgress, PcmAudioOutput, TtsBackend, TtsConfiguration,
+    TtsConfigurationLease, TtsConfigurationRejection, TtsConfigurationRejectionKind, TtsSettings,
+    WavSynthesisErrorKind, DEFAULT_VAD_THRESHOLD,
 };
 use serde::Serialize;
 
@@ -139,6 +139,7 @@ struct ActivePlayback {
     input_during_tts: InputDuringTtsSnapshot,
     tts: TtsConfigurationLease,
     suspension_requested: bool,
+    usage_reported: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2115,6 +2116,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
     let status_sound_runtime = ManagedStatusSoundRuntime::spawn(None)?;
 
     loop {
+        publish_speech_usage(active.as_mut(), &mut writer)?;
         input_progress.enter("voice_events");
         if let Some(events) = input_events.as_mut() {
             while let Ok(event) = events.try_recv() {
@@ -2282,6 +2284,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 interrupt_active(&mut core, &mut active, &mut writer)?;
                 finish_shutdown_playback(
                     &playback_rx,
+                    &control_rx,
                     &mut core,
                     &mut active,
                     &mut writer,
@@ -2571,51 +2574,28 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     )?;
                 }
             }
-            Input::Request(SessionRequest::AudioBeginAccepted { speech_id }) => {
-                if let Err(message) =
-                    handle_audio_ack(speech_id, AudioHostAck::BeginAccepted, active.as_ref())
-                {
-                    write_protocol_fatal(
-                        &mut writer,
-                        "invalid host audio acknowledgement",
-                        &message,
-                    )?;
-                    abort_active(&active);
-                    return Ok(());
+            Input::Request(
+                request @ (SessionRequest::AudioBeginAccepted { .. }
+                | SessionRequest::AudioBeginFailed { .. }
+                | SessionRequest::AudioChunkAccepted { .. }
+                | SessionRequest::AudioPlayed { .. }
+                | SessionRequest::AudioSuspended { .. }
+                | SessionRequest::AudioResumed { .. }
+                | SessionRequest::AudioDrained { .. }
+                | SessionRequest::AudioFailed { .. }
+                | SessionRequest::AudioCancelled { .. }),
+            ) => {
+                match &request {
+                    SessionRequest::AudioBeginFailed { message, .. } => {
+                        eprintln!("host audio begin failed: {message}")
+                    }
+                    SessionRequest::AudioFailed { message, .. } => {
+                        eprintln!("host audio output failed: {message}")
+                    }
+                    _ => {}
                 }
-            }
-            Input::Request(SessionRequest::AudioBeginFailed {
-                speech_id,
-                played_frames,
-                message,
-            }) => {
-                eprintln!("host audio begin failed: {message}");
-                if let Err(message) = handle_audio_ack(
-                    speech_id,
-                    AudioHostAck::BeginFailed {
-                        played_frames,
-                        message,
-                    },
-                    active.as_ref(),
-                ) {
-                    write_protocol_fatal(
-                        &mut writer,
-                        "invalid host audio acknowledgement",
-                        &message,
-                    )?;
-                    abort_active(&active);
-                    return Ok(());
-                }
-            }
-            Input::Request(SessionRequest::AudioChunkAccepted {
-                speech_id,
-                sequence,
-            }) => {
-                match handle_audio_ack(
-                    speech_id,
-                    AudioHostAck::ChunkAccepted { sequence },
-                    active.as_ref(),
-                ) {
+                let (speech_id, ack) = audio_ack(request).expect("audio request matched");
+                match handle_audio_ack(speech_id, ack, active.as_ref()) {
                     Ok(true) => {
                         publish_speech_started(speech_id, &mut core, active.as_ref(), &mut writer)?
                     }
@@ -2629,123 +2609,6 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                         abort_active(&active);
                         return Ok(());
                     }
-                }
-            }
-            Input::Request(SessionRequest::AudioPlayed {
-                speech_id,
-                played_frames,
-            }) => {
-                if let Err(message) = handle_audio_ack(
-                    speech_id,
-                    AudioHostAck::Played { played_frames },
-                    active.as_ref(),
-                ) {
-                    write_protocol_fatal(
-                        &mut writer,
-                        "invalid host audio acknowledgement",
-                        &message,
-                    )?;
-                    abort_active(&active);
-                    return Ok(());
-                }
-            }
-            Input::Request(SessionRequest::AudioSuspended {
-                speech_id,
-                played_frames,
-            }) => {
-                if let Err(message) = handle_audio_ack(
-                    speech_id,
-                    AudioHostAck::Suspended { played_frames },
-                    active.as_ref(),
-                ) {
-                    write_protocol_fatal(
-                        &mut writer,
-                        "invalid host audio acknowledgement",
-                        &message,
-                    )?;
-                    abort_active(&active);
-                    return Ok(());
-                }
-            }
-            Input::Request(SessionRequest::AudioResumed {
-                speech_id,
-                played_frames,
-            }) => {
-                if let Err(message) = handle_audio_ack(
-                    speech_id,
-                    AudioHostAck::Resumed { played_frames },
-                    active.as_ref(),
-                ) {
-                    write_protocol_fatal(
-                        &mut writer,
-                        "invalid host audio acknowledgement",
-                        &message,
-                    )?;
-                    abort_active(&active);
-                    return Ok(());
-                }
-            }
-            Input::Request(SessionRequest::AudioDrained {
-                speech_id,
-                sequence,
-                played_frames,
-            }) => {
-                if let Err(message) = handle_audio_ack(
-                    speech_id,
-                    AudioHostAck::Drained {
-                        sequence,
-                        played_frames,
-                    },
-                    active.as_ref(),
-                ) {
-                    write_protocol_fatal(
-                        &mut writer,
-                        "invalid host audio acknowledgement",
-                        &message,
-                    )?;
-                    abort_active(&active);
-                    return Ok(());
-                }
-            }
-            Input::Request(SessionRequest::AudioFailed {
-                speech_id,
-                played_frames,
-                message,
-            }) => {
-                eprintln!("host audio output failed: {message}");
-                if let Err(message) = handle_audio_ack(
-                    speech_id,
-                    AudioHostAck::Failed {
-                        played_frames,
-                        message,
-                    },
-                    active.as_ref(),
-                ) {
-                    write_protocol_fatal(
-                        &mut writer,
-                        "invalid host audio acknowledgement",
-                        &message,
-                    )?;
-                    abort_active(&active);
-                    return Ok(());
-                }
-            }
-            Input::Request(SessionRequest::AudioCancelled {
-                speech_id,
-                played_frames,
-            }) => {
-                if let Err(message) = handle_audio_ack(
-                    speech_id,
-                    AudioHostAck::Cancelled { played_frames },
-                    active.as_ref(),
-                ) {
-                    write_protocol_fatal(
-                        &mut writer,
-                        "invalid host audio acknowledgement",
-                        &message,
-                    )?;
-                    abort_active(&active);
-                    return Ok(());
                 }
             }
             Input::Request(SessionRequest::QueryState { id, after }) => {
@@ -4282,6 +4145,7 @@ fn process_prepare(
                 input_during_tts,
                 tts,
                 suspension_requested: false,
+                usage_reported: false,
             });
             write_message(
                 writer,
@@ -4548,6 +4412,32 @@ fn publish_speech_started(
     Ok(())
 }
 
+fn publish_speech_usage(
+    current: Option<&mut ActivePlayback>,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    let Some(current) = current else {
+        return Ok(());
+    };
+    if !current.usage_reported
+        && current
+            .output
+            .as_ref()
+            .is_some_and(|output| output.played_frames() > 0)
+    {
+        write_message(
+            writer,
+            &SessionMessage::SpeechUsed {
+                id: current.prepare_id,
+                speech_id: current.speech_id,
+                tts: current.tts.snapshot().settings.clone(),
+            },
+        )?;
+        current.usage_reported = true;
+    }
+    Ok(())
+}
+
 fn finish_playback(
     core: &mut SessionCore,
     active: &mut Option<ActivePlayback>,
@@ -4556,6 +4446,7 @@ fn finish_playback(
     writer: &mut impl Write,
 ) -> Result<(), String> {
     if core.finish(speech_id) {
+        publish_speech_usage(active.as_mut(), writer)?;
         if active
             .as_ref()
             .is_some_and(|current| current.speech_id == speech_id)
@@ -4728,8 +4619,71 @@ fn abort_active(active: &Option<ActivePlayback>) {
     }
 }
 
+fn audio_ack(request: SessionRequest) -> Option<(u64, AudioHostAck)> {
+    use SessionRequest::*;
+    let (speech_id, ack) = match request {
+        AudioBeginAccepted { speech_id } => (speech_id, AudioHostAck::BeginAccepted),
+        AudioBeginFailed {
+            speech_id,
+            played_frames,
+            message,
+        } => (
+            speech_id,
+            AudioHostAck::BeginFailed {
+                played_frames,
+                message,
+            },
+        ),
+        AudioChunkAccepted {
+            speech_id,
+            sequence,
+        } => (speech_id, AudioHostAck::ChunkAccepted { sequence }),
+        AudioPlayed {
+            speech_id,
+            played_frames,
+        } => (speech_id, AudioHostAck::Played { played_frames }),
+        AudioSuspended {
+            speech_id,
+            played_frames,
+        } => (speech_id, AudioHostAck::Suspended { played_frames }),
+        AudioResumed {
+            speech_id,
+            played_frames,
+        } => (speech_id, AudioHostAck::Resumed { played_frames }),
+        AudioDrained {
+            speech_id,
+            sequence,
+            played_frames,
+        } => (
+            speech_id,
+            AudioHostAck::Drained {
+                sequence,
+                played_frames,
+            },
+        ),
+        AudioFailed {
+            speech_id,
+            played_frames,
+            message,
+        } => (
+            speech_id,
+            AudioHostAck::Failed {
+                played_frames,
+                message,
+            },
+        ),
+        AudioCancelled {
+            speech_id,
+            played_frames,
+        } => (speech_id, AudioHostAck::Cancelled { played_frames }),
+        _ => return None,
+    };
+    Some((speech_id, ack))
+}
+
 fn finish_shutdown_playback(
     playback_rx: &Receiver<PlaybackEvent>,
+    control_rx: &Receiver<OrderedControl>,
     core: &mut SessionCore,
     active: &mut Option<ActivePlayback>,
     writer: &mut impl Write,
@@ -4737,17 +4691,30 @@ fn finish_shutdown_playback(
 ) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
     while active.is_some() {
+        while let Ok(control) = control_rx.try_recv() {
+            if let Input::Request(request) = control.input {
+                if let Some((speech_id, ack)) = audio_ack(request) {
+                    handle_audio_ack(speech_id, ack, active.as_ref())?;
+                }
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+        }
+        publish_speech_usage(active.as_mut(), writer)?;
         let remaining = deadline.saturating_duration_since(Instant::now());
         let event = if remaining.is_zero() {
             Err(mpsc::RecvTimeoutError::Timeout)
         } else {
-            playback_rx.recv_timeout(remaining)
+            playback_rx.recv_timeout(remaining.min(Duration::from_millis(2)))
         };
         match event {
             Ok(event) => handle_playback_event(event, core, active, writer)?,
+            Err(mpsc::RecvTimeoutError::Timeout) if Instant::now() < deadline => continue,
             Err(error) => {
-                let current = active.take().expect("active playback exists");
-                core.finish(current.speech_id);
+                let current = active.as_ref().expect("active playback exists");
+                let id = current.prepare_id;
+                let speech_id = current.speech_id;
                 let message = match error {
                     mpsc::RecvTimeoutError::Timeout => {
                         "playback cancellation timed out during shutdown"
@@ -4756,13 +4723,16 @@ fn finish_shutdown_playback(
                         "playback worker disconnected during shutdown"
                     }
                 };
-                write_message(
-                    writer,
-                    &SessionMessage::SpeechFailed {
-                        id: current.prepare_id,
-                        speech_id: current.speech_id,
+                finish_playback(
+                    core,
+                    active,
+                    speech_id,
+                    SessionMessage::SpeechFailed {
+                        id,
+                        speech_id,
                         message: message.into(),
                     },
+                    writer,
                 )?;
             }
         }
@@ -5183,7 +5153,7 @@ fn synthesize_to_output_with_finish(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use berd_call::{PcmAudioOutput, TtsOutcome, TtsPcmSpec};
+    use berd_call::{TtsOutcome, TtsPcmSpec};
     use serde_json::{json, Value};
     use std::io::{Cursor, Read, Write};
     use std::os::fd::IntoRawFd;
@@ -5813,7 +5783,115 @@ mod tests {
             input_during_tts: test_input_policy(),
             tts: test_tts_lease(),
             suspension_requested: false,
+            usage_reported: false,
         }
+    }
+
+    #[test]
+    fn cancelled_playback_reports_used_voice_without_a_late_start() {
+        for (already_started, played_frames) in [(false, 64), (true, 64), (false, 0), (true, 0)] {
+            let mut core = SessionCore::default();
+            let mut current = active_playback(&mut core);
+            let speech_id = current.speech_id;
+            let settings = current.tts.snapshot().settings.clone();
+            let (child, mut host) = UnixStream::pair().unwrap();
+            let transport =
+                unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap();
+            let (control_sender, _control_receiver) = mpsc::channel();
+            let authority = current.active.as_ref().unwrap().clone();
+            let output = Arc::new(
+                RemotePcmAudioOutput::new(
+                    speech_id,
+                    LongRemoteTts.pcm_spec(),
+                    Arc::new(transport),
+                    Arc::clone(&authority),
+                    control_sender,
+                )
+                .unwrap(),
+            );
+            current.output = Some(Arc::clone(&output));
+            let worker_output = Arc::clone(&output);
+            let worker = thread::spawn(move || {
+                worker_output.start()?;
+                worker_output.write(&[0.1; 4096])
+            });
+            assert_eq!(
+                read_audio_record(&mut host).0,
+                session_audio::AUDIO_BEGIN_KIND
+            );
+            output.handle_ack(AudioHostAck::BeginAccepted).unwrap();
+            assert_eq!(
+                read_audio_record(&mut host).0,
+                session_audio::AUDIO_CHUNK_KIND
+            );
+            let mut messages_out = Vec::new();
+            if already_started {
+                publish_speech_started(speech_id, &mut core, Some(&current), &mut messages_out)
+                    .unwrap();
+            }
+            authority.store(false, Ordering::SeqCst);
+            output.notify_cancel_requested();
+            assert_eq!(
+                read_audio_record(&mut host).0,
+                session_audio::AUDIO_CANCEL_KIND
+            );
+            assert!(!output
+                .handle_ack(AudioHostAck::ChunkAccepted { sequence: 1 })
+                .unwrap());
+            output
+                .handle_ack(AudioHostAck::Cancelled { played_frames })
+                .unwrap();
+            assert!(worker.join().unwrap().is_err());
+            let mut active = Some(current);
+            publish_speech_usage(active.as_mut(), &mut messages_out).unwrap();
+            publish_speech_usage(active.as_mut(), &mut messages_out).unwrap();
+            handle_playback_event(
+                PlaybackEvent::Interrupted(speech_id, 0),
+                &mut core,
+                &mut active,
+                &mut messages_out,
+            )
+            .unwrap();
+            let rows = messages(&messages_out);
+            let usage: Vec<_> = rows
+                .iter()
+                .filter(|row| row["type"] == "speech_used")
+                .collect();
+            assert_eq!(usage.len(), usize::from(played_frames > 0));
+            if let Some(usage) = usage.first() {
+                assert_eq!(usage["tts"], serde_json::to_value(settings).unwrap());
+            }
+            assert_eq!(
+                rows.iter()
+                    .filter(|row| row["type"] == "speech_started")
+                    .count(),
+                usize::from(already_started)
+            );
+            assert_eq!(rows.last().unwrap()["type"], "speech_interrupted");
+        }
+    }
+
+    #[test]
+    fn speech_start_is_reported_once_even_after_resume() {
+        let mut core = SessionCore::default();
+        let current = active_playback(&mut core);
+        let mut messages = Vec::new();
+        publish_speech_started(current.speech_id, &mut core, Some(&current), &mut messages)
+            .unwrap();
+        publish_speech_started(current.speech_id, &mut core, Some(&current), &mut messages)
+            .unwrap();
+        let records: Vec<SessionMessage> = String::from_utf8(messages)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(
+            records,
+            vec![SessionMessage::SpeechStarted {
+                id: current.prepare_id,
+                speech_id: current.speech_id,
+            }]
+        );
     }
 
     fn read_audio_record(reader: &mut impl Read) -> (u8, Vec<u8>) {
@@ -7962,6 +8040,7 @@ mod tests {
             input_during_tts: test_input_policy(),
             tts: test_tts_lease(),
             suspension_requested: false,
+            usage_reported: false,
         });
         let mut held = None;
         let mut output = Vec::new();
@@ -8003,6 +8082,7 @@ mod tests {
             input_during_tts: test_input_policy(),
             tts: test_tts_lease(),
             suspension_requested: false,
+            usage_reported: false,
         });
         let mut output = Vec::new();
 
@@ -8155,6 +8235,7 @@ mod tests {
             input_during_tts: test_input_policy(),
             tts: test_tts_lease(),
             suspension_requested: false,
+            usage_reported: false,
         });
         let mut next_token = 1;
         let mut output = Vec::new();
@@ -8247,6 +8328,7 @@ mod tests {
             input_during_tts: test_input_policy(),
             tts: test_tts_lease(),
             suspension_requested: false,
+            usage_reported: false,
         });
         let mut next_token = 1;
         let mut output = Vec::new();
@@ -8434,6 +8516,97 @@ mod tests {
     }
 
     #[test]
+    fn shutdown_settles_queued_audio_acknowledgements_before_counting_usage() {
+        let mut core = SessionCore::default();
+        let mut current = active_playback(&mut core);
+        let speech_id = current.speech_id;
+        let (child, mut host) = UnixStream::pair().unwrap();
+        let transport = unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap();
+        let (controls, _controls) = mpsc::channel();
+        let authority = current.active.as_ref().unwrap().clone();
+        let audio = Arc::new(
+            RemotePcmAudioOutput::new(
+                speech_id,
+                LongRemoteTts.pcm_spec(),
+                Arc::new(transport),
+                authority,
+                controls,
+            )
+            .unwrap(),
+        );
+        current.output = Some(Arc::clone(&audio));
+        let (playback_tx, playback_rx) = mpsc::channel();
+        let output = Arc::clone(&audio);
+        let worker = thread::spawn(move || {
+            output.start().unwrap();
+            assert!(output.write(&[0.1; 4096]).is_err());
+            playback_tx
+                .send(PlaybackEvent::Interrupted(speech_id, 0))
+                .unwrap();
+        });
+        assert_eq!(
+            read_audio_record(&mut host).0,
+            session_audio::AUDIO_BEGIN_KIND
+        );
+        audio.handle_ack(AudioHostAck::BeginAccepted).unwrap();
+        assert_eq!(
+            read_audio_record(&mut host).0,
+            session_audio::AUDIO_CHUNK_KIND
+        );
+        let mut active = Some(current);
+        let mut messages_out = Vec::new();
+        interrupt_active(&mut core, &mut active, &mut messages_out).unwrap();
+        assert_eq!(
+            read_audio_record(&mut host).0,
+            session_audio::AUDIO_CANCEL_KIND
+        );
+        let (sender, receiver) = mpsc::channel();
+        for request in [
+            SessionRequest::AudioChunkAccepted {
+                speech_id,
+                sequence: 1,
+            },
+            SessionRequest::AudioCancelled {
+                speech_id,
+                played_frames: 64,
+            },
+        ] {
+            sender
+                .send(OrderedControl {
+                    after_pcm: 999,
+                    input: Input::Request(request),
+                })
+                .unwrap();
+        }
+        finish_shutdown_playback(
+            &playback_rx,
+            &receiver,
+            &mut core,
+            &mut active,
+            &mut messages_out,
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        // Release the worker if shutdown leaves acknowledgements unprocessed, so a failing test cannot leave a blocked thread.
+        if audio.played_frames() == 0 {
+            audio
+                .handle_ack(AudioHostAck::ChunkAccepted { sequence: 1 })
+                .unwrap();
+            audio
+                .handle_ack(AudioHostAck::Cancelled { played_frames: 64 })
+                .unwrap();
+        }
+        worker.join().unwrap();
+        let rows = messages(&messages_out);
+        assert_eq!(
+            rows.iter()
+                .map(|row| row["type"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["speech_used", "speech_interrupted"]
+        );
+    }
+
+    #[test]
     fn shutdown_drains_started_before_interrupted_terminal() {
         let mut core = SessionCore::default();
         let mut active = Some(active_playback(&mut core));
@@ -8448,6 +8621,7 @@ mod tests {
 
         finish_shutdown_playback(
             &receiver,
+            &mpsc::channel().1,
             &mut core,
             &mut active,
             &mut output,
@@ -8473,6 +8647,7 @@ mod tests {
         let mut output = Vec::new();
         finish_shutdown_playback(
             &receiver,
+            &mpsc::channel().1,
             &mut core,
             &mut active,
             &mut output,
@@ -8492,6 +8667,7 @@ mod tests {
         let mut output = Vec::new();
         finish_shutdown_playback(
             &receiver,
+            &mpsc::channel().1,
             &mut core,
             &mut active,
             &mut output,

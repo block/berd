@@ -242,6 +242,11 @@ pub enum SessionMessage {
         id: u64,
         speech_id: u64,
     },
+    SpeechUsed {
+        id: u64,
+        speech_id: u64,
+        tts: TtsSettings,
+    },
     SpeechCompleted {
         id: u64,
         speech_id: u64,
@@ -284,7 +289,7 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&SessionMessage::Ready {
                 id: 4,
-                protocol: 6,
+                protocol: 7,
                 session: VoiceSessionSnapshot {
                     tts: TtsConfigurationSnapshot {
                         revision: 1,
@@ -301,7 +306,7 @@ mod tests {
                 },
             })
             .unwrap(),
-            r#"{"type":"ready","id":4,"protocol":6,"session":{"tts":{"revision":1,"backend":"openai","model":"gpt-4o-mini-tts","voice":"marin","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}"#
+            r#"{"type":"ready","id":4,"protocol":7,"session":{"tts":{"revision":1,"backend":"openai","model":"gpt-4o-mini-tts","voice":"marin","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}"#
         );
         assert_eq!(
             serde_json::from_str::<SessionRequest>(
