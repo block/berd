@@ -26,6 +26,7 @@ interface ListModelsResult {
   harnesses: Array<{
     harness_id: string;
     models: ModelEntry[];
+    auto_modes?: Array<{ id: string; name: string; is_default: boolean }>;
     /** Present when a stale cached list was served (the last refresh failed)
      *  or when the harness manages its model outside the app. */
     warning?: string;
@@ -40,7 +41,8 @@ export const listModelsCommand = defineCommand({
   description:
     "List the models available per agent harness (same source as the app's " +
     "model picker); omit harness_id to cover every ready harness in one " +
-    "call. Use a model_id (and its harness_id) when creating a session.",
+    "call. Goose also lists configured Auto modes separately in auto_modes. Use " +
+    "--auto-mode-id for those ids, or --model-id for a concrete model when creating a session.",
   helpFooter: `Example:
   berdctl info models --harness-id goose --json
 
@@ -48,16 +50,22 @@ Result:
   {"harnesses": [{"harness_id": "...",
                   "models": [{"model_id": "...", "name": "...",
                               "provider": "..."?}],
+                  "auto_modes": [{"id": "...", "name": "...", "is_default": true}]?,
                   "warning": "..."?}]}
   Use a model_id (with its harness) as --model-id when creating a session.
+  Goose auto_modes ids are not model ids; pass one as --auto-mode-id to route
+  each fresh prompt. auto_modes is omitted for non-Goose harnesses.
   "warning" appears when a stale cached list was served or when the harness
   manages its model outside the app.`,
   schema: listModelsSchema,
   execute: async (args): Promise<ListModelsResult> => {
+    let gooseConfigWarning: string | null = null;
     const [
       { getProviderModelSelectionHint },
       { useProviderModelCacheStore },
       { GOOSE_PROVIDER_ID },
+      { refreshRuntimeConfigForNewChat },
+      { useRuntimeConfigStore },
       {
         findReadyHarnessOrThrow,
         listHarnessStatuses,
@@ -68,6 +76,8 @@ Result:
       import("@/features/providers/modelSelectionHints"),
       import("@/features/providers/stores/providerModelCacheStore"),
       import("@/shared/api/acpPersonaHandoff"),
+      import("@/shared/runtime-config/newChatRuntimeConfig"),
+      import("@/shared/runtime-config/runtimeConfigStore"),
       import("../runtime/providers"),
     ]);
     const targets = args.harness_id
@@ -75,6 +85,30 @@ Result:
       : (await listHarnessStatuses()).filter(
           (harness) => harness.readiness === "ready",
         );
+    if (targets.some((harness) => harness.id === GOOSE_PROVIDER_ID)) {
+      try {
+        await refreshRuntimeConfigForNewChat();
+      } catch (error) {
+        // A Goose-specific sync failure must not abort discovery for the
+        // other ready harnesses; surface it on the Goose entry instead.
+        gooseConfigWarning = `auto mode configuration refresh failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+      }
+    }
+    const runtimeState = useRuntimeConfigStore.getState();
+    const autoRouting = runtimeState.config.goose.autoRouting;
+    if (
+      gooseConfigWarning === null &&
+      (!runtimeState.loaded ||
+        runtimeState.result.status !== "ready" ||
+        runtimeState.result.source === "appDefault")
+    ) {
+      // Startup, failed, and app-default loads expose defaults without
+      // proving the saved Auto modes are gone (same rule as Auto dispatch).
+      gooseConfigWarning =
+        "configured Auto modes may be unavailable; the mode list may be incomplete or stale";
+    }
     const harnesses = await Promise.all(
       targets.map(async (harness) => {
         const models =
@@ -91,11 +125,25 @@ Result:
           harness.id === GOOSE_PROVIDER_ID
             ? null
             : useProviderModelCacheStore.getState().getError(harness.id);
+        const warningParts = [
+          hint,
+          staleError ? `list may be stale: ${staleError}` : null,
+          harness.id === GOOSE_PROVIDER_ID ? gooseConfigWarning : null,
+        ].filter((entry): entry is string => entry !== null);
         const warning =
-          hint ?? (staleError ? `list may be stale: ${staleError}` : null);
+          warningParts.length > 0 ? warningParts.join("; ") : null;
         return {
           harness_id: harness.id,
           models,
+          ...(harness.id === GOOSE_PROVIDER_ID
+            ? {
+                auto_modes: (autoRouting?.modes ?? []).map((mode) => ({
+                  id: mode.id,
+                  name: mode.displayName,
+                  is_default: mode.id === autoRouting?.defaultModeId,
+                })),
+              }
+            : {}),
           ...(warning ? { warning } : {}),
         };
       }),
