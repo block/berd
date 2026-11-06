@@ -562,6 +562,71 @@ describe("LocalSchedulesPanel", () => {
     ).toBeInTheDocument();
   });
 
+  it.each([
+    "0 9 * * JAN",
+    "0 MON * * *",
+    "0 9 * * */MON",
+  ])("blocks unsafe alias input %s before the scheduler RPC", async (cron) => {
+    renderPanel();
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Edit cron schedule for weekday-report",
+      }),
+    );
+    const input = screen.getByLabelText("Cron expression for weekday-report");
+    fireEvent.change(input, { target: { value: cron } });
+    expect(input).toHaveAccessibleDescription(
+      expect.stringContaining("This expression is invalid or uses syntax"),
+    );
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(updateLocalScheduleCron).not.toHaveBeenCalled();
+  });
+
+  it("does not report a refresh failure when cancellation rejects reconciliation", async () => {
+    const reconciliation = deferred<(typeof schedule)[]>();
+    const client = createQueryClient();
+    vi.mocked(listLocalSchedules)
+      .mockResolvedValueOnce([schedule])
+      .mockReturnValueOnce(reconciliation.promise);
+    vi.mocked(updateLocalScheduleCron).mockRejectedValueOnce(
+      new Error("replacement rejected"),
+    );
+    renderPanel(client);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Edit cron schedule for weekday-report",
+      }),
+    );
+    fireEvent.change(
+      screen.getByLabelText("Cron expression for weekday-report"),
+      { target: { value: "0 10 * * 1-5" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("replacement rejected");
+    await waitFor(() => expect(listLocalSchedules).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      // Default revert cancellation can resolve with cached data. Explicitly
+      // exercise the rejecting cancellation path too.
+      await client.cancelQueries(
+        { queryKey: ["local-goose-schedules"] },
+        { revert: false },
+      );
+    });
+    await waitFor(() => expect(client.isMutating()).toBe(0));
+    expect(
+      screen.queryByText(/The refresh also failed/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("replacement rejected")).toBeInTheDocument();
+    expect(
+      screen.getByText("Schedule timer needs verification"),
+    ).toBeInTheDocument();
+    await act(async () => {
+      reconciliation.resolve([schedule]);
+      await reconciliation.promise;
+    });
+  });
+
   it("reports a genuine reconciliation failure without losing timer uncertainty", async () => {
     vi.mocked(listLocalSchedules)
       .mockResolvedValueOnce([schedule])
