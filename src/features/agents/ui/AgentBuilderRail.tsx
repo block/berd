@@ -264,8 +264,13 @@ export function AgentBuilderRail({
   );
 
   const isDraft = data?.properties?.draft === true;
+  // "saving" counts: the write has not landed, so the disk still shows the
+  // previous content and must not be trusted as the whole story.
   const hasLocalEdits =
-    Boolean(data) && (saveStatus === "unsaved" || saveStatus === "error");
+    Boolean(data) &&
+    (saveStatus === "unsaved" ||
+      saveStatus === "saving" ||
+      saveStatus === "error");
 
   useEffect(() => {
     onLocalEditStateChange?.(hasLocalEdits);

@@ -1,6 +1,10 @@
 import { afterEach, describe, it, expect, beforeEach } from "vitest";
 import { useAgentStore } from "../agentStore";
 import type { Persona, Agent } from "@/shared/types/agents";
+import type {
+  AgentGalleryListing,
+  AgentSourceEntry,
+} from "@/shared/api/agents";
 
 // ── fixtures ──────────────────────────────────────────────────────────
 
@@ -39,6 +43,10 @@ describe("agentStore", () => {
     useAgentStore.setState({
       personas: [],
       personasLoading: false,
+      draftSources: [],
+      galleryRevision: 0,
+      galleryMutationsInFlight: 0,
+      galleryRefreshGeneration: 0,
       agents: [],
       agentsLoading: false,
       activeAgentId: null,
@@ -174,6 +182,112 @@ describe("agentStore", () => {
     const custom = useAgentStore.getState().getCustomPersonas();
     expect(custom).toHaveLength(1);
     expect(custom[0].id).toBe("c");
+  });
+
+  // ── gallery fence ─────────────────────────────────────────────────
+
+  describe("gallery fence", () => {
+    const draft: AgentSourceEntry = {
+      type: "agent",
+      path: "/agents/draft.md",
+      name: "Untitled agent",
+      description: "Draft",
+      content: "",
+      properties: { draft: true },
+      writable: true,
+      global: true,
+    };
+
+    function deferredListing() {
+      let resolve: (listing: AgentGalleryListing) => void = () => {};
+      const promise = new Promise<AgentGalleryListing>((r) => {
+        resolve = r;
+      });
+      return { fetch: () => promise, resolve };
+    }
+
+    it("applies a snapshot when nothing changed while it was in flight", async () => {
+      const listing = deferredListing();
+      const pending = useAgentStore.getState().refreshGallery(listing.fetch);
+      listing.resolve({
+        personas: [makePersona({ id: "p1" })],
+        drafts: [draft],
+      });
+
+      await expect(pending).resolves.toBe(true);
+      expect(useAgentStore.getState().personas.map((p) => p.id)).toEqual([
+        "p1",
+      ]);
+      expect(useAgentStore.getState().draftSources).toEqual([draft]);
+    });
+
+    it("drops a snapshot that started before a mutation and resolved after it", async () => {
+      useAgentStore.setState({ draftSources: [draft] });
+      const stale = deferredListing();
+      const pending = useAgentStore.getState().refreshGallery(stale.fetch);
+
+      // The user deletes the draft while the refresh is still in flight.
+      await useAgentStore.getState().mutateGallery(async () => {
+        useAgentStore.getState().removeDraftSource(draft.path);
+      });
+      expect(useAgentStore.getState().draftSources).toEqual([]);
+
+      // The old photo arrives, still showing the draft. It must not win.
+      stale.resolve({ personas: [], drafts: [draft] });
+      await expect(pending).resolves.toBe(false);
+      expect(useAgentStore.getState().draftSources).toEqual([]);
+    });
+
+    it("drops a snapshot that resolves while a mutation is still in flight", async () => {
+      const listing = deferredListing();
+      const pending = useAgentStore.getState().refreshGallery(listing.fetch);
+
+      let finishMutation: () => void = () => {};
+      const mutation = useAgentStore.getState().mutateGallery(
+        () =>
+          new Promise<void>((r) => {
+            finishMutation = r;
+          }),
+      );
+      listing.resolve({ personas: [], drafts: [draft] });
+      await expect(pending).resolves.toBe(false);
+      expect(useAgentStore.getState().draftSources).toEqual([]);
+
+      finishMutation();
+      await mutation;
+      expect(useAgentStore.getState().galleryMutationsInFlight).toBe(0);
+    });
+
+    it("releases the fence when a mutation throws", async () => {
+      await expect(
+        useAgentStore.getState().mutateGallery(async () => {
+          throw new Error("delete failed");
+        }),
+      ).rejects.toThrow("delete failed");
+      expect(useAgentStore.getState().galleryMutationsInFlight).toBe(0);
+
+      const listing = deferredListing();
+      const pending = useAgentStore.getState().refreshGallery(listing.fetch);
+      listing.resolve({ personas: [], drafts: [draft] });
+      await expect(pending).resolves.toBe(true);
+    });
+
+    it("drops an older snapshot that resolves after a newer one (latest wins)", async () => {
+      // The draft file was removed outside the app between two refreshes.
+      // The newer listing (no draft) lands first; the older one (still has
+      // the draft) must not put the card back.
+      const older = deferredListing();
+      const newer = deferredListing();
+      const pendingOlder = useAgentStore.getState().refreshGallery(older.fetch);
+      const pendingNewer = useAgentStore.getState().refreshGallery(newer.fetch);
+
+      newer.resolve({ personas: [], drafts: [] });
+      await expect(pendingNewer).resolves.toBe(true);
+      older.resolve({ personas: [], drafts: [draft] });
+      await expect(pendingOlder).resolves.toBe(false);
+
+      expect(useAgentStore.getState().draftSources).toEqual([]);
+    });
   });
 });
 
