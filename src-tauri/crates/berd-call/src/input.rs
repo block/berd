@@ -2,13 +2,13 @@
 //!
 //! Hosts provide exact normalized PCM frames and own capture devices and final
 //! transcript delivery. This module owns recognition, VAD, mute/reset epochs,
-//! assistant-sensitive interruption thresholds, and bounded engine shutdown.
+//! assistant input policy, and bounded engine shutdown.
 
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Receiver, SyncSender, TrySendError},
         Arc, Condvar, Mutex,
     },
@@ -42,8 +42,8 @@ const OPENAI_LIVE_RESULT_TIMEOUT: Duration = Duration::from_secs(5);
 const OPENAI_FINAL_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 const OPENAI_PRE_ROLL_FRAMES: usize = 15;
 const FINAL_STORAGE_TIMEOUT: Duration = Duration::from_secs(5);
-#[cfg(target_os = "macos")]
-const MAC_LIVE_NO_RESULT_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(any(target_os = "macos", test))]
+const MAC_PENDING_UTTERANCE_TIMEOUT: Duration = Duration::from_secs(5);
 const FINISH_TIMEOUT: Duration =
     Duration::from_secs(crate::MAC_SPEECH_RECOGNITION_FINISH_TIMEOUT_SECONDS + 5 + 1);
 
@@ -82,7 +82,9 @@ pub enum VoiceInputEngineConfig {
         model_dir: PathBuf,
     },
     #[cfg(target_os = "macos")]
-    MacSpeech,
+    MacSpeech {
+        hints: Vec<String>,
+    },
     OpenAi {
         endpoint: String,
         api_key: String,
@@ -120,8 +122,15 @@ impl FinalTranscriptStorageReceipt {
 pub enum VoiceInputEvent {
     Ready,
     SpeakingChanged(bool),
+    /// Agent speech admission hold, which may expire before recognition finishes.
     RecognitionPendingChanged(bool),
+    /// Provisional words, identified by their pending recognition rather than its admission hold.
+    InterimTranscript {
+        recognition_id: String,
+        text: String,
+    },
     FinalTranscript {
+        recognition_id: String,
         text: String,
         storage_receipt: FinalTranscriptStorageReceipt,
     },
@@ -163,13 +172,14 @@ struct ControlState {
     transition: Mutex<ControlTransitionState>,
     muted: AtomicBool,
     mute_epoch: AtomicU64,
-    assistant_speaking: AtomicBool,
-    assistant_vad_threshold: AtomicU32,
+    cue_suppressions: AtomicU64,
 }
 
 #[derive(Default)]
 struct ControlTransitionState {
     host_muted: bool,
+    auto_suppressed: bool,
+    auto_monitor_running: bool,
     assistant_activity: AssistantActivityState,
 }
 
@@ -180,15 +190,59 @@ struct AssistantActivityState {
 }
 
 struct AssistantActivity {
-    vad_threshold: u32,
     input_policy: InputDuringTtsPolicy,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum InputDuringTtsPolicy {
+    Auto,
     AllowBargeIn,
     SuppressInput,
+}
+
+impl InputDuringTtsPolicy {
+    pub fn resolve(self, output_device: Option<&str>) -> Self {
+        if self == Self::Auto {
+            self.resolve_for_speakers(output_device_uses_speakers(output_device))
+        } else {
+            self
+        }
+    }
+
+    pub fn resolve_for_speakers(self, speakers: bool) -> Self {
+        match self {
+            Self::Auto if speakers => Self::SuppressInput,
+            Self::Auto => Self::AllowBargeIn,
+            explicit => explicit,
+        }
+    }
+}
+
+/// Shared best-effort route classification for desktop and CLI callers.
+pub fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
+    #[cfg(target_os = "macos")]
+    let (default_name, builtin) = (
+        crate::macos_audio_route::default_output_device_name as fn() -> Option<String>,
+        || crate::macos_audio_route::output_device_is_builtin_speaker(output_device),
+    );
+    #[cfg(not(target_os = "macos"))]
+    let (default_name, builtin) = ((|| None) as fn() -> Option<String>, || false);
+    route_uses_speakers(output_device, default_name, builtin)
+}
+
+/// A named route is judged by its name, then by built-in speaker metadata. No
+/// name means the default output, which is named the same way.
+fn route_uses_speakers(
+    output_device: Option<&str>,
+    default_name: impl FnOnce() -> Option<String>,
+    builtin_speaker: impl FnOnce() -> bool,
+) -> bool {
+    let name = output_device.map(str::to_owned).or_else(default_name);
+    name.is_some_and(|name| {
+        let name = name.to_lowercase();
+        ["speaker", "altavo"].iter().any(|word| name.contains(word))
+    }) || builtin_speaker()
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -245,14 +299,38 @@ impl Default for VoiceInputControls {
                 transition: Mutex::new(ControlTransitionState::default()),
                 muted: AtomicBool::new(false),
                 mute_epoch: AtomicU64::new(0),
-                assistant_speaking: AtomicBool::new(false),
-                assistant_vad_threshold: AtomicU32::new(0.5_f32.to_bits()),
+                cue_suppressions: AtomicU64::new(0),
             }),
         }
     }
 }
 
 impl VoiceInputControls {
+    /// Pauses new captured frames without invalidating buffered speech or recognition.
+    pub fn begin_cue_activity(
+        &self,
+        policy: InputDuringTtsPolicy,
+        output_device: Option<&str>,
+    ) -> Result<CueInputActivityGuard, String> {
+        let suppress = policy.resolve(output_device) == InputDuringTtsPolicy::SuppressInput;
+        if suppress {
+            self.shared
+                .cue_suppressions
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                    count.checked_add(1)
+                })
+                .map_err(|_| "Too many overlapping cue activity guards".to_string())?;
+        }
+        Ok(CueInputActivityGuard {
+            controls: self.clone(),
+            suppress,
+        })
+    }
+
+    pub fn is_input_suppressed(&self) -> bool {
+        self.is_muted() || self.shared.cue_suppressions.load(Ordering::Acquire) > 0
+    }
+
     pub fn is_muted(&self) -> bool {
         self.shared.muted.load(Ordering::Acquire)
     }
@@ -290,12 +368,8 @@ impl VoiceInputControls {
 
     pub fn begin_assistant_activity(
         &self,
-        vad_threshold: f32,
         input_policy: InputDuringTtsPolicy,
     ) -> Result<AssistantActivityGuard, String> {
-        if !vad_threshold.is_finite() || !(0.0..=1.0).contains(&vad_threshold) {
-            return Err("assistant VAD threshold must be finite and between 0 and 1".to_string());
-        }
         let mut transition = self
             .shared
             .transition
@@ -307,15 +381,49 @@ impl VoiceInputControls {
             .checked_add(1)
             .ok_or_else(|| "assistant activity generation is exhausted".to_string())?;
         transition.assistant_activity.generation = generation;
-        transition.assistant_activity.lifetimes.insert(
-            generation,
-            AssistantActivity {
-                vad_threshold: vad_threshold.to_bits(),
-                input_policy,
-            },
-        );
-        self.publish_assistant_activity(&transition.assistant_activity);
+        transition
+            .assistant_activity
+            .lifetimes
+            .insert(generation, AssistantActivity { input_policy });
+        let start_monitor =
+            input_policy == InputDuringTtsPolicy::Auto && !transition.auto_monitor_running;
+        if start_monitor {
+            transition.auto_suppressed =
+                InputDuringTtsPolicy::Auto.resolve(None) == InputDuringTtsPolicy::SuppressInput;
+            transition.auto_monitor_running = true;
+        }
         self.publish_effective_mute(&transition);
+        drop(transition);
+        if start_monitor {
+            // Route queries stay off capture callbacks. The monitor owns no strong
+            // reference while sleeping and ends after the last Auto activity.
+            let shared = Arc::downgrade(&self.shared);
+            thread::spawn(move || loop {
+                thread::sleep(Duration::from_millis(100));
+                let Some(shared) = shared.upgrade() else {
+                    break;
+                };
+                let controls = VoiceInputControls { shared };
+                let suppress =
+                    InputDuringTtsPolicy::Auto.resolve(None) == InputDuringTtsPolicy::SuppressInput;
+                let mut transition = controls
+                    .shared
+                    .transition
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if !transition
+                    .assistant_activity
+                    .lifetimes
+                    .values()
+                    .any(|activity| activity.input_policy == InputDuringTtsPolicy::Auto)
+                {
+                    transition.auto_monitor_running = false;
+                    break;
+                }
+                transition.auto_suppressed = suppress;
+                controls.publish_effective_mute(&transition);
+            });
+        }
         Ok(AssistantActivityGuard {
             controls: self.clone(),
             generation,
@@ -326,38 +434,38 @@ impl VoiceInputControls {
         self.shared.mute_epoch.load(Ordering::Acquire)
     }
 
-    fn vad_threshold(&self, speech_threshold: f32) -> f32 {
-        if self.shared.assistant_speaking.load(Ordering::Acquire) {
-            f32::from_bits(self.shared.assistant_vad_threshold.load(Ordering::Acquire))
-        } else {
-            speech_threshold
-        }
-    }
-
     fn publish_effective_mute(&self, transition: &ControlTransitionState) {
-        let assistant_suppressed = transition
-            .assistant_activity
-            .lifetimes
-            .values()
-            .any(|activity| activity.input_policy == InputDuringTtsPolicy::SuppressInput);
+        let assistant_suppressed =
+            transition
+                .assistant_activity
+                .lifetimes
+                .values()
+                .any(|activity| {
+                    activity
+                        .input_policy
+                        .resolve_for_speakers(transition.auto_suppressed)
+                        == InputDuringTtsPolicy::SuppressInput
+                });
         let muted = transition.host_muted || assistant_suppressed;
         if self.shared.muted.swap(muted, Ordering::AcqRel) != muted {
             self.shared.mute_epoch.fetch_add(1, Ordering::AcqRel);
         }
     }
+}
 
-    fn publish_assistant_activity(&self, activity: &AssistantActivityState) {
-        if let Some((_, current)) = activity.lifetimes.last_key_value() {
-            self.shared
-                .assistant_vad_threshold
-                .store(current.vad_threshold, Ordering::Release);
-            self.shared
-                .assistant_speaking
-                .store(true, Ordering::Release);
-        } else {
-            self.shared
-                .assistant_speaking
-                .store(false, Ordering::Release);
+#[must_use = "cue input suppression ends when the guard is dropped"]
+pub struct CueInputActivityGuard {
+    controls: VoiceInputControls,
+    suppress: bool,
+}
+
+impl Drop for CueInputActivityGuard {
+    fn drop(&mut self) {
+        if self.suppress {
+            self.controls
+                .shared
+                .cue_suppressions
+                .fetch_sub(1, Ordering::AcqRel);
         }
     }
 }
@@ -380,8 +488,6 @@ impl Drop for AssistantActivityGuard {
             .assistant_activity
             .lifetimes
             .remove(&self.generation);
-        self.controls
-            .publish_assistant_activity(&transition.assistant_activity);
         self.controls.publish_effective_mute(&transition);
     }
 }
@@ -437,7 +543,7 @@ impl VoiceInputRuntime {
                 }),
             ),
             #[cfg(target_os = "macos")]
-            VoiceInputEngineConfig::MacSpeech => (
+            VoiceInputEngineConfig::MacSpeech { hints } => (
                 "berd-macos-stt",
                 Box::new(move || {
                     mac_speech_worker(
@@ -448,6 +554,7 @@ impl VoiceInputRuntime {
                         worker_shutdown_epoch,
                         worker_controls,
                         speech_threshold,
+                        hints,
                     )
                 }),
             ),
@@ -496,11 +603,11 @@ impl VoiceInputRuntime {
         if self.shutdown.load(Ordering::Acquire) {
             return Err("Voice input recognition is no longer running.".to_string());
         }
-        if self.controls.is_muted() {
+        if self.controls.is_input_suppressed() {
             return Ok(());
         }
         let mute_epoch = self.controls.mute_epoch();
-        if self.controls.is_muted() || mute_epoch != self.controls.mute_epoch() {
+        if self.controls.is_input_suppressed() || mute_epoch != self.controls.mute_epoch() {
             return Ok(());
         }
         match self.frame_tx.try_send(QueuedFrame { frame, mute_epoch }) {
@@ -589,18 +696,68 @@ fn reap_dropped_worker(worker: thread::JoinHandle<()>) {
         });
 }
 
+// Native finals have no utterance ID. Consume expired credits first, so an old
+// final cannot release a newer speech hold. Saturation keeps attribution
+// ambiguous until the recognizer is explicitly reset, without unbounded storage.
+#[cfg(any(target_os = "macos", test))]
+const MAX_PENDING_RECOGNITIONS: usize = 1024;
+
+// Apple ends a final about 0.3 s after its last word, so this only absorbs
+// trailing sound the detector still counted as speech.
+#[cfg(any(target_os = "macos", test))]
+const FINAL_COVERAGE_SLACK_SAMPLES: u64 = 12_000;
+
+// How much longer than the pending-utterance timeout agents wait while Apple's
+// latest result is interim words. Finals can take seven seconds or more.
+#[cfg(target_os = "macos")]
+const HEARD_WORDS_GRACE: Duration = Duration::from_secs(10);
+
+#[derive(Default)]
 struct PendingRecognitions {
     count: usize,
+    blocking: usize,
+    ambiguous: bool,
+    /// Where each unresolved turn's speech ended, oldest first; None while it continues.
+    ends: VecDeque<Option<u64>>,
+    /// Where the furthest final so far ended, since one can arrive before its turn ends.
+    #[cfg(any(target_os = "macos", test))]
+    final_end: Option<u64>,
+    /// Apple's latest result was interim words rather than a final. Apple
+    /// re-reports words a final left out, and interim results end where its
+    /// audio does rather than at the last word, so order says more than samples.
+    #[cfg(target_os = "macos")]
+    unfinalized: bool,
+    /// The interim text last shown, so repeats and clears are sent once.
+    interim: String,
+    interim_recognition_id: String,
+    /// Apple recognition segments can span multiple VAD admission holds.
+    #[cfg(any(target_os = "macos", test))]
+    segment_id: Option<String>,
 }
 
 impl PendingRecognitions {
     fn new() -> Self {
-        Self { count: 0 }
+        Self::default()
     }
 
     fn begin(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>) -> Result<(), ()> {
-        self.count += 1;
-        if self.count == 1 {
+        self.begin_bounded(events, usize::MAX)
+    }
+
+    fn begin_bounded(
+        &mut self,
+        events: &tokio_mpsc::Sender<VoiceInputEvent>,
+        limit: usize,
+    ) -> Result<(), ()> {
+        if self.count == limit {
+            self.ambiguous = true;
+        } else {
+            self.count += 1;
+            self.ends.push_back(None);
+        }
+        let was_blocking = self.blocking > 0;
+        self.blocking = self.blocking.saturating_add(1).min(limit);
+        if !was_blocking {
             events
                 .blocking_send(VoiceInputEvent::RecognitionPendingChanged(true))
                 .map_err(|_| ())?;
@@ -608,12 +765,108 @@ impl PendingRecognitions {
         Ok(())
     }
 
+    #[cfg(any(target_os = "macos", test))]
+    fn end_turn(
+        &mut self,
+        events: &tokio_mpsc::Sender<VoiceInputEvent>,
+        speech_end: u64,
+    ) -> Result<(), ()> {
+        if let Some(end @ None) = self.ends.back_mut() {
+            *end = Some(speech_end);
+        }
+        for _ in 0..self.final_end.map_or(0, |end| self.covered(end)) {
+            self.resolve(events)?;
+        }
+        Ok(())
+    }
+
+    /// Ended turns, oldest first, whose speech a final ending at `end` covers.
+    #[cfg(any(target_os = "macos", test))]
+    fn covered(&self, end: u64) -> usize {
+        let end = end.saturating_add(FINAL_COVERAGE_SLACK_SAMPLES);
+        self.ends
+            .iter()
+            .take_while(|turn| turn.is_some_and(|turn| turn <= end))
+            .count()
+    }
+
+    /// Apple has interim words no final has followed, so a transcript is still coming.
+    #[cfg(target_os = "macos")]
+    fn words_outstanding(&self) -> bool {
+        self.unfinalized
+    }
+
+    /// Stops waiting on interim words whose final never came, so later holds keep their timeout.
+    #[cfg(target_os = "macos")]
+    fn abandon_heard_words(&mut self) {
+        self.unfinalized = false;
+    }
+
+    /// Apple reports cumulative text until a final, independent of VAD pauses.
+    #[cfg(any(target_os = "macos", test))]
+    fn show_segment_interim(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>, text: &str) {
+        let id = self
+            .segment_id
+            .get_or_insert_with(|| uuid::Uuid::new_v4().to_string())
+            .clone();
+        self.emit_interim(events, text, id);
+    }
+
+    #[cfg(any(target_os = "macos", test))]
+    fn take_segment_recognition_id(&mut self) -> String {
+        self.segment_id
+            .take()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+    }
+
+    fn clear_interim(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>) {
+        self.emit_interim(events, "", String::new());
+    }
+
+    /// Interim text is best effort: a full event queue drops it rather than stall recognition.
+    fn emit_interim(
+        &mut self,
+        events: &tokio_mpsc::Sender<VoiceInputEvent>,
+        text: &str,
+        recognition_id: String,
+    ) {
+        if self.interim != text
+            || (!text.is_empty() && self.interim_recognition_id != recognition_id)
+        {
+            self.interim = text.to_string();
+            self.interim_recognition_id = recognition_id.clone();
+            let _ = events.try_send(VoiceInputEvent::InterimTranscript {
+                recognition_id,
+                text: self.interim.clone(),
+            });
+        }
+    }
+
+    fn result_is_current(&self) -> bool {
+        !self.ambiguous && self.count == self.blocking
+    }
+
     fn resolve(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>) -> Result<(), ()> {
-        if self.count == 0 {
+        if self.count == 0 || self.ambiguous {
             return Ok(());
         }
+        let current = self.result_is_current();
         self.count -= 1;
-        if self.count == 0 {
+        self.ends.pop_front();
+        if current {
+            self.blocking -= 1;
+            if self.blocking == 0 {
+                events
+                    .blocking_send(VoiceInputEvent::RecognitionPendingChanged(false))
+                    .map_err(|_| ())?;
+            }
+        }
+        Ok(())
+    }
+
+    fn release_hold(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>) -> Result<(), ()> {
+        if self.blocking > 0 {
+            self.blocking = 0;
             events
                 .blocking_send(VoiceInputEvent::RecognitionPendingChanged(false))
                 .map_err(|_| ())?;
@@ -622,12 +875,9 @@ impl PendingRecognitions {
     }
 
     fn reset(&mut self, events: &tokio_mpsc::Sender<VoiceInputEvent>) -> Result<(), ()> {
-        if self.count > 0 {
-            self.count = 0;
-            events
-                .blocking_send(VoiceInputEvent::RecognitionPendingChanged(false))
-                .map_err(|_| ())?;
-        }
+        self.release_hold(events)?;
+        self.clear_interim(events);
+        *self = Self::new();
         Ok(())
     }
 }
@@ -676,6 +926,7 @@ fn clamp_vad_frame(samples: &[f32]) -> Vec<f32> {
 
 fn send_final(
     events: &tokio_mpsc::Sender<VoiceInputEvent>,
+    recognition_id: String,
     text: String,
     storage_deadline: Option<Instant>,
 ) -> Result<(), ()> {
@@ -687,6 +938,7 @@ fn send_final(
     };
     events
         .blocking_send(VoiceInputEvent::FinalTranscript {
+            recognition_id,
             text,
             storage_receipt: receipt,
         })
@@ -1151,8 +1403,7 @@ fn parakeet_coordinator(
             while leftover_16k.len() >= VAD_FRAME_SAMPLES {
                 let frame: Vec<f32> = leftover_16k.drain(..VAD_FRAME_SAMPLES).collect();
                 let clamped = clamp_vad_frame(&frame);
-                let threshold = controls.vad_threshold(speech_vad_threshold);
-                if vad.predict_f32(&clamped) > threshold {
+                if vad.predict_f32(&clamped) > speech_vad_threshold {
                     silence_frames = 0;
                     speech.extend_from_slice(&frame);
                     if !in_speech {
@@ -1278,20 +1529,27 @@ fn complete_parakeet_recognition(
     storage_deadline: Option<Instant>,
 ) {
     if !text.is_empty() {
-        let _ = send_final(events, text, storage_deadline);
+        let _ = send_final(
+            events,
+            uuid::Uuid::new_v4().to_string(),
+            text,
+            storage_deadline,
+        );
     }
     let _ = pending.resolve(events);
 }
 
 #[cfg(target_os = "macos")]
-fn new_mac_recognizer() -> Result<
+fn new_mac_recognizer(
+    hints: &[String],
+) -> Result<
     (
         crate::mac_speech::MacSpeechRecognizer,
         tokio_mpsc::UnboundedReceiver<crate::mac_speech::MacSpeechRecognitionEvent>,
     ),
     String,
 > {
-    crate::mac_speech::MacSpeechRecognizer::new()
+    crate::mac_speech::MacSpeechRecognizer::with_hints(hints)
 }
 
 #[cfg(target_os = "macos")]
@@ -1306,15 +1564,30 @@ fn forward_mac_events(
 ) -> Result<(), ()> {
     while let Ok(event) = recognition_events.try_recv() {
         match event {
-            crate::mac_speech::MacSpeechRecognitionEvent::Final(text) => {
+            crate::mac_speech::MacSpeechRecognitionEvent::Final(text, end) => {
                 let text = text.trim().to_string();
+                let recognition_id = pending.take_segment_recognition_id();
                 if !text.is_empty() {
-                    send_final(events, text, storage_deadline)?;
+                    send_final(events, recognition_id, text, storage_deadline)?;
                 }
-                pending.resolve(events)?;
-                if pending.count == 0 {
+                // One final can span several turns split by pauses, and one turn
+                // can produce several finals, so a final with an end resolves
+                // exactly the turns it covers. Without one it resolves the oldest.
+                pending.unfinalized = false;
+                pending.final_end = pending.final_end.max(end);
+                for _ in 0..end.map_or(1, |end| pending.covered(end)) {
+                    pending.resolve(events)?;
+                }
+                if pending.blocking == 0 {
                     *settle_deadline = None;
                 }
+                if !pending.words_outstanding() {
+                    pending.clear_interim(events);
+                }
+            }
+            crate::mac_speech::MacSpeechRecognitionEvent::Heard(_, text) => {
+                pending.unfinalized = true;
+                pending.show_segment_interim(events, &text);
             }
             crate::mac_speech::MacSpeechRecognitionEvent::Finished => {
                 if storage_deadline.is_none() {
@@ -1348,7 +1621,7 @@ fn begin_mac_turn(
     events: &tokio_mpsc::Sender<VoiceInputEvent>,
     settle_deadline: &mut Option<Instant>,
 ) -> Result<(), ()> {
-    pending.begin(events)?;
+    pending.begin_bounded(events, MAX_PENDING_RECOGNITIONS)?;
     *settle_deadline = None;
     Ok(())
 }
@@ -1358,9 +1631,10 @@ fn end_mac_turn(
     pending: &PendingRecognitions,
     settle_deadline: &mut Option<Instant>,
     now: Instant,
+    timeout: Duration,
 ) {
-    if pending.count > 0 {
-        *settle_deadline = Some(now + MAC_LIVE_NO_RESULT_TIMEOUT);
+    if pending.blocking > 0 {
+        *settle_deadline = Some(now + timeout);
     }
 }
 
@@ -1370,7 +1644,10 @@ fn mac_settle_expired(
     settle_deadline: Option<Instant>,
     now: Instant,
 ) -> bool {
-    pending.count > 0 && settle_deadline.is_some_and(|deadline| now >= deadline)
+    pending.blocking > 0
+        && settle_deadline.is_some_and(|deadline| {
+            now >= deadline && (!pending.words_outstanding() || now >= deadline + HEARD_WORDS_GRACE)
+        })
 }
 
 #[cfg(target_os = "macos")]
@@ -1383,10 +1660,11 @@ fn mac_speech_worker(
     shutdown_mute_epoch: Arc<AtomicU64>,
     controls: VoiceInputControls,
     speech_vad_threshold: f32,
+    hints: Vec<String>,
 ) {
     use rubato::{Fft, FixedSync, Resampler};
 
-    let (mut recognizer, mut recognition_events) = match new_mac_recognizer() {
+    let (mut recognizer, mut recognition_events) = match new_mac_recognizer(&hints) {
         Ok(session) => session,
         Err(error) => {
             let _ = events.blocking_send(VoiceInputEvent::Failed(error));
@@ -1413,6 +1691,8 @@ fn mac_speech_worker(
     let mut pending = PendingRecognitions::new();
     let mut settle_deadline = None;
     let mut received_audio = false;
+    // Samples pushed to the current recognizer, the timeline its finals report.
+    let mut recognized = 0_u64;
     if events.blocking_send(VoiceInputEvent::Ready).is_err() {
         return;
     }
@@ -1430,27 +1710,14 @@ fn mac_speech_worker(
             return;
         }
         if mac_settle_expired(&pending, settle_deadline, Instant::now()) {
-            // SpeechTranscriber has no per-utterance no-result callback. End
-            // this recognizer generation at the bounded idle deadline so its
-            // suppressed late callbacks cannot resolve a later generation.
-            recognizer.cancel();
-            let _ = pending.reset(&events);
-            settle_deadline = None;
-            input_48k.clear();
-            leftover_16k.clear();
-            silence_frames = 0;
-            vad = earshot::Detector::new(earshot::DefaultPredictor::new());
-            match new_mac_recognizer() {
-                Ok((next, next_events)) => {
-                    recognizer = next;
-                    recognition_events = next_events;
-                    received_audio = false;
-                }
-                Err(error) => {
-                    let _ = events.blocking_send(VoiceInputEvent::Failed(error));
-                    return;
-                }
+            // Release admission only. Keep native recognition and all its queued
+            // events/audio alive so late finals still reach the conversation.
+            if pending.release_hold(&events).is_err() {
+                return;
             }
+            pending.abandon_heard_words();
+            pending.clear_interim(&events);
+            settle_deadline = None;
         }
         let frame = match frames.recv_timeout(Duration::from_millis(50)) {
             Ok(frame) => Some(frame),
@@ -1473,11 +1740,12 @@ fn mac_speech_worker(
             if shutting_down {
                 break;
             }
-            match new_mac_recognizer() {
+            match new_mac_recognizer(&hints) {
                 Ok((next, next_events)) => {
                     recognizer = next;
                     recognition_events = next_events;
                     received_audio = false;
+                    recognized = 0;
                 }
                 Err(error) => {
                     let _ = events.blocking_send(VoiceInputEvent::Failed(error));
@@ -1501,6 +1769,7 @@ fn mac_speech_worker(
             return;
         }
         received_audio = true;
+        recognized += frame.frame.samples().len() as u64;
 
         input_48k.extend_from_slice(frame.frame.samples());
         while input_48k.len() >= chunk_in {
@@ -1509,7 +1778,7 @@ fn mac_speech_worker(
             while leftover_16k.len() >= VAD_FRAME_SAMPLES {
                 let frame: Vec<f32> = leftover_16k.drain(..VAD_FRAME_SAMPLES).collect();
                 let clamped = clamp_vad_frame(&frame);
-                if vad.predict_f32(&clamped) > controls.vad_threshold(speech_vad_threshold) {
+                if vad.predict_f32(&clamped) > speech_vad_threshold {
                     silence_frames = 0;
                     if !in_speech {
                         in_speech = true;
@@ -1523,7 +1792,25 @@ fn mac_speech_worker(
                     if silence_frames >= SILENCE_FLUSH_FRAMES {
                         silence_frames = 0;
                         in_speech = false;
-                        end_mac_turn(&pending, &mut settle_deadline, Instant::now());
+                        // Pushed audio runs slightly ahead of the detector, which
+                        // only delays coverage.
+                        if pending
+                            .end_turn(
+                                &events,
+                                recognized.saturating_sub(
+                                    (SILENCE_FLUSH_FRAMES * VAD_FRAME_SAMPLES * 3) as u64,
+                                ),
+                            )
+                            .is_err()
+                        {
+                            return;
+                        }
+                        end_mac_turn(
+                            &pending,
+                            &mut settle_deadline,
+                            Instant::now(),
+                            MAC_PENDING_UTTERANCE_TIMEOUT,
+                        );
                         let _ = events.blocking_send(VoiceInputEvent::SpeakingChanged(false));
                     }
                 }
@@ -1706,7 +1993,12 @@ fn deliver_openai_turns(
             .then_some(final_storage_deadline)
             .flatten();
         if !text.is_empty() {
-            let _ = send_final(events, text, storage_deadline);
+            let _ = send_final(
+                events,
+                uuid::Uuid::new_v4().to_string(),
+                text,
+                storage_deadline,
+            );
         }
         let _ = pending.resolve(events);
     }
@@ -1940,7 +2232,7 @@ fn openai_worker(
             let mut should_commit = false;
             while vad_16k.len() >= VAD_FRAME_SAMPLES {
                 let frame: Vec<f32> = vad_16k.drain(..VAD_FRAME_SAMPLES).collect();
-                if vad.predict_f32(&frame) > controls.vad_threshold(speech_vad_threshold) {
+                if vad.predict_f32(&frame) > speech_vad_threshold {
                     silence_frames = 0;
                     if !in_speech {
                         in_speech = true;
@@ -2069,8 +2361,168 @@ fn openai_worker(
 mod tests {
     use super::*;
 
+    #[test]
+    fn cue_auto_policy_uses_selected_speaker_route() {
+        let controls = VoiceInputControls::default();
+        let guard = controls
+            .begin_cue_activity(InputDuringTtsPolicy::Auto, Some("Test Speakers"))
+            .unwrap();
+        assert!(controls.is_input_suppressed());
+        assert_eq!(controls.mute_epoch(), 0);
+        drop(guard);
+        assert!(!controls.is_input_suppressed());
+    }
+
+    #[test]
+    fn cue_suppression_preserves_recognition_epoch_and_composes_with_host_mute() {
+        let controls = VoiceInputControls::default();
+        let epoch = controls.mute_epoch();
+        let first = controls
+            .begin_cue_activity(InputDuringTtsPolicy::SuppressInput, None)
+            .unwrap();
+        let second = controls
+            .begin_cue_activity(InputDuringTtsPolicy::SuppressInput, None)
+            .unwrap();
+        assert!(controls.is_input_suppressed());
+        assert!(!controls.is_muted());
+        assert_eq!(controls.mute_epoch(), epoch);
+        drop(first);
+        assert!(controls.is_input_suppressed());
+        drop(second);
+        assert!(!controls.is_input_suppressed());
+        assert_eq!(controls.mute_epoch(), epoch);
+        let allow = controls
+            .begin_cue_activity(InputDuringTtsPolicy::AllowBargeIn, None)
+            .unwrap();
+        assert!(!controls.is_input_suppressed());
+        controls.set_host_muted(true);
+        drop(allow);
+        assert!(controls.is_input_suppressed());
+    }
+
+    #[test]
+    fn default_output_is_classified_by_its_name() {
+        for name in ["USB Speakers", "Bluetooth SPEAKER", "Altavoces externos"] {
+            assert!(
+                route_uses_speakers(None, || Some(name.into()), || false),
+                "{name}"
+            );
+        }
+        for name in ["AirPods Pro", "USB Headphones"] {
+            assert!(!route_uses_speakers(None, || Some(name.into()), || false));
+        }
+        assert!(!route_uses_speakers(None, || None, || false));
+        assert!(route_uses_speakers(
+            None,
+            || Some("MacBook".into()),
+            || true
+        ));
+        let named = |default: fn() -> Option<String>| {
+            route_uses_speakers(Some("AirPods"), default, || false)
+        };
+        assert!(!named(|| Some("USB Speakers".into())));
+    }
+
     fn silence_frame() -> VoiceInputFrame {
         VoiceInputFrame::try_from_samples(&[0.0; INPUT_FRAME_SAMPLES]).unwrap()
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "changes the default output; requires SwitchAudioSource and BlackHole 2ch"]
+    fn native_auto_mute_follows_default_output_during_speech() {
+        fn output(args: &[&str]) -> String {
+            let result = std::process::Command::new("SwitchAudioSource")
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            String::from_utf8(result.stdout).unwrap().trim().to_owned()
+        }
+        struct RestoreOutput(String);
+        impl Drop for RestoreOutput {
+            fn drop(&mut self) {
+                let _ = std::process::Command::new("SwitchAudioSource")
+                    .args(["-s", &self.0, "-t", "output"])
+                    .output();
+            }
+        }
+        let _restore = RestoreOutput(output(&["-c", "-t", "output"]));
+        let devices = output(&["-a", "-t", "output"]);
+        assert!(devices.contains("MacBook Pro Speakers") && devices.contains("BlackHole 2ch"));
+        let controls = VoiceInputControls::default();
+        let _activity = controls
+            .begin_assistant_activity(InputDuringTtsPolicy::Auto)
+            .unwrap();
+        for (device, muted) in [
+            ("MacBook Pro Speakers", true),
+            ("BlackHole 2ch", false),
+            ("MacBook Pro Speakers", true),
+        ] {
+            output(&["-s", device, "-t", "output"]);
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while controls.is_muted() != muted && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(controls.is_muted(), muted, "Auto did not follow {device}");
+        }
+    }
+
+    #[test]
+    fn auto_policy_follows_routes_without_overriding_explicit_choices() {
+        for (speakers, expected) in [
+            (true, InputDuringTtsPolicy::SuppressInput),
+            (false, InputDuringTtsPolicy::AllowBargeIn),
+        ] {
+            assert_eq!(
+                InputDuringTtsPolicy::Auto.resolve_for_speakers(speakers),
+                expected
+            );
+            for explicit in [
+                InputDuringTtsPolicy::SuppressInput,
+                InputDuringTtsPolicy::AllowBargeIn,
+            ] {
+                assert_eq!(explicit.resolve_for_speakers(speakers), explicit);
+            }
+        }
+    }
+
+    #[test]
+    fn auto_route_changes_advance_mute_epochs_and_preserve_host_mute() {
+        let controls = VoiceInputControls::default();
+        let activity = controls
+            .begin_assistant_activity(InputDuringTtsPolicy::Auto)
+            .unwrap();
+        // Hold the transition lock to inject route changes deterministically,
+        // excluding the native route monitor for the duration of the test.
+        let mut transition = controls.shared.transition.lock().unwrap();
+        transition.auto_suppressed = false;
+        controls.publish_effective_mute(&transition);
+        let epoch = controls.mute_epoch();
+        assert!(!controls.is_muted());
+        transition.auto_suppressed = true;
+        controls.publish_effective_mute(&transition);
+        assert!(controls.is_muted());
+        assert_eq!(controls.mute_epoch(), epoch + 1);
+        transition.auto_suppressed = false;
+        controls.publish_effective_mute(&transition);
+        assert!(!controls.is_muted());
+        assert_eq!(controls.mute_epoch(), epoch + 2);
+        transition.host_muted = true;
+        controls.publish_effective_mute(&transition);
+        transition.auto_suppressed = true;
+        controls.publish_effective_mute(&transition);
+        transition.auto_suppressed = false;
+        controls.publish_effective_mute(&transition);
+        assert!(controls.is_muted());
+        assert_eq!(controls.mute_epoch(), epoch + 3);
+        drop(transition);
+        drop(activity);
+        assert!(controls.is_muted());
     }
 
     #[test]
@@ -2105,7 +2557,7 @@ mod tests {
         let controls = VoiceInputControls::default();
         controls.set_host_muted(true);
         let assistant = controls
-            .begin_assistant_activity(0.65, InputDuringTtsPolicy::SuppressInput)
+            .begin_assistant_activity(InputDuringTtsPolicy::SuppressInput)
             .unwrap();
         controls.set_host_muted(false);
         assert!(controls.is_muted());
@@ -2115,7 +2567,7 @@ mod tests {
         assert_eq!(controls.mute_epoch(), 2);
 
         let assistant = controls
-            .begin_assistant_activity(0.65, InputDuringTtsPolicy::SuppressInput)
+            .begin_assistant_activity(InputDuringTtsPolicy::SuppressInput)
             .unwrap();
         controls.set_host_muted(true);
         drop(assistant);
@@ -2130,18 +2582,15 @@ mod tests {
     fn overlapping_assistant_guards_snapshot_policy_and_drop_out_of_order() {
         let controls = VoiceInputControls::default();
         let suppress = controls
-            .begin_assistant_activity(0.8, InputDuringTtsPolicy::SuppressInput)
+            .begin_assistant_activity(InputDuringTtsPolicy::SuppressInput)
             .unwrap();
         let allow = controls
-            .begin_assistant_activity(0.65, InputDuringTtsPolicy::AllowBargeIn)
+            .begin_assistant_activity(InputDuringTtsPolicy::AllowBargeIn)
             .unwrap();
         assert!(controls.is_muted());
-        assert_eq!(controls.vad_threshold(0.5), 0.65);
         drop(suppress);
         assert!(!controls.is_muted());
-        assert_eq!(controls.vad_threshold(0.5), 0.65);
         drop(allow);
-        assert_eq!(controls.vad_threshold(0.5), 0.5);
     }
 
     #[test]
@@ -2159,74 +2608,6 @@ mod tests {
         assert_eq!(applied.policy, InputDuringTtsPolicy::SuppressInput);
         assert_eq!(stale, applied);
         assert_eq!(slot.snapshot().unwrap(), applied);
-    }
-
-    #[test]
-    fn assistant_activity_guards_restore_the_newest_overlapping_threshold() {
-        let controls = VoiceInputControls::default();
-        let first = controls
-            .begin_assistant_activity(0.8, InputDuringTtsPolicy::AllowBargeIn)
-            .unwrap();
-        assert_eq!(controls.vad_threshold(0.5), 0.8);
-        let second = controls
-            .begin_assistant_activity(0.65, InputDuringTtsPolicy::AllowBargeIn)
-            .unwrap();
-        assert_eq!(controls.vad_threshold(0.5), 0.65);
-        drop(first);
-        assert_eq!(controls.vad_threshold(0.5), 0.65);
-        drop(second);
-        assert_eq!(controls.vad_threshold(0.5), 0.5);
-    }
-
-    #[test]
-    fn concurrent_assistant_starts_publish_the_highest_generation_threshold() {
-        let controls = VoiceInputControls::default();
-        let barrier = Arc::new(std::sync::Barrier::new(8));
-        let (result_tx, result_rx) = mpsc::channel();
-        let threads = (1..=8)
-            .map(|index| {
-                let controls = controls.clone();
-                let barrier = Arc::clone(&barrier);
-                let result_tx = result_tx.clone();
-                thread::spawn(move || {
-                    let threshold = index as f32 / 10.0;
-                    barrier.wait();
-                    let guard = controls
-                        .begin_assistant_activity(threshold, InputDuringTtsPolicy::AllowBargeIn)
-                        .unwrap();
-                    result_tx
-                        .send((guard.generation, threshold, guard))
-                        .unwrap();
-                })
-            })
-            .collect::<Vec<_>>();
-        drop(result_tx);
-        let guards = result_rx.into_iter().collect::<Vec<_>>();
-        for thread in threads {
-            thread.join().unwrap();
-        }
-        let expected = guards
-            .iter()
-            .max_by_key(|(generation, _, _)| *generation)
-            .map(|(_, threshold, _)| *threshold)
-            .unwrap();
-
-        assert_eq!(controls.vad_threshold(0.5), expected);
-        drop(guards);
-        assert_eq!(controls.vad_threshold(0.5), 0.5);
-    }
-
-    #[test]
-    fn cloned_controls_carry_assistant_activity_across_runtime_replacement() {
-        let controls = VoiceInputControls::default();
-        let replacement_controls = controls.clone();
-        let guard = controls
-            .begin_assistant_activity(0.8, InputDuringTtsPolicy::AllowBargeIn)
-            .unwrap();
-
-        assert_eq!(replacement_controls.vad_threshold(0.5), 0.8);
-        drop(guard);
-        assert_eq!(replacement_controls.vad_threshold(0.5), 0.5);
     }
 
     #[test]
@@ -2431,11 +2812,13 @@ mod tests {
                 VoiceInputEvent::FinalTranscript {
                     text,
                     storage_receipt,
+                    ..
                 } => {
                     assert_eq!(text, "fixture final");
                     storage_receipt.stored();
                     observed.push("final");
                 }
+                VoiceInputEvent::InterimTranscript { .. } => {}
                 VoiceInputEvent::Failed(error) => panic!("unexpected input failure: {error}"),
             }
         }
@@ -2774,12 +3157,88 @@ mod tests {
     }
 
     #[test]
+    fn apple_cumulative_segment_survives_pause_turns() {
+        let (events, mut receiver) = tokio_mpsc::channel(16);
+        let mut pending = PendingRecognitions::new();
+        pending.begin(&events).unwrap();
+        pending.show_segment_interim(&events, "first words");
+        pending.end_turn(&events, 100).unwrap();
+        pending.begin(&events).unwrap();
+        pending.show_segment_interim(&events, "first words and more");
+        let mut ids = Vec::new();
+        while let Ok(event) = receiver.try_recv() {
+            if let VoiceInputEvent::InterimTranscript { recognition_id, .. } = event {
+                ids.push(recognition_id);
+            }
+        }
+        assert_eq!(ids[0], ids[1], "one Apple segment across two VAD turns");
+        pending.release_hold(&events).unwrap();
+        assert_eq!(pending.take_segment_recognition_id(), ids[1]);
+        pending.show_segment_interim(&events, "next segment");
+        assert_ne!(pending.take_segment_recognition_id(), ids[1]);
+    }
+
+    #[test]
+    fn final_only_backends_generate_distinct_recognition_ids() {
+        for openai in [false, true] {
+            let (events, mut receiver) = tokio_mpsc::channel(16);
+            let mut pending = PendingRecognitions::new();
+            pending.begin(&events).unwrap();
+            pending.release_hold(&events).unwrap();
+            pending.begin(&events).unwrap();
+            for text in ["old final", "new final"] {
+                if openai {
+                    let mut committed = VecDeque::from([OpenAiCommittedTurn {
+                        item_id: text.into(),
+                        mute_epoch: 0,
+                        settle_deadline: Instant::now(),
+                    }]);
+                    let mut completed = HashMap::from([(text.into(), text.into())]);
+                    deliver_openai_turns(
+                        &mut committed,
+                        &mut completed,
+                        &events,
+                        &mut pending,
+                        None,
+                        None,
+                    );
+                } else {
+                    complete_parakeet_recognition(text.into(), &events, &mut pending, None);
+                }
+                assert_eq!(pending.blocking, usize::from(text == "old final"));
+            }
+            let mut finals = Vec::new();
+            while let Ok(event) = receiver.try_recv() {
+                if let VoiceInputEvent::FinalTranscript {
+                    recognition_id,
+                    text,
+                    ..
+                } = event
+                {
+                    assert_eq!(
+                        uuid::Uuid::parse_str(&recognition_id)
+                            .unwrap()
+                            .get_version_num(),
+                        4
+                    );
+                    finals.push((recognition_id, text));
+                }
+            }
+            assert_eq!(finals.len(), 2);
+            assert_ne!(finals[0].0, finals[1].0);
+            assert_eq!(finals[0].1, "old final");
+            assert_eq!(finals[1].1, "new final");
+        }
+    }
+
+    #[test]
     fn final_storage_receipt_unblocks_the_bounded_sender() {
         let (events, mut receiver) = tokio_mpsc::channel(1);
         let (done_tx, done_rx) = mpsc::sync_channel(0);
         let sender = thread::spawn(move || {
             send_final(
                 &events,
+                "recognition".into(),
                 "stored words".to_string(),
                 Some(Instant::now() + Duration::from_secs(1)),
             )
@@ -2789,6 +3248,7 @@ mod tests {
         let VoiceInputEvent::FinalTranscript {
             text,
             storage_receipt,
+            ..
         } = receiver.blocking_recv().expect("final event")
         else {
             panic!("expected final transcript")
@@ -2809,6 +3269,7 @@ mod tests {
         let sender = thread::spawn(move || {
             send_final(
                 &events,
+                "recognition".into(),
                 "unstored words".to_string(),
                 Some(Instant::now() + Duration::from_secs(1)),
             )
@@ -2836,8 +3297,20 @@ mod tests {
         let (done_tx, done_rx) = mpsc::sync_channel(0);
         let deadline = Instant::now() + Duration::from_millis(100);
         let sender = thread::spawn(move || {
-            send_final(&events, "first".to_string(), Some(deadline)).unwrap();
-            send_final(&events, "second".to_string(), Some(deadline)).unwrap();
+            send_final(
+                &events,
+                "first-id".into(),
+                "first".to_string(),
+                Some(deadline),
+            )
+            .unwrap();
+            send_final(
+                &events,
+                "second-id".into(),
+                "second".to_string(),
+                Some(deadline),
+            )
+            .unwrap();
             done_tx.send(()).unwrap();
         });
         let VoiceInputEvent::FinalTranscript {
@@ -2887,6 +3360,34 @@ mod tests {
     }
 
     #[test]
+    fn cue_pause_drops_only_new_pcm_and_keeps_recognition_epoch() {
+        let (frame_tx, frame_rx) = mpsc::sync_channel(INPUT_QUEUE_FRAMES);
+        let controls = VoiceInputControls::default();
+        let runtime = VoiceInputRuntime {
+            frame_tx,
+            controls: controls.clone(),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            discard_on_shutdown: Arc::new(AtomicBool::new(false)),
+            shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
+            worker: None,
+        };
+        runtime.try_push_frame(silence_frame()).unwrap();
+        let before = frame_rx.try_recv().unwrap();
+        let cue = controls
+            .begin_cue_activity(InputDuringTtsPolicy::SuppressInput, None)
+            .unwrap();
+        runtime.try_push_frame(silence_frame()).unwrap();
+        assert!(frame_rx.try_recv().is_err());
+        assert_eq!(before.mute_epoch, controls.mute_epoch());
+        drop(cue);
+        runtime.try_push_frame(silence_frame()).unwrap();
+        let after = frame_rx.try_recv().unwrap();
+        assert_eq!(before.mute_epoch, after.mute_epoch);
+        runtime.signal_shutdown(false);
+        assert!(!runtime.discard_on_shutdown.load(Ordering::Acquire));
+    }
+
+    #[test]
     fn input_during_tts_policy_controls_frame_admission() {
         let (frame_tx, frame_rx) = mpsc::sync_channel(INPUT_QUEUE_FRAMES);
         let controls = VoiceInputControls::default();
@@ -2900,14 +3401,14 @@ mod tests {
         };
 
         let suppress = controls
-            .begin_assistant_activity(0.65, InputDuringTtsPolicy::SuppressInput)
+            .begin_assistant_activity(InputDuringTtsPolicy::SuppressInput)
             .unwrap();
         runtime.try_push_frame(silence_frame()).unwrap();
         assert!(frame_rx.try_recv().is_err());
         drop(suppress);
 
         let allow = controls
-            .begin_assistant_activity(0.65, InputDuringTtsPolicy::AllowBargeIn)
+            .begin_assistant_activity(InputDuringTtsPolicy::AllowBargeIn)
             .unwrap();
         runtime.try_push_frame(silence_frame()).unwrap();
         assert!(frame_rx.try_recv().is_ok());
@@ -3112,7 +3613,11 @@ mod tests {
             );
         }
         let (event_tx, mut event_rx) = tokio_mpsc::channel(4);
-        let mut pending = PendingRecognitions { count: 2 };
+        let mut pending = PendingRecognitions {
+            count: 2,
+            blocking: 2,
+            ..Default::default()
+        };
 
         deliver_openai_turns(
             &mut committed,
@@ -3289,7 +3794,11 @@ mod tests {
             &mut completed,
         );
         let (event_tx, mut event_rx) = tokio_mpsc::channel(2);
-        let mut pending = PendingRecognitions { count: 1 };
+        let mut pending = PendingRecognitions {
+            count: 1,
+            blocking: 1,
+            ..Default::default()
+        };
 
         deliver_openai_turns(
             &mut committed,
@@ -3412,12 +3921,17 @@ mod tests {
             recognition_tx
                 .send(crate::mac_speech::MacSpeechRecognitionEvent::Final(
                     text.to_string(),
+                    None,
                 ))
                 .unwrap();
         }
         let (event_tx, mut event_rx) = tokio_mpsc::channel(4);
-        let mut pending = PendingRecognitions { count: 2 };
-        let mut settle_deadline = Some(Instant::now() + MAC_LIVE_NO_RESULT_TIMEOUT);
+        let mut pending = PendingRecognitions {
+            count: 2,
+            blocking: 2,
+            ..Default::default()
+        };
+        let mut settle_deadline = Some(Instant::now() + MAC_PENDING_UTTERANCE_TIMEOUT);
 
         forward_mac_events(
             &mut recognition_rx,
@@ -3440,56 +3954,304 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn mac_new_speech_cancels_then_refreshes_the_settle_deadline() {
-        let (event_tx, _event_rx) = tokio_mpsc::channel(4);
+        let (event_tx, mut event_rx) = tokio_mpsc::channel(8);
         let mut pending = PendingRecognitions::new();
         let mut deadline = None;
         let now = Instant::now();
         begin_mac_turn(&mut pending, &event_tx, &mut deadline).unwrap();
-        end_mac_turn(&pending, &mut deadline, now);
+        end_mac_turn(&pending, &mut deadline, now, MAC_PENDING_UTTERANCE_TIMEOUT);
         let first_deadline = deadline.expect("first deadline");
 
         begin_mac_turn(&mut pending, &event_tx, &mut deadline).unwrap();
         assert!(deadline.is_none());
-        end_mac_turn(&pending, &mut deadline, now + Duration::from_secs(1));
+        end_mac_turn(
+            &pending,
+            &mut deadline,
+            now + Duration::from_secs(1),
+            MAC_PENDING_UTTERANCE_TIMEOUT,
+        );
 
         assert!(deadline.is_some_and(|deadline| deadline > first_deadline));
+        assert_eq!(pending.count, 2);
+        assert_eq!(pending.blocking, 2);
+        assert!(matches!(
+            event_rx.try_recv(),
+            Ok(VoiceInputEvent::RecognitionPendingChanged(true))
+        ));
+        assert!(event_rx.try_recv().is_err());
+        let (native_tx, mut native_rx) = tokio_mpsc::unbounded_channel();
+        native_tx
+            .send(crate::mac_speech::MacSpeechRecognitionEvent::Final(
+                "continued speech".into(),
+                None,
+            ))
+            .unwrap();
+        forward_mac_events(&mut native_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
+        assert_eq!(pending.blocking, 1);
+        assert!(deadline.is_some());
     }
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn mac_timeout_reset_drops_the_old_event_channel_before_new_pending() {
-        let (event_tx, _event_rx) = tokio_mpsc::channel(8);
+    fn mac_final_releases_every_turn_its_audio_covers() {
+        let (event_tx, mut event_rx) = tokio_mpsc::channel(16);
+        let mut pending = PendingRecognitions::new();
+        let mut deadline = None;
+        let timeout = Duration::from_secs(5);
+        // One sentence split by two pauses, then a turn the final does not reach.
+        for end in [48_000, 96_000, 200_000] {
+            begin_mac_turn(&mut pending, &event_tx, &mut deadline).unwrap();
+            pending.end_turn(&event_tx, end).unwrap();
+            end_mac_turn(&pending, &mut deadline, Instant::now(), timeout);
+        }
+        let (native_tx, mut native_rx) = tokio_mpsc::unbounded_channel();
+        let final_at =
+            |end| crate::mac_speech::MacSpeechRecognitionEvent::Final("words".into(), end);
+        native_tx.send(final_at(Some(90_000))).unwrap();
+        forward_mac_events(&mut native_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
+        assert_eq!((pending.count, pending.blocking), (1, 1));
+        assert!(deadline.is_some());
+
+        native_tx.send(final_at(Some(190_000))).unwrap();
+        forward_mac_events(&mut native_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
+        assert_eq!((pending.count, pending.blocking), (0, 0));
+        assert!(deadline.is_none());
+        let holds: Vec<_> = std::iter::from_fn(|| event_rx.try_recv().ok())
+            .filter_map(|event| match event {
+                VoiceInputEvent::RecognitionPendingChanged(active) => Some(active),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(holds, [true, false]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_earlier_phrase_final_keeps_the_hold_for_the_rest_of_the_turn() {
+        let (event_tx, _event_rx) = tokio_mpsc::channel(16);
+        let mut pending = PendingRecognitions::new();
+        let mut deadline = None;
+        let (native_tx, mut native_rx) = tokio_mpsc::unbounded_channel();
+        let final_at =
+            |end| crate::mac_speech::MacSpeechRecognitionEvent::Final("words".into(), Some(end));
+        begin_mac_turn(&mut pending, &event_tx, &mut deadline).unwrap();
+        // Apple finalizes the first phrase while the user is still speaking.
+        native_tx.send(final_at(50_000)).unwrap();
+        forward_mac_events(&mut native_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
+        pending.end_turn(&event_tx, 200_000).unwrap();
+        end_mac_turn(
+            &pending,
+            &mut deadline,
+            Instant::now(),
+            Duration::from_secs(5),
+        );
+        native_tx.send(final_at(120_000)).unwrap();
+        forward_mac_events(&mut native_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
+        assert_eq!(pending.blocking, 1);
+        assert!(deadline.is_some());
+
+        native_tx.send(final_at(195_000)).unwrap();
+        forward_mac_events(&mut native_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
+        assert_eq!(pending.blocking, 0);
+        assert!(deadline.is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_final_before_its_turn_ends_releases_the_hold_when_it_does() {
+        let (event_tx, _event_rx) = tokio_mpsc::channel(16);
+        let mut pending = PendingRecognitions::new();
+        let mut deadline = None;
+        let (native_tx, mut native_rx) = tokio_mpsc::unbounded_channel();
+        begin_mac_turn(&mut pending, &event_tx, &mut deadline).unwrap();
+        // Apple finalizes the turn before the detector has heard enough silence to end it.
+        native_tx
+            .send(crate::mac_speech::MacSpeechRecognitionEvent::Final(
+                "words".into(),
+                Some(100_000),
+            ))
+            .unwrap();
+        forward_mac_events(&mut native_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
+        assert_eq!(pending.blocking, 1);
+        pending.end_turn(&event_tx, 105_000).unwrap();
+        end_mac_turn(
+            &pending,
+            &mut deadline,
+            Instant::now(),
+            Duration::from_secs(5),
+        );
+        assert_eq!((pending.count, pending.blocking), (0, 0));
+        assert!(deadline.is_none());
+    }
+
+    #[test]
+    fn finals_cover_only_ended_turns_in_order() {
+        let (event_tx, _event_rx) = tokio_mpsc::channel(4);
+        let mut pending = PendingRecognitions::new();
+        pending.begin(&event_tx).unwrap();
+        pending.end_turn(&event_tx, 10_000).unwrap();
+        pending.begin(&event_tx).unwrap();
+        assert_eq!(pending.covered(1_000_000), 1);
+        pending.end_turn(&event_tx, 50_000).unwrap();
+        pending.end_turn(&event_tx, 1).unwrap();
+        assert_eq!(pending.covered(50_000 - FINAL_COVERAGE_SLACK_SAMPLES), 2);
+        assert_eq!(pending.covered(49_999 - FINAL_COVERAGE_SLACK_SAMPLES), 1);
+        pending.resolve(&event_tx).unwrap();
+        assert_eq!(pending.covered(40_000), 1);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_hold_waits_past_its_timeout_for_words_apple_has_heard() {
+        let (event_tx, _event_rx) = tokio_mpsc::channel(16);
+        let mut pending = PendingRecognitions::new();
+        let mut deadline = None;
+        let now = Instant::now();
+        let timeout = Duration::from_secs(5);
+        // Two sentences: the first final arrives, the second takes longer than the timeout.
+        for end in [100_000, 300_000] {
+            begin_mac_turn(&mut pending, &event_tx, &mut deadline).unwrap();
+            pending.end_turn(&event_tx, end).unwrap();
+            end_mac_turn(&pending, &mut deadline, now, timeout);
+        }
+        let (native_tx, mut native_rx) = tokio_mpsc::unbounded_channel();
+        use crate::mac_speech::MacSpeechRecognitionEvent::{Final, Heard};
+        // Apple re-reports the second sentence's interim words after the first final.
+        native_tx.send(Heard(310_000, "you should".into())).unwrap();
+        native_tx
+            .send(Final("first".into(), Some(110_000)))
+            .unwrap();
+        native_tx.send(Heard(310_000, "you should".into())).unwrap();
+        forward_mac_events(&mut native_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
+        assert_eq!(pending.blocking, 1);
+        assert!(!mac_settle_expired(&pending, deadline, now + timeout));
+        assert!(mac_settle_expired(
+            &pending,
+            deadline,
+            now + timeout + HEARD_WORDS_GRACE
+        ));
+        pending.release_hold(&event_tx).unwrap();
+        pending.abandon_heard_words();
+        assert!(!pending.words_outstanding());
+        // The late final still resolves its turn.
+        native_tx
+            .send(Final("second".into(), Some(310_000)))
+            .unwrap();
+        forward_mac_events(&mut native_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
+        assert_eq!(pending.count, 0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_hold_keeps_its_timeout_once_a_final_follows_the_heard_words() {
+        let (event_tx, _event_rx) = tokio_mpsc::channel(16);
+        let mut pending = PendingRecognitions::new();
+        let mut deadline = None;
+        let now = Instant::now();
+        let timeout = Duration::from_secs(5);
+        // Words, then noise after them that Apple never transcribes. Interim
+        // results end where Apple's audio did, past the final's last word.
+        for end in [100_000, 300_000] {
+            begin_mac_turn(&mut pending, &event_tx, &mut deadline).unwrap();
+            pending.end_turn(&event_tx, end).unwrap();
+            end_mac_turn(&pending, &mut deadline, now, timeout);
+        }
+        let (native_tx, mut native_rx) = tokio_mpsc::unbounded_channel();
+        use crate::mac_speech::MacSpeechRecognitionEvent::{Final, Heard};
+        native_tx.send(Heard(130_000, "words".into())).unwrap();
+        native_tx
+            .send(Final("words".into(), Some(110_000)))
+            .unwrap();
+        forward_mac_events(&mut native_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
+        assert_eq!(pending.blocking, 1);
+        assert!(mac_settle_expired(&pending, deadline, now + timeout));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_hold_expiry_keeps_late_finals_without_clearing_a_new_hold() {
+        let (event_tx, mut event_rx) = tokio_mpsc::channel(16);
         let mut pending = PendingRecognitions::new();
         let mut deadline = None;
         let now = Instant::now();
         begin_mac_turn(&mut pending, &event_tx, &mut deadline).unwrap();
-        end_mac_turn(&pending, &mut deadline, now);
+        end_mac_turn(&pending, &mut deadline, now, Duration::from_millis(750));
+        assert!(!mac_settle_expired(
+            &pending,
+            deadline,
+            now + Duration::from_millis(749)
+        ));
         assert!(mac_settle_expired(
             &pending,
             deadline,
-            now + MAC_LIVE_NO_RESULT_TIMEOUT
+            now + Duration::from_millis(750)
         ));
-
-        let (old_tx, old_rx) = tokio_mpsc::unbounded_channel();
-        drop(old_rx);
-        pending.reset(&event_tx).unwrap();
-        deadline = None;
-        begin_mac_turn(&mut pending, &event_tx, &mut deadline).unwrap();
-        assert!(old_tx
-            .send(crate::mac_speech::MacSpeechRecognitionEvent::Final(
-                "late old final".to_string(),
-            ))
-            .is_err());
+        pending.release_hold(&event_tx).unwrap();
         assert_eq!(pending.count, 1);
-
-        let (new_tx, mut new_rx) = tokio_mpsc::unbounded_channel();
-        new_tx
+        assert_eq!(pending.blocking, 0);
+        begin_mac_turn(&mut pending, &event_tx, &mut deadline).unwrap();
+        assert!(deadline.is_none());
+        let (native_tx, mut native_rx) = tokio_mpsc::unbounded_channel();
+        native_tx
             .send(crate::mac_speech::MacSpeechRecognitionEvent::Final(
-                "current final".to_string(),
+                "late old final".into(),
+                None,
             ))
             .unwrap();
-        forward_mac_events(&mut new_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
+        forward_mac_events(&mut native_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
+        assert_eq!(pending.count, 1);
+        assert_eq!(pending.blocking, 1);
+        let mut saw_text = false;
+        let mut holds = Vec::new();
+        while let Ok(event) = event_rx.try_recv() {
+            match event {
+                VoiceInputEvent::FinalTranscript { text, .. } => {
+                    assert_eq!(text, "late old final");
+                    saw_text = true;
+                }
+                VoiceInputEvent::RecognitionPendingChanged(active) => holds.push(active),
+                _ => {}
+            }
+        }
+        assert!(saw_text);
+        assert_eq!(holds, [true, false, true]);
+        native_tx
+            .send(crate::mac_speech::MacSpeechRecognitionEvent::Final(
+                "new final".into(),
+                None,
+            ))
+            .unwrap();
+        forward_mac_events(&mut native_rx, &event_tx, &mut pending, &mut deadline, None).unwrap();
+        assert_eq!(pending.blocking, 0);
+    }
+
+    #[test]
+    fn pending_credit_saturation_stays_conservative_until_reset() {
+        let (tx, mut rx) = tokio_mpsc::channel(8);
+        let mut pending = PendingRecognitions::new();
+        for _ in 0..MAX_PENDING_RECOGNITIONS + 10 {
+            pending
+                .begin_bounded(&tx, MAX_PENDING_RECOGNITIONS)
+                .unwrap();
+        }
+        assert_eq!(pending.count, MAX_PENDING_RECOGNITIONS);
+        assert!(pending.ambiguous);
+        pending.release_hold(&tx).unwrap();
+        pending
+            .begin_bounded(&tx, MAX_PENDING_RECOGNITIONS)
+            .unwrap();
+        for _ in 0..MAX_PENDING_RECOGNITIONS + 10 {
+            assert!(!pending.result_is_current());
+            pending.resolve(&tx).unwrap();
+        }
+        assert_eq!(pending.blocking, 1);
+        pending.reset(&tx).unwrap();
         assert_eq!(pending.count, 0);
+        assert!(!pending.ambiguous);
+        while rx.try_recv().is_ok() {}
+        pending.begin(&tx).unwrap();
+        pending.resolve(&tx).unwrap();
+        assert_eq!(pending.blocking, 0);
     }
 
     #[tokio::test]

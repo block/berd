@@ -1844,15 +1844,7 @@ function sanitizeVoiceSpeechFallback(message: Message): Message {
 }
 
 function isVoiceConversationUserTurn(message: Message): boolean {
-  return (
-    message.metadata?.origin === "voice_conversation" ||
-    (message.role === "user" &&
-      message.content.some(
-        (content) =>
-          content.type === "text" &&
-          content.text.trimStart().startsWith("[Voice transcript] "),
-      ))
-  );
+  return message.metadata?.origin === "voice_conversation";
 }
 
 function isVisibleTranscriptMessage(message: Message): boolean {

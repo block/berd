@@ -7,6 +7,7 @@ import {
   clearFakeRuntimeConfig,
   getRuntimeConfig,
   refreshRuntimeConfig,
+  refreshRuntimeConfigForNewChat,
   setFakeRuntimeConfig,
 } from "./runtimeConfig";
 
@@ -27,6 +28,7 @@ describe("runtime config api", () => {
     const result = {
       status: "ready",
       source: "fakeEndpoint",
+      autoRoutingRevision: "a".repeat(64),
       config: validConfig,
     };
     mockInvoke.mockResolvedValueOnce(result);
@@ -46,6 +48,28 @@ describe("runtime config api", () => {
 
     await expect(refreshRuntimeConfig()).resolves.toEqual(result);
     expect(mockInvoke).toHaveBeenCalledWith("refresh_runtime_config");
+  });
+
+  it("refreshes new-chat config through the bounded native resolver", async () => {
+    const result = {
+      status: "ready",
+      source: "bundledFile",
+      config: validConfig,
+    };
+    mockInvoke.mockResolvedValueOnce(result);
+    await expect(refreshRuntimeConfigForNewChat()).resolves.toEqual(result);
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "refresh_runtime_config_for_new_chat",
+    );
+  });
+
+  it("rejects malformed new-chat source results before applying them", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      status: "ready",
+      source: "bundledFile",
+      config: {},
+    });
+    await expect(refreshRuntimeConfigForNewChat()).rejects.toThrow();
   });
 
   it("validates fake config before persisting it", async () => {

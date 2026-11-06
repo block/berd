@@ -95,6 +95,9 @@ Result:
   bridgeTimeoutMs: 900_000,
   execute: async (args, ctx): Promise<CreateSessionResult> => {
     const [
+      { refreshRuntimeConfigForNewChat },
+      { getAutoModeExecutionTarget },
+      { useRuntimeConfigStore },
       { acceptFirstSend },
       { useChatSessionStore },
       { resolveSessionCwd },
@@ -111,6 +114,9 @@ Result:
       { findProjectOrThrow },
       { findReadyHarnessOrThrow, gooseModelOptions, harnessModelOptions },
     ] = await Promise.all([
+      import("@/shared/runtime-config/newChatRuntimeConfig"),
+      import("@/features/chat/lib/autoModelSelection"),
+      import("@/shared/runtime-config/runtimeConfigStore"),
       import("@/features/chat/lib/firstWorkspaceSend"),
       import("@/features/chat/stores/chatSessionStore"),
       import("@/features/projects/lib/sessionCwdSelection"),
@@ -122,6 +128,12 @@ Result:
       import("../runtime/projects"),
       import("../runtime/providers"),
     ]);
+    await refreshRuntimeConfigForNewChat();
+    const autoModeId =
+      args.harness_id || args.model_id || args.agent_id
+        ? null
+        : useRuntimeConfigStore.getState().config.goose.autoRouting
+            ?.defaultModeId;
     const harnessId = args.harness_id ?? GOOSE_PROVIDER_ID;
     // The validation legs are independent I/O; overlap them.
     const [project, , models, persona] = await Promise.all([
@@ -164,7 +176,8 @@ Result:
           modelId: args.model_id,
           modelName: args.model_id,
         })
-      : normalizeSessionExecutionTarget({ harnessId });
+      : (getAutoModeExecutionTarget(autoModeId) ??
+        normalizeSessionExecutionTarget({ harnessId }));
     const requiresStartupName = Boolean(
       project && projectRequiresStartupWorkspaceName(project),
     );
@@ -208,6 +221,7 @@ Result:
         workingDir,
         projectId: args.project_id,
         executionTarget,
+        autoModeId,
         personaId: persona?.id,
         workspaceAttachments: workspacePlan?.workspaceAttachments,
         deferProviderSetup: false,

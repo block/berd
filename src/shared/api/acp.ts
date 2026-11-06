@@ -380,6 +380,15 @@ function resolveGooseSessionSelection(
   return requestedSelection;
 }
 
+/** Preserve the already-prepared CWD when changing only a turn's model. */
+export function acpGetPreparedWorkingDir(sessionId: string): string {
+  const workingDir = sessionRegistry.getPreparedWorkingDir(sessionId);
+  if (!workingDir?.trim()) {
+    throw new Error("Session working directory has not been prepared.");
+  }
+  return workingDir;
+}
+
 /** Prepare or warm an ACP session ahead of the first prompt. */
 export async function acpPrepareSession(
   sessionId: string,

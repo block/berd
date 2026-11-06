@@ -1,11 +1,13 @@
 use crate::services::distro_bundle::{DistroBundleState, TelemetryChannel};
+use berd_call::telemetry_store::{
+    self as store, load_or_create_installation_id, persist_telemetry_consent,
+};
 use reqwest::{
     header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE},
     redirect::Policy,
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    fs,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -37,7 +39,7 @@ const TELEMETRY_BOOTSTRAP_PATH: &str = "/v1/bootstrap";
 // lost because the renderer's `BatchLogRecordProcessor` drops it.
 // `/v1/bootstrap` does not read it.
 const TELEMETRY_SCHEMA_VERSION_HEADER: &str = "x-berd-schema-version";
-const TELEMETRY_SCHEMA_VERSION: &str = "berd-otlp-logs-v3";
+const TELEMETRY_SCHEMA_VERSION: &str = "berd-otlp-logs-v4";
 
 // Telemetry-gateway host allowlist. The renderer's OTLP endpoint is
 // build-injected from VITE_OTLP_LOGS_ENDPOINT (see vite.config.ts) and must
@@ -60,20 +62,13 @@ const ALLOWED_OTEL_LOGS_HOSTS: [&str; 3] = [
     "otlp.invalid.goose-internal.example",
 ];
 
-// File under the app-data dir holding the persistent anonymous installation
-// id. It keys bootstrap-token issuance (and rate limiting) on the gateway and
-// is stamped by the renderer as the `installation.id` resource attribute.
-const INSTALLATION_ID_FILE_NAME: &str = "telemetry-installation-id";
-
-// File under the app-data dir holding the user's telemetry consent. It lives
-// here — not in the renderer's localStorage — precisely so this module can
+// The installation id and consent files live in the app-data dir, through
+// `berd_call::telemetry_store`, which the standalone berd-call CLI shares. The
+// consent lives there, not in the renderer's localStorage, so this module can
 // enforce it natively: "disabled" must mean no bytes to the gateway at all,
-// including `/v1/bootstrap` (which carries the installation id), and only the
-// Rust host can guarantee that regardless of renderer timing. A missing file
+// including `/v1/bootstrap` (which carries the installation id). A missing file
 // is DISABLED — telemetry is opt-in, and every failure mode reads as "no
 // consent".
-const TELEMETRY_SETTINGS_FILE_NAME: &str = "telemetry-settings.json";
-const TELEMETRY_SETTINGS_SCHEMA_VERSION: u32 = 1;
 
 // Refresh the cached upload token this long before its reported expiry, so an
 // export near the boundary does not race server-side expiry.
@@ -128,9 +123,14 @@ impl TelemetryAuthState {
 
     /// The effective telemetry consent: forced ON in enforced builds,
     /// otherwise the persisted user setting. Fail-closed — a missing,
-    /// unreadable, or unrecognized settings file means disabled.
+    /// unreadable, or unrecognized settings file means disabled. The file is
+    /// re-read on every check because `berd-call telemetry disable` writes it
+    /// from outside this process, and that revocation must stop this app's
+    /// exports too, including ones already past the entry gate.
     fn consent_granted(&self) -> bool {
-        telemetry_enforced_by_build() || self.consent_enabled.load(Ordering::Relaxed)
+        telemetry_enforced_by_build()
+            || (self.consent_enabled.load(Ordering::Relaxed)
+                && store::load_telemetry_consent(&self.app_data_dir).unwrap_or(false))
     }
 
     /// Snapshot of the revocation counter, taken as an export begins and
@@ -257,16 +257,6 @@ impl TelemetryAuthState {
 /// renderer flag would hide the consent toggle and then reject every export.
 fn telemetry_enforced_by_build() -> bool {
     cfg!(feature = "block-telemetry-enforced")
-}
-
-/// On-disk shape of the consent file. The schema version is pinned exactly:
-/// a file from a future schema fails closed (reads as disabled) rather than
-/// guessing at consent semantics this build does not know.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PersistedTelemetrySettings {
-    schema_version: u32,
-    enabled: bool,
 }
 
 /// Wire shape of `get_telemetry_settings` / `set_telemetry_enabled`: the
@@ -506,95 +496,14 @@ async fn bootstrap_upload_token(
     })
 }
 
-/// Loads the persisted installation id, generating and persisting a fresh UUID
-/// when the file is missing or holds a value the gateway would reject.
-fn load_or_create_installation_id(app_data_dir: &Path) -> Result<String, String> {
-    let path = app_data_dir.join(INSTALLATION_ID_FILE_NAME);
-    if let Ok(existing) = fs::read_to_string(&path) {
-        let existing = existing.trim();
-        if is_valid_installation_id(existing) {
-            return Ok(existing.to_string());
-        }
-    }
-
-    let id = Uuid::new_v4().to_string();
-    fs::create_dir_all(app_data_dir).map_err(|error| {
-        format!(
-            "Failed to create app data dir {}: {error}",
-            app_data_dir.display()
-        )
-    })?;
-    // Write-then-rename so a crash can never leave a torn id on disk.
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, &id).map_err(|error| format!("Failed to write {}: {error}", tmp.display()))?;
-    fs::rename(&tmp, &path)
-        .map_err(|error| format!("Failed to persist {}: {error}", path.display()))?;
-    Ok(id)
-}
-
 /// Loads the persisted telemetry consent. Fail-closed: a missing file (the
 /// normal first-run state — telemetry is opt-in), an unreadable file, invalid
 /// JSON, or an unknown schema version all read as disabled.
 fn load_telemetry_consent(app_data_dir: &Path) -> bool {
-    let path = app_data_dir.join(TELEMETRY_SETTINGS_FILE_NAME);
-    let Ok(raw) = fs::read_to_string(&path) else {
-        return false;
-    };
-    match serde_json::from_str::<PersistedTelemetrySettings>(&raw) {
-        Ok(settings) if settings.schema_version == TELEMETRY_SETTINGS_SCHEMA_VERSION => {
-            settings.enabled
-        }
-        Ok(settings) => {
-            log::warn!(
-                "Ignoring telemetry settings with unknown schema version {}",
-                settings.schema_version
-            );
-            false
-        }
-        Err(error) => {
-            log::warn!("Ignoring unreadable telemetry settings: {error}");
-            false
-        }
-    }
-}
-
-/// Persists the telemetry consent with a write-then-rename, mirroring the
-/// installation-id write, so a crash can never leave a torn settings file —
-/// and a torn file would read as disabled anyway. The rename replaces an
-/// existing destination on Windows too — `std::fs::rename`'s documented
-/// contract, via `MoveFileExW`/`FileRenameInfoEx` with replace-if-exists,
-/// unlike C's `rename` — so re-toggling consent needs no remove-first step.
-fn persist_telemetry_consent(app_data_dir: &Path, enabled: bool) -> Result<(), String> {
-    let path = app_data_dir.join(TELEMETRY_SETTINGS_FILE_NAME);
-    fs::create_dir_all(app_data_dir).map_err(|error| {
-        format!(
-            "Failed to create app data dir {}: {error}",
-            app_data_dir.display()
-        )
-    })?;
-    let body = serde_json::to_string_pretty(&PersistedTelemetrySettings {
-        schema_version: TELEMETRY_SETTINGS_SCHEMA_VERSION,
-        enabled,
+    store::load_telemetry_consent(app_data_dir).unwrap_or_else(|error| {
+        log::warn!("Ignoring telemetry settings: {error}");
+        false
     })
-    .map_err(|error| format!("Failed to serialize telemetry settings: {error}"))?;
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, body).map_err(|error| format!("Failed to write {}: {error}", tmp.display()))?;
-    fs::rename(&tmp, &path)
-        .map_err(|error| format!("Failed to persist {}: {error}", path.display()))?;
-    Ok(())
-}
-
-/// Mirrors the gateway's accepted installation-id shape
-/// (`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`), so a corrupted file regenerates
-/// instead of bootstrapping with a value the gateway will reject.
-fn is_valid_installation_id(value: &str) -> bool {
-    let mut chars = value.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    (8..=128).contains(&value.len())
-        && first.is_ascii_alphanumeric()
-        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
 }
 
 /// Validates that an OTLP logs endpoint is HTTPS, targets an allowlisted
@@ -671,6 +580,8 @@ fn client() -> &'static reqwest::Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use berd_call::telemetry_store::{is_valid_installation_id, INSTALLATION_ID_FILE_NAME};
+    use std::fs;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex as StdMutex,
@@ -1199,7 +1110,7 @@ mod tests {
             // comma-joined, which it rejects like a missing one.
             assert_eq!(
                 request.header_values(TELEMETRY_SCHEMA_VERSION_HEADER),
-                vec!["berd-otlp-logs-v3"]
+                vec!["berd-otlp-logs-v4"]
             );
             assert_eq!(request.header("content-type"), Some("application/json"));
             // The gateway hands the raw request bytes to its JSON parser, so a
@@ -1304,6 +1215,10 @@ mod tests {
     #[cfg(not(feature = "block-telemetry-enforced"))]
     mod consent {
         use super::*;
+        use berd_call::telemetry_store::{
+            PersistedTelemetrySettings, TELEMETRY_SETTINGS_FILE_NAME,
+            TELEMETRY_SETTINGS_SCHEMA_VERSION,
+        };
         use tokio::sync::Semaphore;
 
         #[test]
@@ -1478,6 +1393,67 @@ mod tests {
             // the batch itself never leaves.
             assert_eq!(gateway.requests_to("/v1/bootstrap").len(), 1);
             assert!(gateway.requests_to("/v1/logs").is_empty());
+        }
+
+        /// `berd-call telemetry disable` revokes consent by rewriting the shared
+        /// file from another process, so a running app must honor that at its
+        /// next boundary as well as at the entry gate.
+        #[tokio::test]
+        async fn an_external_revocation_stops_a_running_app_from_uploading() {
+            let release = Arc::new(Semaphore::new(0));
+            let gate = release.clone();
+            let gateway = TestGateway::spawn_async(move |request| {
+                let gate = gate.clone();
+                async move {
+                    if request.path == "/v1/bootstrap" {
+                        let _permit = gate.acquire().await;
+                        bootstrap_response("token-1")
+                    } else {
+                        ScriptedResponse {
+                            status: 200,
+                            body: "{}".to_string(),
+                        }
+                    }
+                }
+            })
+            .await;
+            let (dir, auth) = consented_auth_state();
+            let auth = Arc::new(auth);
+            let logs_url = gateway.url("/v1/logs");
+            let bootstrap_url = gateway.url("/v1/bootstrap");
+            let epoch = auth.revocation_epoch();
+
+            let export = tokio::spawn({
+                let auth = auth.clone();
+                async move {
+                    export_with_bootstrap_auth(
+                        client(),
+                        &auth,
+                        epoch,
+                        &logs_url,
+                        &bootstrap_url,
+                        EXPORT_BODY.to_string(),
+                    )
+                    .await
+                }
+            });
+
+            wait_for_request(&gateway, "/v1/bootstrap").await;
+            persist_telemetry_consent(dir.path(), false).unwrap();
+            release.add_permits(1);
+
+            let error = export.await.unwrap().unwrap_err();
+            assert!(error.contains("revoked"), "unexpected error: {error}");
+            assert!(gateway.requests_to("/v1/logs").is_empty());
+            assert!(!auth.settings().enabled);
+            let error = export_otel_logs_for_state(
+                &auth,
+                "https://otlp.invalid.goose-internal.example/v1/logs",
+                EXPORT_BODY.to_string(),
+            )
+            .await
+            .unwrap_err();
+            assert!(error.contains("disabled"), "unexpected error: {error}");
         }
 
         /// The 401 path is the widest post-gate window: it would otherwise

@@ -1,11 +1,11 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashSet;
 use std::io::{self, BufWriter, Read, Write};
 use std::os::fd::RawFd;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc::{self, Receiver, SyncSender},
-    Arc,
+    Arc, Mutex,
 };
 use std::thread;
 use std::time::{Duration, Instant};
@@ -16,50 +16,26 @@ use berd_call::benchmark::{
     SttBenchmarkTarget, TtsBenchmarkMode, TtsBenchmarkPromptManifest, TtsBenchmarkTarget,
 };
 use berd_call::endpoint_url::{is_allowed_endpoint_url, EndpointProtocol};
-use berd_call::expert_spokesperson::{ExpertDirectiveOutcome, LiveSideEvent};
 use berd_call::input::{
-    AssistantActivityGuard, InputDuringTtsSlot, InputDuringTtsSnapshot, VoiceInputConfig,
-    VoiceInputControls, VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame,
+    AssistantActivityGuard, InputDuringTtsPolicy, InputDuringTtsSlot, InputDuringTtsSnapshot,
+    VoiceInputConfig, VoiceInputControls, VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame,
     VoiceInputRuntime, INPUT_FRAME_SAMPLES,
 };
-use berd_call::openai_realtime_protocol::accepted_handoff_tool_output;
-use berd_call::openai_realtime_protocol::expert_handoff_message;
-use berd_call::openai_realtime_protocol::expert_transcript_message;
-use berd_call::openai_realtime_protocol::RealtimeExpertMessage;
-use berd_call::openai_realtime_protocol::RealtimeExpertMessageMode;
-use berd_call::openai_realtime_protocol::RealtimeExpertSpokespersonSession;
-use berd_call::openai_realtime_protocol::RealtimeHandoffReminder;
-use berd_call::openai_realtime_protocol::RealtimeTranscriptSpeaker;
-use berd_call::openai_spokesperson::{
-    OpenAiSpokespersonConfig, OpenAiSpokespersonRuntime, SpokespersonCommand, SpokespersonEvent,
-    SpokespersonResponseStatus,
-};
 use berd_call::protocol::{
-    CancelOutcome, DismissHandoffsOutcome, ExpertTurnOutcome, InputDuringTtsOutcome,
-    NotAdmittedReason, OutputReadyOutcome, SessionMessage, SessionRequest, TtsSettingsOutcome,
-    VoiceSessionSnapshot,
+    CancelOutcome, InputDuringTtsOutcome, NotAdmittedReason, OutputReadyOutcome, SessionMessage,
+    SessionRequest, TtsSettingsOutcome, VoiceSessionSnapshot,
 };
-use berd_call::realtime_audio_delivery::RealtimeAudioDelivery;
-use berd_call::realtime_host_lifecycle::RealtimeSessionLossAction;
-use berd_call::realtime_host_lifecycle::{
-    spokesperson_renew_after, RealtimeHostLifecycle, RealtimeHostWork,
-};
-use berd_call::realtime_pipe::RealtimePipeExchange;
 use berd_call::session::{PrepareOutcome, PrepareRequest, SessionCore};
-use berd_call::spokesperson_voice_update::{
-    validate_voice_update_settings, VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePurpose,
-    VoiceUpdateQueue, VoiceUpdateRequest, VoiceUpdateTransaction,
-};
-use berd_call::StatusSoundRuntime;
+use berd_call::ManagedStatusSoundRuntime;
 use berd_call::{
     estimated_spoken_through_utf8,
     local_assets::{
         LocalAssetLockError, LocalAssetRoots, LocalInstallError, LocalInstallErrorKind,
         LocalInstallPhase, LocalInstallProgress,
     },
-    ConfiguredTtsSlot, DeliveryProgress, PcmAudioOutput, TtsBackend, TtsConfiguration,
-    TtsConfigurationLease, TtsConfigurationRejection, TtsConfigurationRejectionKind, TtsPcmSpec,
-    TtsSettings, WavSynthesisErrorKind,
+    ConfiguredTtsSlot, DeliveryProgress, TtsBackend, TtsConfiguration, TtsConfigurationLease,
+    TtsConfigurationRejection, TtsConfigurationRejectionKind, TtsSettings, WavSynthesisErrorKind,
+    DEFAULT_VAD_THRESHOLD,
 };
 use serde::Serialize;
 
@@ -67,6 +43,8 @@ mod cli_help;
 #[cfg(target_os = "macos")]
 mod codex;
 mod host_control;
+#[cfg(unix)]
+mod host_lifetime;
 #[cfg(target_os = "macos")]
 mod host_session;
 #[cfg(target_os = "macos")]
@@ -78,10 +56,11 @@ mod session_audio;
 mod session_framing;
 #[cfg(target_os = "macos")]
 mod system_input_mute;
+mod telemetry;
 
 use session_audio::{
     AudioHostAck, AudioOutputControlRequest, AudioPipeTransport, RemotePcmAudioOutput,
-    AUDIO_CANCELLED,
+    AUDIO_CANCELLED, AUDIO_HOST_FAILED,
 };
 
 use session_framing::{
@@ -93,14 +72,9 @@ const MAX_LINE_BYTES: usize = 1024 * 1024;
 const PCM_FRAME_BYTES: usize = INPUT_FRAME_SAMPLES * std::mem::size_of::<f32>();
 const MAX_FINAL_TEXT_BYTES: usize = 64 * 1024;
 const MAX_SPEAK_TEXT_BYTES: usize = 16 * 1024;
-const MAX_HANDOFF_IDS: usize = 64;
-const MAX_HANDOFF_ID_BYTES: usize = 512;
-const MAX_HANDOFF_REASON_BYTES: usize = 4 * 1024;
 const INPUT_QUEUE_CAPACITY: usize = 32;
 const INPUT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const SHUTDOWN_PLAYBACK_TIMEOUT: Duration = Duration::from_secs(3);
-const MAX_PENDING_SPOKESPERSON_FRAMES: usize = 24_000 * 15;
-const MAX_PENDING_SPOKESPERSON_RESPONSES: usize = 8;
 const TTS_CONFIGURATION_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_OPENAI_BENCHMARK_REQUESTS: usize = 20;
 const MAX_OPENAI_BENCHMARK_TEXT_BYTES: usize = 64 * 1024;
@@ -110,6 +84,14 @@ enum Input {
     Request(SessionRequest),
     Pcm(Box<VoiceInputFrame>),
     Invalid(String),
+    /// A speech request whose voice is now built.
+    VoiceBuilt(SessionRequest),
+    /// A speech request's voice could not be built.
+    VoiceUnavailable {
+        id: u64,
+        voice: String,
+        message: String,
+    },
     Eof,
 }
 
@@ -187,22 +169,14 @@ enum SttBackendConfig {
 struct SessionConfig {
     tts: TtsBackendConfig,
     stt: SttBackendConfig,
-    mode: SessionMode,
+    stt_hints: Vec<String>,
     endpoints: SessionEndpointOverrides,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 struct SessionEndpointOverrides {
-    realtime: Option<String>,
     tts: Option<String>,
     stt: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum SessionMode {
-    #[default]
-    Conventional,
-    ExpertSpokesperson,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -258,7 +232,7 @@ impl SynthesisConfig {
 
 const MANAGEMENT_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 enum ManagementCommand {
     ListVoices {
         language: Option<String>,
@@ -266,6 +240,10 @@ enum ManagementCommand {
     DownloadVoice {
         identity: berd_call::siri::SiriVoiceIdentity,
         availability_wait: berd_call::siri::SiriDownloadAvailabilityWait,
+    },
+    PreviewVoice {
+        identity: berd_call::siri::SiriVoiceIdentity,
+        rate: f32,
     },
     MacosModelStatus,
     InstallMacosModel,
@@ -290,6 +268,7 @@ impl ManagementCommand {
         match self {
             Self::ListVoices { .. } => "voices.list",
             Self::DownloadVoice { .. } => "voices.download",
+            Self::PreviewVoice { .. } => "voices.preview",
             Self::MacosModelStatus => "models.macos.status",
             Self::InstallMacosModel => "models.macos.install",
             Self::PocketModelStatus { .. } => "models.pocket.status",
@@ -398,6 +377,16 @@ struct VoiceDownloadResult {
     voice: berd_call::siri::SiriVoiceIdentity,
     installed: bool,
     availability_wait_seconds: u64,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VoicePreviewResult {
+    backend: &'static str,
+    voice: berd_call::siri::SiriVoiceIdentity,
+    rate: f32,
+    source: berd_call::siri::SiriPreviewSource,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -510,12 +499,12 @@ fn main() {
         Some("start") => {
             let options = parse_or_exit(parse_saved_start_args(&args), &args);
             #[cfg(target_os = "macos")]
-            if let Err(error) = host_session::route_stop_signals(options.port) {
+            if let Err(error) = host_lifetime::route_stop_signals(options.port) {
                 eprintln!("berd-call start failed: {error}");
                 std::process::exit(1);
             }
             #[cfg(target_os = "macos")]
-            let _update_guard = guard_and_request_bundled_app_update();
+            let _update_guard = guard_and_request_update();
             #[cfg(target_os = "macos")]
             if let Err(error) = menu_bar::run(options) {
                 eprintln!("berd-call start failed: {error}");
@@ -532,7 +521,8 @@ fn main() {
             let SpeakOptions {
                 port,
                 acknowledgement,
-                resolved_handoff_ids,
+                voice,
+                language,
                 text,
             } = parse_or_exit(parse_speak_control_args(&args), &args);
             let response = host_control::request(
@@ -540,7 +530,8 @@ fn main() {
                 host_control::ControlRequest::Speak {
                     text,
                     acknowledgement,
-                    resolved_handoff_ids,
+                    voice,
+                    language,
                 },
             )
             .unwrap_or_else(|error| operational_error("speak", error));
@@ -562,6 +553,12 @@ fn main() {
             print_pretty_json(&response)
                 .unwrap_or_else(|error| operational_error(operation, error));
         }
+        Some("telemetry") => {
+            let response = telemetry::command(&args[2..])
+                .unwrap_or_else(|error| operational_error("telemetry", error));
+            print_pretty_json(&response)
+                .unwrap_or_else(|error| operational_error("telemetry", error));
+        }
         Some("settings") => {
             let (port, request) = parse_or_exit(parse_host_settings_args(&args), &args);
             let response = host_control::request(port, request)
@@ -576,15 +573,15 @@ fn main() {
             print_pretty_json(&response).unwrap_or_else(|error| operational_error("stop", error));
         }
         Some("session") => {
+            // A host blocks its stop signals, and the session inherits that mask.
+            unsafe {
+                let mut signals = std::mem::zeroed::<libc::sigset_t>();
+                libc::sigemptyset(&mut signals);
+                libc::pthread_sigmask(libc::SIG_SETMASK, &signals, std::ptr::null_mut());
+            }
             let config = parse_or_exit(parse_args(&args), &args);
             let pcm_output_fd = parse_or_exit(parse_pcm_output_fd(&args), &args);
-            let result = match config.mode {
-                SessionMode::Conventional => run_session(config, pcm_output_fd),
-                SessionMode::ExpertSpokesperson => {
-                    run_expert_spokesperson_session(config, pcm_output_fd)
-                }
-            };
-            if let Err(error) = result {
+            if let Err(error) = run_session(config, pcm_output_fd) {
                 eprintln!("berd-call session failed: {error}");
                 std::process::exit(1);
             }
@@ -693,19 +690,54 @@ fn bundled_app_path(executable: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
-fn guard_and_request_bundled_app_update() -> Option<std::fs::File> {
-    let app_path = std::env::current_exe()
-        .ok()
-        .and_then(|executable| bundled_app_path(&executable))?;
+fn guard_and_request_update() -> Option<std::fs::File> {
+    use std::os::unix::process::CommandExt;
+    let executable = resolved_executable_path(&std::env::current_exe().ok()?);
     let guard = match berd_call::update_guard::hold_call() {
         Ok(guard) => guard,
         Err(error) => {
-            eprintln!("berd-call could not guard app updates during this call: {error}");
+            eprintln!("berd-call could not guard updates during this call: {error}");
             return None;
         }
     };
-    request_bundled_app_update(&app_path);
+    if let Some(app_path) = bundled_app_path(&executable) {
+        request_bundled_app_update(&app_path);
+    } else if std::env::var("BERD_CALL_AUTO_UPDATE").as_deref() != Ok("0") {
+        if let Some(helper) = standalone_update_helper(&executable) {
+            match std::process::Command::new("/bin/bash")
+                .arg(helper)
+                .process_group(0)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            {
+                Ok(mut child) => {
+                    std::thread::spawn(move || {
+                        let _ = child.wait();
+                    });
+                }
+                Err(error) => eprintln!("berd-call could not check standalone updates: {error}"),
+            }
+        }
+    }
     Some(guard)
+}
+
+// A managed standalone install has its helper and metadata beside the binary.
+// Every app bundle, including Buzz, keeps ownership of its own executable.
+#[cfg(any(target_os = "macos", test))]
+fn standalone_update_helper(executable: &Path) -> Option<PathBuf> {
+    if executable.file_name()?.to_str()? != "berd-call"
+        || executable
+            .ancestors()
+            .any(|path| path.extension().is_some_and(|ext| ext == "app"))
+    {
+        return None;
+    }
+    let root = executable.parent()?.join(".berd-call");
+    let helper = root.join("update");
+    (root.join("installed").is_file() && helper.is_file()).then_some(helper)
 }
 
 #[cfg(target_os = "macos")]
@@ -742,11 +774,10 @@ struct StartOptions {
     transcript: TranscriptDestination,
     menu_bar: bool,
     non_blocking: bool,
-    expert_spokesperson: bool,
     session_arguments: Vec<String>,
 }
 
-fn validate_session_arguments(arguments: &[String]) -> Result<bool, String> {
+fn validate_session_arguments(arguments: &[String]) -> Result<(), String> {
     if arguments
         .iter()
         .any(|argument| argument == "--pcm-output-fd")
@@ -756,7 +787,7 @@ fn validate_session_arguments(arguments: &[String]) -> Result<bool, String> {
     let mut validation = vec!["berd-call".to_string()];
     validation.extend(arguments.iter().cloned());
     match parse_args(&validation) {
-        Ok(config) => Ok(config.mode == SessionMode::ExpertSpokesperson),
+        Ok(_) => Ok(()),
         Err(ParseFailure::HelpRequested) => Err("session options must not request help".into()),
         Err(ParseFailure::Usage(message)) => Err(message),
     }
@@ -777,12 +808,12 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
                 if transcript != TranscriptDestination::None {
                     return Err("choose one of --stream or --codex for transcript delivery".into());
                 }
-                transcript = if flag == "--stream" {
-                    TranscriptDestination::Stdout
-                } else {
-                    TranscriptDestination::Codex
-                };
                 index += 1;
+                transcript = if flag == "--codex" {
+                    TranscriptDestination::Codex
+                } else {
+                    TranscriptDestination::Stdout
+                };
             }
             "--no-menu-bar" if menu_bar => {
                 menu_bar = false;
@@ -812,7 +843,7 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
             }
         }
     }
-    let expert_spokesperson = validate_session_arguments(&session_arguments)?;
+    validate_session_arguments(&session_arguments)?;
     if non_blocking && transcript == TranscriptDestination::None {
         return Err(
             "non-blocking speech requires --stream or --codex for interruption and failure events"
@@ -825,7 +856,6 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
         transcript,
         menu_bar,
         non_blocking,
-        expert_spokesperson,
         session_arguments,
     })
 }
@@ -841,7 +871,6 @@ fn parse_saved_start_args(args: &[String]) -> Result<StartOptions, ParseFailure>
 fn parse_saved_start_args_at(args: &[String], path: PathBuf) -> Result<StartOptions, ParseFailure> {
     let mut saved = saved_settings::load(&path)?;
     // Restore the accepted runtime rate through its own backend validation.
-    // Realtime and conventional synthesis may have different startup bounds.
     if saved.tts.is_some() {
         saved.arguments = saved
             .arguments
@@ -856,10 +885,10 @@ fn parse_saved_start_args_at(args: &[String], path: PathBuf) -> Result<StartOpti
         &args[2..],
     ));
     let mut options = parse_start_args(&merged)?;
-    // Explicit synthesis or mode choices use normal startup validation.
+    // Explicit synthesis choices use normal startup validation.
     if args
         .iter()
-        .any(|arg| matches!(arg.as_str(), "--tts-backend" | "--mode" | "--model-dir"))
+        .any(|arg| matches!(arg.as_str(), "--tts-backend" | "--model-dir"))
     {
         saved.tts = None;
     }
@@ -894,7 +923,8 @@ fn parse_saved_start_args_at(args: &[String], path: PathBuf) -> Result<StartOpti
 struct SpeakOptions {
     port: u16,
     acknowledgement: Option<u64>,
-    resolved_handoff_ids: Vec<String>,
+    voice: Option<String>,
+    language: Option<String>,
     text: String,
 }
 
@@ -902,7 +932,7 @@ fn parse_speak_control_args(args: &[String]) -> Result<SpeakOptions, ParseFailur
     let mut port = 5222_u16;
     let mut port_seen = false;
     let mut acknowledgement = None;
-    let mut resolved_handoff_ids = Vec::new();
+    let (mut voice, mut language) = (None, None);
     let mut text = None;
     let mut index = 2;
     while index < args.len() {
@@ -929,17 +959,21 @@ fn parse_speak_control_args(args: &[String]) -> Result<SpeakOptions, ParseFailur
                 index += 2;
             }
             "--re" => return Err("--re may be provided only once".into()),
-            "--resolves" => {
-                let value = args
-                    .get(index + 1)
-                    .filter(|value| !value.is_empty() && value.len() <= MAX_HANDOFF_ID_BYTES)
-                    .ok_or_else(|| {
-                        "--resolves requires a handoff ID up to 512 bytes".to_string()
-                    })?;
-                if resolved_handoff_ids.len() >= MAX_HANDOFF_IDS {
-                    return Err("--resolves may be provided at most 64 times".into());
+            flag @ ("--voice" | "--language") => {
+                let slot = if flag == "--voice" {
+                    &mut voice
+                } else {
+                    &mut language
+                };
+                if slot.is_some() {
+                    return Err(format!("{flag} may be provided only once").into());
                 }
-                resolved_handoff_ids.push(value.clone());
+                *slot = Some(
+                    args.get(index + 1)
+                        .filter(|value| !value.trim().is_empty())
+                        .ok_or_else(|| format!("{flag} requires a value"))?
+                        .clone(),
+                );
                 index += 2;
             }
             value if value.starts_with('-') => {
@@ -958,10 +992,14 @@ fn parse_speak_control_args(args: &[String]) -> Result<SpeakOptions, ParseFailur
     if text.len() > MAX_SPEAK_TEXT_BYTES {
         return Err("speak text is larger than 16 KiB".into());
     }
+    if language.is_some() && voice.is_none() {
+        return Err("--language requires --voice".into());
+    }
     Ok(SpeakOptions {
         port,
         acknowledgement,
-        resolved_handoff_ids,
+        voice,
+        language,
         text,
     })
 }
@@ -1017,11 +1055,33 @@ fn parse_host_settings_args(
             "--muted" => host_control::ControlRequest::Muted {
                 muted: parse_bool_setting(flag, args.get(index + 1))?,
             },
+            "--status-sounds" => host_control::ControlRequest::StatusSounds {
+                mode: Some(match args.get(index + 1).map(String::as_str) {
+                    Some("off") => berd_call::StatusSoundMode::Off,
+                    Some("working") => berd_call::StatusSoundMode::Working,
+                    Some("working-and-waiting") => berd_call::StatusSoundMode::WorkingAndWaiting,
+                    _ => {
+                        return Err(
+                            "--status-sounds requires off, working, or working-and-waiting".into(),
+                        )
+                    }
+                }),
+                status: None,
+            },
+            "--conversation-status" => host_control::ControlRequest::StatusSounds {
+                mode: None,
+                status: Some(match args.get(index + 1).map(String::as_str) {
+                    Some("working") => berd_call::ConversationStatus::Working,
+                    Some("waiting") => berd_call::ConversationStatus::Waiting,
+                    _ => return Err("--conversation-status requires working or waiting".into()),
+                }),
+            },
             "--input-during-tts" => host_control::ControlRequest::InputDuringTts {
                 policy: match args.get(index + 1).map(String::as_str) {
                     Some("allow") => berd_call::input::InputDuringTtsPolicy::AllowBargeIn,
                     Some("suppress") => berd_call::input::InputDuringTtsPolicy::SuppressInput,
-                    _ => return Err("--input-during-tts requires allow or suppress".into()),
+                    Some("auto") => InputDuringTtsPolicy::Auto,
+                    _ => return Err("--input-during-tts requires auto, allow or suppress".into()),
                 },
             },
             "--rate" => host_control::ControlRequest::Rate {
@@ -1070,7 +1130,7 @@ fn parse_host_settings_args(
 }
 
 const SETTINGS_CHOICE_ERROR: &str =
-    "provide exactly one of --non-blocking, --rate, --voice, --tts, --input-during-tts, --muted, or --restart";
+    "provide exactly one of --non-blocking, --rate, --voice, --tts, --input-during-tts, --muted, --status-sounds, --conversation-status, or --restart";
 
 fn parse_bool_setting(flag: &str, value: Option<&String>) -> Result<bool, String> {
     match value.map(String::as_str) {
@@ -1287,6 +1347,45 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, ParseFail
                 availability_wait,
             })
         }
+        (Some("voices"), Some("preview"), _) => {
+            let mut voice = None;
+            let mut language = None;
+            let mut rate = None;
+            let mut index = 3;
+            while index < args.len() {
+                let flag = args[index].as_str();
+                if is_help_flag(flag) {
+                    return Err(ParseFailure::HelpRequested);
+                }
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| format!("{flag} requires a value"))?;
+                match flag {
+                    "--voice" if voice.is_none() => voice = Some(value.clone()),
+                    "--language" if language.is_none() => language = Some(value.clone()),
+                    "--rate" if rate.is_none() => {
+                        let value = value
+                            .parse::<f32>()
+                            .map_err(|_| "--rate must be a number".to_string())?;
+                        if !value.is_finite() || !(0.5..=2.0).contains(&value) {
+                            return Err("--rate must be between 0.5 and 2.0".into());
+                        }
+                        rate = Some(value);
+                    }
+                    "--voice" | "--language" | "--rate" => {
+                        return Err(format!("{flag} may be provided only once").into())
+                    }
+                    _ => return Err(format!("unknown voices preview argument: {flag}").into()),
+                }
+                index += 2;
+            }
+            let voice = voice.ok_or_else(|| "--voice is required".to_string())?;
+            let language = language.ok_or_else(|| "--language is required".to_string())?;
+            Ok(ManagementCommand::PreviewVoice {
+                identity: berd_call::siri::SiriVoiceIdentity::new(voice, &language)?,
+                rate: rate.unwrap_or(1.0),
+            })
+        }
         (Some("models"), Some("macos"), Some("status" | "install"))
             if args.len() == 5 && args.get(4).is_some_and(|value| is_help_flag(value)) =>
         {
@@ -1334,7 +1433,7 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, ParseFail
                 roots: parse_local_model_roots(args)?,
             })
         }
-        (Some("voices"), _, _) => Err("expected voices list or voices download".into()),
+        (Some("voices"), _, _) => Err("expected voices list, download, or preview".into()),
         (Some("models"), _, _) => Err("expected a supported models command".into()),
         _ => Err("expected a management command".into()),
     }
@@ -1423,7 +1522,7 @@ fn pocket_voices_report() -> PocketVoicesResult {
 fn openai_voices_report() -> OpenAiVoicesResult {
     OpenAiVoicesResult {
         backend: "openai",
-        voices: berd_call::openai_realtime_protocol::OPENAI_REALTIME_VOICE_IDS,
+        voices: berd_call::openai::OPENAI_VOICE_IDS,
     }
 }
 
@@ -1793,6 +1892,31 @@ fn voice_download_failure(error: berd_call::siri::SiriVoiceDownloadError) -> Man
     }
 }
 
+/// Previews a voice, stopping playback and exiting on SIGINT or SIGTERM so a
+/// host can end a preview by signaling the process.
+#[cfg(target_os = "macos")]
+fn preview_voice_until_stopped(
+    identity: &berd_call::siri::SiriVoiceIdentity,
+    rate: f32,
+) -> Result<berd_call::siri::SiriPreviewSource, String> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static ACTIVE: AtomicBool = AtomicBool::new(true);
+    extern "C" fn stop(_: libc::c_int) {
+        ACTIVE.store(false, Ordering::SeqCst);
+    }
+    let handler = stop as extern "C" fn(libc::c_int) as libc::sighandler_t;
+    // SAFETY: The handler only stores to an atomic.
+    unsafe {
+        libc::signal(libc::SIGINT, handler);
+        libc::signal(libc::SIGTERM, handler);
+    }
+    let result = berd_call::siri::preview_voice(identity, rate, &ACTIVE);
+    if !ACTIVE.load(Ordering::SeqCst) {
+        std::process::exit(130);
+    }
+    result
+}
+
 fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFailure> {
     let operation = command.operation();
     match command {
@@ -1827,6 +1951,36 @@ fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFa
                 let identity = berd_call::siri::download_voice(&identity, availability_wait)
                     .map_err(voice_download_failure)?;
                 let result = voice_download_report(&identity, availability_wait);
+                write_management_result(operation, result).map_err(|error| {
+                    management_failure("output_failed", "Could not write command result", error)
+                })
+            }
+        }
+        ManagementCommand::PreviewVoice { identity, rate } => {
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = (identity, rate);
+                return Err(management_failure(
+                    "unsupported",
+                    "Siri voice preview is available only on macOS",
+                    "Siri voice preview is available only on macOS",
+                ));
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let source = preview_voice_until_stopped(&identity, rate).map_err(|error| {
+                    management_failure(
+                        "operation_failed",
+                        "Could not preview the Siri voice",
+                        error,
+                    )
+                })?;
+                let result = VoicePreviewResult {
+                    backend: "siri",
+                    voice: identity,
+                    rate,
+                    source,
+                };
                 write_management_result(operation, result).map_err(|error| {
                     management_failure("output_failed", "Could not write command result", error)
                 })
@@ -1919,17 +2073,24 @@ fn standard_session_status_cues_suppressed(
     core.user_speaking() || assistant_output_active
 }
 
-fn expert_session_status_cues_suppressed(
-    turn_gate: &ExpertTurnGate,
-    assistant_output_active: bool,
-) -> bool {
-    turn_gate.lifecycle.user_speaking() || assistant_output_active
-}
-
 fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String> {
     let (control_tx, control_rx) = mpsc::channel();
     let (pcm_tx, pcm_rx) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
-    thread::spawn(move || read_framed_requests(io::stdin().lock(), control_tx, pcm_tx));
+    let mut voice_builds = VoiceBuilds {
+        controls: control_tx.clone(),
+        pending: HashSet::new(),
+    };
+    let input_progress = Arc::new(SessionInputProgress::default());
+    let reader_progress = Arc::clone(&input_progress);
+    thread::spawn(move || {
+        read_framed_requests(
+            io::stdin().lock(),
+            control_tx,
+            pcm_tx,
+            &reader_progress,
+            &mut io::stderr(),
+        )
+    });
     let audio_transport = Arc::new(unsafe { AudioPipeTransport::from_raw_fd(pcm_output_fd)? });
     let (playback_tx, playback_rx) = mpsc::channel();
     let (audio_control_tx, audio_control_rx) = mpsc::channel();
@@ -1948,11 +2109,13 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
     let mut next_input_token = 1_u64;
     let mut pending_control = None;
     let mut processed_pcm = 0_u64;
-    let mut held: Option<PrepareRequest> = None;
+    let mut held: Option<HeldPrepare> = None;
     let mut active: Option<ActivePlayback> = None;
-    let mut status_sound_runtime = StatusSoundRuntime::default();
+    input_progress.enter("status_assets");
+    let status_sound_runtime = ManagedStatusSoundRuntime::spawn(None)?;
 
     loop {
+        input_progress.enter("voice_events");
         if let Some(events) = input_events.as_mut() {
             while let Ok(event) = events.try_recv() {
                 handle_voice_input_event(
@@ -1964,6 +2127,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 )?;
             }
         }
+        input_progress.enter("playback");
         while let Ok(request) = audio_control_rx.try_recv() {
             write_audio_control_request(request, active.as_ref(), &mut writer)?;
         }
@@ -1991,6 +2155,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 return Err(message);
             }
         }
+        input_progress.enter("maintenance");
         poll_tts_configuration_update(
             Instant::now(),
             &tts_configuration_rx,
@@ -2021,17 +2186,31 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
             )?;
         }
         let conversation_active = standard_session_status_cues_suppressed(&core, active.is_some());
-        let status_sound_result = status_sound_runtime.poll(conversation_active);
+        input_progress.enter("status_sounds");
+        let status_sound_result =
+            status_sound_runtime.queue_conversation_active(conversation_active);
         if let Err(message) = status_sound_result {
             eprintln!("status sound playback disabled: {message}");
         }
 
+        input_progress.enter("receive");
         let Some(input) = receive_session_input(
             &control_rx,
             &pcm_rx,
             &mut pending_control,
             &mut processed_pcm,
         ) else {
+            continue;
+        };
+        input_progress
+            .processed
+            .store(processed_pcm, Ordering::Relaxed);
+        input_progress.enter(match &input {
+            Input::Pcm(_) => "pcm",
+            Input::Request(SessionRequest::Hello { .. }) => "hello_tts",
+            _ => "control",
+        });
+        let Some(input) = voice_builds.filter(input, tts_slot.as_ref(), &mut writer)? else {
             continue;
         };
         match input {
@@ -2042,6 +2221,9 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     runtime.cancel();
                 }
                 return Ok(());
+            }
+            Input::VoiceBuilt(_) | Input::VoiceUnavailable { .. } => {
+                unreachable!("voice builds are filtered")
             }
             Input::Eof => {
                 if let Some(current) = active.as_mut() {
@@ -2088,7 +2270,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     "session is shutting down",
                     &mut writer,
                 )?;
-                if let Some(held) = held.take() {
+                if let Some((held, _)) = held.take() {
                     write_message(
                         &mut writer,
                         &SessionMessage::NotAdmitted {
@@ -2144,18 +2326,22 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                         return Ok(());
                     }
                 };
-                let (runtime, mut events) =
-                    match create_input_runtime(&config.stt, config.endpoints.stt.as_deref()) {
-                        Ok(runtime) => runtime,
-                        Err(message) => {
-                            write_protocol_fatal(
-                                &mut writer,
-                                &public_stt_startup_error(&config.stt),
-                                &format!("STT startup failed: {message}"),
-                            )?;
-                            return Ok(());
-                        }
-                    };
+                input_progress.enter("hello_stt");
+                let (runtime, mut events) = match create_input_runtime(
+                    &config.stt,
+                    config.endpoints.stt.as_deref(),
+                    &config.stt_hints,
+                ) {
+                    Ok(runtime) => runtime,
+                    Err(message) => {
+                        write_protocol_fatal(
+                            &mut writer,
+                            &public_stt_startup_error(&config.stt),
+                            &format!("STT startup failed: {message}"),
+                        )?;
+                        return Ok(());
+                    }
+                };
                 let readiness = wait_for_input_ready(&mut events, INPUT_STARTUP_TIMEOUT);
                 if let Err(message) = readiness {
                     runtime.cancel();
@@ -2169,11 +2355,14 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     finish_result?;
                     return Ok(());
                 }
+                input_progress.enter("hello_ready");
+                status_sound_runtime.set_input_controls(runtime.controls())?;
                 input_controls = Some(runtime.controls());
                 input_runtime = Some(runtime);
                 input_events = Some(events);
                 initialized = true;
-                status_sound_runtime.set_output_device(status_sound_output_device);
+                status_sound_runtime.set_output_device(status_sound_output_device)?;
+                status_sound_runtime.set_input_policy(input_during_tts)?;
                 let input_policy = InputDuringTtsSlot::new(input_during_tts);
                 let session = VoiceSessionSnapshot {
                     tts: slot.snapshot()?,
@@ -2205,7 +2394,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 status,
                 settings,
             }) => {
-                status_sound_runtime.update(status, settings);
+                status_sound_runtime.update(status, settings)?;
                 write_message(
                     &mut writer,
                     &SessionMessage::ConversationStatusApplied {
@@ -2277,6 +2466,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     Ok(snapshot) => (InputDuringTtsOutcome::Applied, snapshot),
                     Err(snapshot) => (InputDuringTtsOutcome::Rejected, snapshot),
                 };
+                status_sound_runtime.set_input_policy(snapshot.policy)?;
                 write_message(
                     &mut writer,
                     &SessionMessage::InputDuringTtsResult {
@@ -2306,12 +2496,18 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 id,
                 acknowledgement,
                 text,
-                resolved_handoff_ids: _,
+                voice,
+                language,
             }) => {
                 let request = PrepareRequest {
                     id,
                     acknowledgement,
                     text,
+                };
+                let Some(voice) =
+                    speak_voice(tts_slot.as_deref(), voice, language, id, &mut writer)?
+                else {
+                    continue;
                 };
                 if held.is_some() {
                     write_message(
@@ -2324,6 +2520,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 } else {
                     process_prepare(
                         request,
+                        voice,
                         &mut core,
                         tts_slot.as_deref().expect("hello initialized TTS"),
                         input_during_tts_slot
@@ -2554,34 +2751,6 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
             Input::Request(SessionRequest::QueryState { id, after }) => {
                 write_state(&mut writer, id, after, &core)?
             }
-            Input::Request(SessionRequest::DismissHandoffs { id, .. }) => {
-                write_message(
-                    &mut writer,
-                    &SessionMessage::DismissHandoffsResult {
-                        id,
-                        outcome: DismissHandoffsOutcome::Rejected,
-                        cursor: core.confirmed_token(),
-                        dismissed_handoff_ids: Vec::new(),
-                        message: Some("handoff dismissal requires Expert-Spokesperson mode".into()),
-                    },
-                )?;
-            }
-            Input::Request(SessionRequest::CompleteExpertTurn { id, .. }) => {
-                write_message(
-                    &mut writer,
-                    &SessionMessage::ExpertTurnResult {
-                        id,
-                        outcome: ExpertTurnOutcome::Rejected,
-                        handoff_ids: Vec::new(),
-                        attempt: None,
-                        through_token: None,
-                        message: Some(
-                            "Expert turn completion requires Expert-Spokesperson mode".into(),
-                        ),
-                        events: Vec::new(),
-                    },
-                )?;
-            }
             Input::Request(SessionRequest::Cancel { id }) => {
                 handle_cancel(id, &mut held, &mut core, &mut active, &mut writer)?;
             }
@@ -2592,2646 +2761,6 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
     }
 }
 
-enum LivePlaybackInput {
-    Samples(Vec<f32>),
-    Finish,
-}
-
-type LivePlaybackResult = Result<(String, u64), (String, u64, String)>;
-
-struct LivePlayback {
-    response_id: String,
-    speech_id: u64,
-    prepare_id: Option<u64>,
-    output: Arc<RemotePcmAudioOutput>,
-    active: Arc<AtomicBool>,
-    sender: SyncSender<LivePlaybackInput>,
-}
-
-struct PendingExpertPrepare {
-    id: u64,
-    acknowledgement: Option<u64>,
-    text: String,
-    resolved_handoff_ids: Vec<String>,
-}
-
-struct PendingSpokespersonSettingsUpdate {
-    id: u64,
-    base_revision: u64,
-    settings: TtsSettings,
-}
-
-fn rollback_spokesperson_voice_update(
-    pending: &mut Option<VoiceUpdateTransaction>,
-    old_runtime: &OpenAiSpokespersonRuntime,
-    snapshot: &berd_call::TtsConfigurationSnapshot,
-    message: String,
-    writer: &mut impl Write,
-) -> Result<(), String> {
-    let Some(update) = pending.take() else {
-        return Ok(());
-    };
-    let report_result = matches!(update.purpose(), VoiceUpdatePurpose::Settings);
-    let id = update.abort(old_runtime)?;
-    if report_result {
-        reject_spokesperson_tts_settings(id, snapshot, message, writer)
-    } else {
-        Ok(())
-    }
-}
-
-fn activate_spokesperson_voice_update(
-    pending: &mut Option<VoiceUpdateTransaction>,
-    runtime: &mut Option<OpenAiSpokespersonRuntime>,
-    runtime_events: &mut Option<Receiver<SpokespersonEvent>>,
-    runtime_config: &mut Option<OpenAiSpokespersonConfig>,
-    snapshot: &mut berd_call::TtsConfigurationSnapshot,
-    writer: &mut impl Write,
-) -> Result<(), String> {
-    let activated = pending
-        .take()
-        .expect("matched pending voice update")
-        .activate();
-    let old_runtime = runtime
-        .replace(activated.runtime)
-        .expect("initialized runtime");
-    *runtime_events = Some(activated.events);
-    old_runtime.retire_in_background();
-    for frame in activated.held_input {
-        runtime
-            .as_ref()
-            .expect("activated runtime")
-            .send(SpokespersonCommand::InputPcm48Khz(
-                frame.as_samples().to_vec(),
-            ))?;
-    }
-    if matches!(activated.purpose, VoiceUpdatePurpose::Settings) {
-        snapshot.revision = snapshot
-            .revision
-            .checked_add(1)
-            .ok_or("TTS configuration revision overflow")?;
-        snapshot.settings = activated.settings.clone();
-        if let TtsSettings::OpenAi { voice, rate, .. } = &activated.settings {
-            let config = runtime_config
-                .as_mut()
-                .expect("initialized Spokesperson config");
-            config.set_voice_and_speed(voice.clone(), *rate);
-        }
-        write_message(
-            writer,
-            &SessionMessage::TtsSettingsResult {
-                id: activated.id,
-                outcome: TtsSettingsOutcome::Applied,
-                snapshot: snapshot.clone(),
-                message: None,
-            },
-        )?;
-    }
-    Ok(())
-}
-
-enum ExpertPrepareRouting {
-    Ready(PendingExpertPrepare),
-    Held,
-    InProgress(u64),
-}
-
-struct ExpertTurnGate {
-    lifecycle: RealtimeHostLifecycle,
-    pending_prepare: Option<PendingExpertPrepare>,
-}
-
-impl Default for ExpertTurnGate {
-    fn default() -> Self {
-        Self::new(spokesperson_renew_after())
-    }
-}
-
-impl ExpertTurnGate {
-    fn new(renew_after: Duration) -> Self {
-        let mut lifecycle = RealtimeHostLifecycle::new(renew_after);
-        lifecycle.session_started(Instant::now());
-        Self {
-            lifecycle,
-            pending_prepare: None,
-        }
-    }
-
-    fn begin_user_speaking(&mut self, item_id: String) {
-        self.lifecycle.begin_user_speaking(item_id);
-    }
-
-    fn finish_user_speaking(&mut self) {
-        self.lifecycle.finish_user_speaking();
-    }
-
-    fn discard_user_turn(&mut self, item_id: &str) {
-        self.lifecycle.finish_user_item(item_id);
-    }
-
-    fn resolve_user_final(&mut self, item_id: &str) {
-        self.lifecycle.finish_user_item(item_id);
-    }
-
-    fn response_started(
-        &mut self,
-        response_id: &str,
-        retained_responses: usize,
-    ) -> Result<(), String> {
-        if !self.lifecycle.has_inflight_response(response_id)
-            && retained_responses >= MAX_PENDING_SPOKESPERSON_RESPONSES
-        {
-            return Err("Spokesperson started too many concurrent responses".into());
-        }
-        self.lifecycle.begin_response(response_id.to_string());
-        Ok(())
-    }
-
-    fn response_finished(&mut self, response_id: &str) {
-        self.lifecycle.finish_response(response_id);
-    }
-
-    fn defer_if_busy(
-        &mut self,
-        request: PendingExpertPrepare,
-        playback_active: bool,
-        retained_responses: usize,
-    ) -> ExpertPrepareRouting {
-        if self.is_busy(playback_active, retained_responses) {
-            if self.pending_prepare.is_some() {
-                ExpertPrepareRouting::InProgress(request.id)
-            } else {
-                self.pending_prepare = Some(request);
-                ExpertPrepareRouting::Held
-            }
-        } else {
-            ExpertPrepareRouting::Ready(request)
-        }
-    }
-
-    fn take_ready(
-        &mut self,
-        playback_active: bool,
-        retained_responses: usize,
-    ) -> Option<PendingExpertPrepare> {
-        (!self.is_busy(playback_active, retained_responses))
-            .then(|| self.pending_prepare.take())
-            .flatten()
-    }
-
-    fn is_busy(&self, playback_active: bool, retained_responses: usize) -> bool {
-        self.lifecycle.is_busy(RealtimeHostWork {
-            playback_active,
-            retained_responses,
-            ..RealtimeHostWork::default()
-        })
-    }
-
-    fn cancel_pending(&mut self, id: u64) -> bool {
-        if self
-            .pending_prepare
-            .as_ref()
-            .is_some_and(|request| request.id == id)
-        {
-            self.pending_prepare.take();
-            true
-        } else {
-            false
-        }
-    }
-
-    fn input_blocks_output(&self) -> bool {
-        self.lifecycle.input_blocks_output()
-    }
-}
-
-fn expert_output_reserved(
-    directive_speeches: &HashMap<u64, DirectiveSpeech>,
-    cancelled_directives: &HashSet<u64>,
-    active: Option<&LivePlayback>,
-    responses: &HashMap<String, LiveResponse>,
-) -> bool {
-    !directive_speeches.is_empty()
-        || !cancelled_directives.is_empty()
-        || active.is_some_and(|playback| playback.prepare_id.is_some())
-        || responses
-            .values()
-            .any(|response| response.prepare_id.is_some())
-}
-
-struct DirectiveSpeech {
-    prepare_id: u64,
-    speech_id: u64,
-    text: String,
-}
-
-fn route_expert_prepare(
-    gate: &mut ExpertTurnGate,
-    request: PendingExpertPrepare,
-    expert_output_reserved: bool,
-    settings_update_pending: bool,
-    playback_active: bool,
-    retained_responses: usize,
-) -> ExpertPrepareRouting {
-    if expert_output_reserved {
-        ExpertPrepareRouting::InProgress(request.id)
-    } else {
-        gate.defer_if_busy(
-            request,
-            playback_active || settings_update_pending,
-            retained_responses,
-        )
-    }
-}
-
-struct LiveResponse {
-    prepare_id: Option<u64>,
-    speech_id: Option<u64>,
-    expert_text: Option<String>,
-    delivery: RealtimeAudioDelivery,
-    pending_audio: VecDeque<Vec<f32>>,
-    pending_frames: usize,
-    audio_done: bool,
-    finish_sent: bool,
-    server_finished: bool,
-    playback_complete: bool,
-    interrupted: bool,
-    speech_terminal_sent: bool,
-}
-
-impl LiveResponse {
-    fn new(prepare_id: Option<u64>, speech_id: Option<u64>) -> Self {
-        Self {
-            prepare_id,
-            speech_id,
-            expert_text: None,
-            delivery: RealtimeAudioDelivery::default(),
-            pending_audio: VecDeque::new(),
-            pending_frames: 0,
-            audio_done: false,
-            finish_sent: false,
-            server_finished: false,
-            playback_complete: false,
-            interrupted: false,
-            speech_terminal_sent: false,
-        }
-    }
-
-    fn queue_audio(
-        &mut self,
-        samples: Vec<f32>,
-        total_pending_frames: usize,
-    ) -> Result<(), String> {
-        total_pending_frames
-            .checked_add(samples.len())
-            .filter(|frames| *frames <= MAX_PENDING_SPOKESPERSON_FRAMES)
-            .ok_or_else(|| {
-                "Spokesperson queued more than 15 seconds of audio in total".to_string()
-            })?;
-        self.pending_frames = self
-            .pending_frames
-            .checked_add(samples.len())
-            .ok_or_else(|| "Spokesperson queued audio frame count overflowed".to_string())?;
-        self.pending_audio.push_back(samples);
-        Ok(())
-    }
-
-    fn claim_speech_terminal(&mut self) -> bool {
-        if self.speech_terminal_sent {
-            false
-        } else {
-            self.speech_terminal_sent = true;
-            true
-        }
-    }
-}
-
-#[derive(Debug)]
-enum LiveAudioDelta {
-    Stream(Vec<f32>),
-    Queued,
-    Ignored,
-}
-
-fn total_pending_live_audio_frames(
-    responses: &HashMap<String, LiveResponse>,
-) -> Result<usize, String> {
-    responses
-        .values()
-        .try_fold(0_usize, |total, response| {
-            total.checked_add(response.pending_frames)
-        })
-        .ok_or_else(|| "Spokesperson queued audio frame count overflowed".to_string())
-}
-
-fn stage_live_audio_delta(
-    response_id: &str,
-    samples: Vec<f32>,
-    responses: &mut HashMap<String, LiveResponse>,
-    waiting_responses: &mut VecDeque<String>,
-    active: Option<(&str, bool)>,
-) -> Result<LiveAudioDelta, String> {
-    let total_pending_frames = total_pending_live_audio_frames(responses)?;
-    if !responses.contains_key(response_id) && responses.len() >= MAX_PENDING_SPOKESPERSON_RESPONSES
-    {
-        return Err("Spokesperson queued too many audio responses".into());
-    }
-    let response = responses
-        .entry(response_id.to_string())
-        .or_insert_with(|| LiveResponse::new(None, None));
-    if response.interrupted || response.audio_done {
-        return Ok(LiveAudioDelta::Ignored);
-    }
-    if let Some((_, active)) = active.filter(|(id, _)| *id == response_id) {
-        if !active {
-            return Ok(LiveAudioDelta::Ignored);
-        }
-        if response.pending_audio.is_empty() {
-            return Ok(LiveAudioDelta::Stream(samples));
-        }
-    }
-    response.queue_audio(samples, total_pending_frames)?;
-    if active.is_none_or(|(id, _)| id != response_id)
-        && !waiting_responses.iter().any(|id| id == response_id)
-    {
-        waiting_responses.push_back(response_id.to_string());
-    }
-    Ok(LiveAudioDelta::Queued)
-}
-
-fn spokesperson_pcm_allowed(
-    input_muted: bool,
-    playback_active: bool,
-    input_policy: InputDuringTtsSnapshot,
-) -> bool {
-    !(input_muted
-        || playback_active
-            && input_policy.policy == berd_call::input::InputDuringTtsPolicy::SuppressInput)
-}
-
-fn set_spokesperson_input_muted(
-    id: u64,
-    muted: bool,
-    input_muted: &mut bool,
-    mut reset_input: impl FnMut() -> Result<(), String>,
-    writer: &mut impl Write,
-) -> Result<(), String> {
-    *input_muted = muted;
-    if muted {
-        reset_input()?;
-    }
-    write_message(
-        writer,
-        &SessionMessage::InputMuteApplied { id, active: muted },
-    )
-}
-
-fn reset_spokesperson_input(
-    id: u64,
-    mut reset_input: impl FnMut() -> Result<(), String>,
-    writer: &mut impl Write,
-) -> Result<(), String> {
-    reset_input()?;
-    write_message(writer, &SessionMessage::InputResetApplied { id })
-}
-
-fn set_spokesperson_input_policy(
-    id: u64,
-    expected_revision: u64,
-    policy: berd_call::input::InputDuringTtsPolicy,
-    slot: &InputDuringTtsSlot,
-    writer: &mut impl Write,
-) -> Result<(), String> {
-    let (outcome, snapshot) = match slot.update(expected_revision, policy) {
-        Ok(snapshot) => (InputDuringTtsOutcome::Applied, snapshot),
-        Err(snapshot) => (InputDuringTtsOutcome::Rejected, snapshot),
-    };
-    write_message(
-        writer,
-        &SessionMessage::InputDuringTtsResult {
-            id,
-            outcome,
-            snapshot,
-        },
-    )
-}
-
-fn reject_spokesperson_tts_settings(
-    id: u64,
-    snapshot: &berd_call::TtsConfigurationSnapshot,
-    message: String,
-    writer: &mut impl Write,
-) -> Result<(), String> {
-    write_message(
-        writer,
-        &SessionMessage::TtsSettingsResult {
-            id,
-            outcome: TtsSettingsOutcome::Rejected,
-            snapshot: snapshot.clone(),
-            message: Some(message),
-        },
-    )
-}
-
-fn spokesperson_host_work(
-    gate: &ExpertTurnGate,
-    active: Option<&LivePlayback>,
-    responses: &HashMap<String, LiveResponse>,
-    directive_speeches: &HashMap<u64, DirectiveSpeech>,
-    cancelled_directives: &HashSet<u64>,
-) -> RealtimeHostWork {
-    RealtimeHostWork {
-        playback_active: active.is_some(),
-        retained_responses: responses.len(),
-        expert_output_reserved: expert_output_reserved(
-            directive_speeches,
-            cancelled_directives,
-            active,
-            responses,
-        ),
-        pending_expert_prepare: gate.pending_prepare.is_some(),
-        truncation_pending: live_truncation_pending(responses),
-    }
-}
-
-fn queued_spokesperson_settings_are_ready(
-    gate: &ExpertTurnGate,
-    active: Option<&LivePlayback>,
-    responses: &HashMap<String, LiveResponse>,
-    directive_speeches: &HashMap<u64, DirectiveSpeech>,
-    cancelled_directives: &HashSet<u64>,
-) -> bool {
-    let work = spokesperson_host_work(
-        gate,
-        active,
-        responses,
-        directive_speeches,
-        cancelled_directives,
-    );
-    gate.lifecycle.queued_settings_are_ready(work)
-}
-
-fn validate_queued_spokesperson_settings(
-    request: &PendingSpokespersonSettingsUpdate,
-    snapshot: &berd_call::TtsConfigurationSnapshot,
-    runtime_config: &OpenAiSpokespersonConfig,
-) -> Result<(), String> {
-    validate_voice_update_settings(
-        request.base_revision,
-        &request.settings,
-        snapshot.revision,
-        runtime_config,
-    )
-}
-
-fn spokesperson_voice_update_is_safe(
-    update: &VoiceUpdateTransaction,
-    core: &RealtimeExpertSpokespersonSession,
-    snapshot: &berd_call::TtsConfigurationSnapshot,
-    gate: &ExpertTurnGate,
-    work: RealtimeHostWork,
-) -> bool {
-    gate.lifecycle.voice_update_is_safe(
-        update.purpose(),
-        update.semantic_revision,
-        core.semantic_revision(),
-        update.base_revision,
-        snapshot.revision,
-        core.has_unresolved_handoff(),
-        work,
-    )
-}
-
-fn unavailable_spokesperson_title(connection_lost: bool, quiescent: bool) -> &'static str {
-    match (connection_lost, quiescent) {
-        (true, false) => "Spokesperson connection was lost during an active turn",
-        (true, true) => "Spokesperson connection was lost during a settings update",
-        (false, _) => "Spokesperson session expired before it could renew",
-    }
-}
-
-fn apply_spokesperson_startup_settings(
-    session: &SessionConfig,
-    spokesperson: &mut OpenAiSpokespersonConfig,
-) -> Result<(), String> {
-    let rate = match &session.tts {
-        TtsBackendConfig::OpenAi { rate }
-        | TtsBackendConfig::Siri { rate, .. }
-        | TtsBackendConfig::Pocket { rate, .. } => *rate,
-    };
-    if !(0.25..=1.5).contains(&rate) {
-        return Err("Expert-Spokesperson rate must be between 0.25 and 1.5".into());
-    }
-    spokesperson.session.speed = Some(rate);
-    Ok(())
-}
-
-fn run_expert_spokesperson_session(
-    config: SessionConfig,
-    pcm_output_fd: RawFd,
-) -> Result<(), String> {
-    let (control_tx, control_rx) = mpsc::channel();
-    let (pcm_tx, pcm_rx) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
-    thread::spawn(move || read_framed_requests(io::stdin().lock(), control_tx, pcm_tx));
-    let audio_transport = Arc::new(unsafe { AudioPipeTransport::from_raw_fd(pcm_output_fd)? });
-    let (audio_control_tx, audio_control_rx) = mpsc::channel();
-    let (playback_tx, playback_rx) = mpsc::channel::<LivePlaybackResult>();
-    let stdout = io::stdout();
-    let mut writer = BufWriter::new(stdout.lock());
-    let mut core = RealtimeExpertSpokespersonSession::new(0, "external");
-    let mut runtime: Option<OpenAiSpokespersonRuntime> = None;
-    let mut runtime_events: Option<Receiver<SpokespersonEvent>> = None;
-    let mut runtime_config: Option<OpenAiSpokespersonConfig> = None;
-    let mut initialized = false;
-    let mut pending_control = None;
-    let mut processed_pcm = 0_u64;
-    let mut emitted_live_token = 0_u64;
-    let mut next_speech_id = 1_u64;
-    let mut directive_speeches = HashMap::<u64, DirectiveSpeech>::new();
-    let mut cancelled_directives = HashSet::<u64>::new();
-    let mut responses = HashMap::<String, LiveResponse>::new();
-    let mut waiting_responses = VecDeque::<String>::new();
-    let mut active: Option<LivePlayback> = None;
-    let mut turn_gate = ExpertTurnGate::new(spokesperson_renew_after());
-    let mut session_tts: Option<berd_call::TtsConfigurationSnapshot> = None;
-    let mut input_during_tts_slot: Option<InputDuringTtsSlot> = None;
-    let mut input_muted = false;
-    let mut queued_tts_settings = VoiceUpdateQueue::<PendingSpokespersonSettingsUpdate>::default();
-    let mut pending_voice_update: Option<VoiceUpdateTransaction> = None;
-    let mut status_sound_runtime = StatusSoundRuntime::default();
-
-    loop {
-        if initialized {
-            let work = spokesperson_host_work(
-                &turn_gate,
-                active.as_ref(),
-                &responses,
-                &directive_speeches,
-                &cancelled_directives,
-            );
-            if turn_gate.lifecycle.renewal_is_due(
-                Instant::now(),
-                work,
-                core.has_unresolved_handoff(),
-                pending_voice_update.is_some(),
-            ) {
-                let snapshot = session_tts.as_ref().expect("initialized TTS snapshot");
-                let request = VoiceUpdateRequest {
-                    id: turn_gate.lifecycle.next_maintenance_id(),
-                    base_revision: snapshot.revision,
-                    settings: snapshot.settings.clone(),
-                    semantic_revision: core.semantic_revision(),
-                };
-                pending_voice_update = Some(VoiceUpdateTransaction::start_with_purpose(
-                    request,
-                    snapshot.revision,
-                    true,
-                    runtime_config
-                        .as_ref()
-                        .expect("initialized Spokesperson config"),
-                    core.semantic_transcript(),
-                    VoiceUpdatePurpose::Renewal,
-                )?);
-            }
-        }
-        if let Some(update) = pending_voice_update.as_ref() {
-            let work = spokesperson_host_work(
-                &turn_gate,
-                active.as_ref(),
-                &responses,
-                &directive_speeches,
-                &cancelled_directives,
-            );
-            let safe = spokesperson_voice_update_is_safe(
-                update,
-                &core,
-                session_tts.as_ref().expect("initialized TTS snapshot"),
-                &turn_gate,
-                work,
-            );
-            match update.next_action(Instant::now(), safe) {
-                VoiceUpdateAction::None => {}
-                VoiceUpdateAction::BeginInputBarrier => pending_voice_update
-                    .as_mut()
-                    .expect("voice update exists")
-                    .begin_input_barrier(runtime.as_ref().expect("initialized runtime"))?,
-                VoiceUpdateAction::Activate => {
-                    activate_spokesperson_voice_update(
-                        &mut pending_voice_update,
-                        &mut runtime,
-                        &mut runtime_events,
-                        &mut runtime_config,
-                        session_tts.as_mut().expect("initialized TTS snapshot"),
-                        &mut writer,
-                    )?;
-                    turn_gate.lifecycle.session_started(Instant::now());
-                }
-                VoiceUpdateAction::Reject(message) => {
-                    let expiry_cause = pending_voice_update.as_ref().and_then(|update| {
-                        if let VoiceUpdatePurpose::SessionRecovery { cause } = update.purpose() {
-                            Some(cause.clone())
-                        } else {
-                            None
-                        }
-                    });
-                    if let Some(cause) = expiry_cause {
-                        write_protocol_fatal(
-                            &mut writer,
-                            "Spokesperson session renewal failed",
-                            &format!("{cause}; replacement failed: {message}"),
-                        )?;
-                        return Ok(());
-                    }
-                    let was_renewal = pending_voice_update.as_ref().is_some_and(|update| {
-                        matches!(update.purpose(), VoiceUpdatePurpose::Renewal)
-                    });
-                    rollback_spokesperson_voice_update(
-                        &mut pending_voice_update,
-                        runtime.as_ref().expect("initialized runtime"),
-                        session_tts.as_ref().expect("initialized TTS snapshot"),
-                        message,
-                        &mut writer,
-                    )?;
-                    if was_renewal {
-                        turn_gate
-                            .lifecycle
-                            .retry_renewal_after(Instant::now(), Duration::from_secs(30));
-                    }
-                }
-            }
-        }
-        let queued_settings_ready = queued_spokesperson_settings_are_ready(
-            &turn_gate,
-            active.as_ref(),
-            &responses,
-            &directive_speeches,
-            &cancelled_directives,
-        );
-        if let Some(request) =
-            queued_tts_settings.take_ready(pending_voice_update.is_some(), queued_settings_ready)
-        {
-            let snapshot = session_tts.as_ref().expect("initialized TTS snapshot");
-            let id = request.id;
-            pending_voice_update = match VoiceUpdateTransaction::start(
-                VoiceUpdateRequest {
-                    id,
-                    base_revision: request.base_revision,
-                    settings: request.settings,
-                    semantic_revision: core.semantic_revision(),
-                },
-                snapshot.revision,
-                true,
-                runtime_config
-                    .as_ref()
-                    .expect("initialized Spokesperson config"),
-                core.semantic_transcript(),
-            ) {
-                Ok(update) => Some(update),
-                Err(message) => {
-                    reject_spokesperson_tts_settings(id, snapshot, message, &mut writer)?;
-                    None
-                }
-            };
-        }
-        if let Some(events) = runtime_events.as_ref() {
-            if let Ok(event) = events.try_recv() {
-                match event {
-                    SpokespersonEvent::Provider(event) => {
-                        let kind = event.pointer("/type").and_then(serde_json::Value::as_str);
-                        if !matches!(
-                            kind,
-                            Some(
-                                "output_audio_buffer.started"
-                                    | "output_audio_buffer.stopped"
-                                    | "output_audio_buffer.cleared"
-                            )
-                        ) {
-                            apply_external_coordinator_event(
-                                &mut core,
-                                runtime.as_ref().expect("initialized runtime"),
-                                &event,
-                            )?;
-                        }
-                    }
-                    SpokespersonEvent::Ready => {}
-                    SpokespersonEvent::UserSpeaking {
-                        active: speaking,
-                        item_id,
-                    } => {
-                        if speaking {
-                            let preexisting_responses: HashSet<String> =
-                                responses.keys().cloned().collect();
-                            turn_gate.begin_user_speaking(item_id);
-                            let active_response_id =
-                                active.as_ref().map(|playback| playback.response_id.clone());
-                            if active_response_id.as_ref().is_some_and(|response_id| {
-                                preexisting_responses.contains(response_id)
-                            }) {
-                                cancel_live_playback(&mut active);
-                            }
-                            interrupt_live_responses(
-                                &preexisting_responses,
-                                active_response_id.as_deref(),
-                                &mut responses,
-                                &mut waiting_responses,
-                            );
-                            for response_id in &preexisting_responses {
-                                let Some(response) = responses.get_mut(response_id) else {
-                                    continue;
-                                };
-                                require_live_response_truncation(response)?;
-                                if active_response_id.as_deref() != Some(response_id.as_str()) {
-                                    send_live_response_truncation(
-                                        response_id,
-                                        response,
-                                        runtime.as_ref().expect("initialized runtime"),
-                                    )?;
-                                }
-                            }
-                            interrupt_unbound_directives(
-                                &mut directive_speeches,
-                                &mut cancelled_directives,
-                                &mut writer,
-                            )?;
-                        } else {
-                            turn_gate.finish_user_speaking();
-                        }
-                        write_message(
-                            &mut writer,
-                            &SessionMessage::InputSpeaking { active: speaking },
-                        )?;
-                    }
-                    SpokespersonEvent::UserTurnDiscarded { item_id } => {
-                        turn_gate.discard_user_turn(&item_id);
-                    }
-                    SpokespersonEvent::UserFinal { item_id, text } => {
-                        turn_gate.resolve_user_final(&item_id);
-                        record_and_emit_live_event(
-                            &mut core,
-                            &mut emitted_live_token,
-                            LiveSideEvent::UserTranscript { text: text.clone() },
-                            &mut writer,
-                        )?;
-                        core.record_user_turn(text);
-                    }
-                    SpokespersonEvent::ResponseStarted { response_id } => {
-                        turn_gate.response_started(&response_id, responses.len())?;
-                        core.reserve_spokesperson_turn(response_id.clone());
-                        responses
-                            .entry(response_id)
-                            .or_insert_with(|| LiveResponse::new(None, None));
-                    }
-                    SpokespersonEvent::ResponseFinished {
-                        response_id,
-                        status,
-                    } => {
-                        turn_gate.response_finished(&response_id);
-                        if let Some(response) = responses.get_mut(&response_id) {
-                            mark_live_response_server_finished(response);
-                            if !response.delivery.received_audio() {
-                                response.playback_complete = true;
-                            }
-                            if status != SpokespersonResponseStatus::Completed {
-                                if let (Some(id), Some(speech_id)) =
-                                    (response.prepare_id, response.speech_id)
-                                {
-                                    if response.claim_speech_terminal() {
-                                        match &status {
-                                            SpokespersonResponseStatus::Cancelled => write_message(
-                                                &mut writer,
-                                                &SessionMessage::SpeechInterrupted {
-                                                    id,
-                                                    speech_id,
-                                                    spoken_through_utf8: 0,
-                                                },
-                                            )?,
-                                            SpokespersonResponseStatus::Failed(message) => {
-                                                write_message(
-                                                    &mut writer,
-                                                    &SessionMessage::SpeechFailed {
-                                                        id,
-                                                        speech_id,
-                                                        message: message.clone(),
-                                                    },
-                                                )?
-                                            }
-                                            SpokespersonResponseStatus::Completed => unreachable!(),
-                                        }
-                                    }
-                                }
-                                response.interrupted = true;
-                                response.pending_audio.clear();
-                                response.pending_frames = 0;
-                                if active
-                                    .as_ref()
-                                    .is_some_and(|playback| playback.response_id == response_id)
-                                {
-                                    cancel_live_playback(&mut active);
-                                } else {
-                                    response.playback_complete = true;
-                                }
-                            }
-                        }
-                        publish_live_response_if_complete(
-                            &response_id,
-                            &mut responses,
-                            &mut core,
-                            &mut emitted_live_token,
-                            &mut writer,
-                        )?;
-                    }
-                    SpokespersonEvent::ResponseBound {
-                        response_id,
-                        directive_id,
-                    } => {
-                        bind_expert_response(
-                            response_id,
-                            directive_id,
-                            &mut directive_speeches,
-                            &mut cancelled_directives,
-                            &mut responses,
-                        )?;
-                    }
-                    SpokespersonEvent::AudioDelta {
-                        response_id,
-                        item_id,
-                        output_index,
-                        content_index,
-                        samples,
-                    } => {
-                        let frame_count = u64::try_from(samples.len())
-                            .map_err(|_| "Spokesperson audio frame count overflowed")?;
-                        let active_response = active.as_ref().map(|playback| {
-                            (
-                                playback.response_id.as_str(),
-                                playback.active.load(Ordering::SeqCst),
-                            )
-                        });
-                        let staged = stage_live_audio_delta(
-                            &response_id,
-                            samples,
-                            &mut responses,
-                            &mut waiting_responses,
-                            active_response,
-                        )?;
-                        let ignored = matches!(&staged, LiveAudioDelta::Ignored);
-                        match staged {
-                            LiveAudioDelta::Stream(samples) => match active
-                                .as_ref()
-                                .expect("streaming response is active")
-                                .sender
-                                .try_send(LivePlaybackInput::Samples(samples))
-                            {
-                                Ok(()) => {}
-                                Err(mpsc::TrySendError::Full(LivePlaybackInput::Samples(
-                                    samples,
-                                ))) => {
-                                    let total_pending_frames =
-                                        total_pending_live_audio_frames(&responses)?;
-                                    responses
-                                        .get_mut(&response_id)
-                                        .expect("streaming response state exists")
-                                        .queue_audio(samples, total_pending_frames)?;
-                                }
-                                Err(mpsc::TrySendError::Disconnected(_)) => {
-                                    return Err(
-                                        "Spokesperson playback worker closed while streaming"
-                                            .into(),
-                                    )
-                                }
-                                Err(mpsc::TrySendError::Full(LivePlaybackInput::Finish)) => {
-                                    unreachable!("streaming sends samples")
-                                }
-                            },
-                            LiveAudioDelta::Queued | LiveAudioDelta::Ignored => {}
-                        }
-                        if let Some(response) = responses.get_mut(&response_id) {
-                            let active_matches = active
-                                .as_ref()
-                                .is_some_and(|playback| playback.response_id == response_id);
-                            let requires_truncation =
-                                ignored && response.interrupted && !active_matches;
-                            match response.delivery.record_audio(
-                                &item_id,
-                                output_index,
-                                content_index,
-                                frame_count,
-                                ignored && response.interrupted,
-                            ) {
-                                Ok(()) => {}
-                                Err(message) => {
-                                    write_protocol_fatal(
-                                        &mut writer,
-                                        "Spokesperson audio identity was invalid",
-                                        &message,
-                                    )?;
-                                    break;
-                                }
-                            }
-                            if requires_truncation {
-                                send_live_response_truncation(
-                                    &response_id,
-                                    response,
-                                    runtime.as_ref().expect("initialized runtime"),
-                                )?;
-                            }
-                        }
-                    }
-                    SpokespersonEvent::AudioDone {
-                        response_id,
-                        item_id,
-                        output_index,
-                        content_index,
-                    } => {
-                        let response = responses
-                            .entry(response_id)
-                            .or_insert_with(|| LiveResponse::new(None, None));
-                        if let Err(message) =
-                            response
-                                .delivery
-                                .ensure_part(&item_id, output_index, content_index)
-                        {
-                            write_protocol_fatal(
-                                &mut writer,
-                                "Spokesperson audio identity was invalid",
-                                &message,
-                            )?;
-                            break;
-                        }
-                    }
-                    SpokespersonEvent::TranscriptDone {
-                        response_id,
-                        item_id,
-                        output_index,
-                        content_index,
-                        text,
-                    } => {
-                        let response = responses
-                            .entry(response_id.clone())
-                            .or_insert_with(|| LiveResponse::new(None, None));
-                        if let Err(message) = response.delivery.replace_transcript(
-                            &item_id,
-                            output_index,
-                            content_index,
-                            text,
-                        ) {
-                            write_protocol_fatal(
-                                &mut writer,
-                                "Spokesperson audio identity was invalid",
-                                &message,
-                            )?;
-                            break;
-                        }
-                        publish_live_response_if_complete(
-                            &response_id,
-                            &mut responses,
-                            &mut core,
-                            &mut emitted_live_token,
-                            &mut writer,
-                        )?;
-                    }
-                    SpokespersonEvent::TranscriptDelta {
-                        response_id,
-                        item_id,
-                        output_index,
-                        content_index,
-                        text,
-                    } => {
-                        let response = responses
-                            .entry(response_id)
-                            .or_insert_with(|| LiveResponse::new(None, None));
-                        if let Err(message) = response.delivery.append_transcript(
-                            &item_id,
-                            output_index,
-                            content_index,
-                            &text,
-                        ) {
-                            write_protocol_fatal(
-                                &mut writer,
-                                "Spokesperson audio identity was invalid",
-                                &message,
-                            )?;
-                            break;
-                        }
-                    }
-                    SpokespersonEvent::InputCutoverFinished { request_id, result } => {
-                        let action = pending_voice_update.as_ref().map_or(
-                            VoiceBarrierAction::Ignore,
-                            |update| {
-                                let work = spokesperson_host_work(
-                                    &turn_gate,
-                                    active.as_ref(),
-                                    &responses,
-                                    &directive_speeches,
-                                    &cancelled_directives,
-                                );
-                                let safe = spokesperson_voice_update_is_safe(
-                                    update,
-                                    &core,
-                                    session_tts.as_ref().expect("initialized TTS snapshot"),
-                                    &turn_gate,
-                                    work,
-                                );
-                                match update.next_action(Instant::now(), safe) {
-                                    VoiceUpdateAction::Reject(message) => {
-                                        VoiceBarrierAction::Reject(message)
-                                    }
-                                    _ => update.finish_barrier(request_id, result, safe),
-                                }
-                            },
-                        );
-                        if action == VoiceBarrierAction::Activate {
-                            activate_spokesperson_voice_update(
-                                &mut pending_voice_update,
-                                &mut runtime,
-                                &mut runtime_events,
-                                &mut runtime_config,
-                                session_tts.as_mut().expect("initialized TTS snapshot"),
-                                &mut writer,
-                            )?;
-                            turn_gate.lifecycle.session_started(Instant::now());
-                        } else if let VoiceBarrierAction::Reject(message) = action {
-                            rollback_spokesperson_voice_update(
-                                &mut pending_voice_update,
-                                runtime.as_ref().expect("initialized runtime"),
-                                session_tts.as_ref().expect("initialized TTS snapshot"),
-                                message,
-                                &mut writer,
-                            )?;
-                        }
-                    }
-                    SpokespersonEvent::OutputTruncated {
-                        response_id,
-                        item_id,
-                        content_index,
-                    } => {
-                        if let Some(response) = responses.get_mut(&response_id) {
-                            response
-                                .delivery
-                                .acknowledge_truncation(&item_id, content_index);
-                        }
-                        publish_live_response_if_complete(
-                            &response_id,
-                            &mut responses,
-                            &mut core,
-                            &mut emitted_live_token,
-                            &mut writer,
-                        )?;
-                    }
-                    SpokespersonEvent::Handoff {
-                        response_id: _,
-                        call_id,
-                        message,
-                    } => {
-                        let handoff_id = match record_and_emit_live_event(
-                            &mut core,
-                            &mut emitted_live_token,
-                            LiveSideEvent::Handoff {
-                                call_id: call_id.clone(),
-                                message,
-                            },
-                            &mut writer,
-                        )? {
-                            LiveSideEvent::Handoff { call_id, .. } => call_id,
-                            _ => return Err("live handoff did not produce a handoff ID".into()),
-                        };
-                        runtime.as_ref().expect("initialized runtime").send(
-                            SpokespersonCommand::Provider(accepted_handoff_tool_output(
-                                &call_id,
-                                &handoff_id,
-                            )?),
-                        )?;
-                    }
-                    event @ (SpokespersonEvent::Expired(_) | SpokespersonEvent::SessionLost(_)) => {
-                        let (message, connection_lost) = match event {
-                            SpokespersonEvent::Expired(message) => (message, false),
-                            SpokespersonEvent::SessionLost(message) => (message, true),
-                            _ => unreachable!("matched a session terminal event"),
-                        };
-                        if let Some(request) = queued_tts_settings.take() {
-                            reject_spokesperson_tts_settings(
-                                request.id,
-                                session_tts.as_ref().expect("initialized TTS snapshot"),
-                                "Spokesperson session ended before the queued settings update could begin"
-                                    .into(),
-                                &mut writer,
-                            )?;
-                        }
-                        if pending_voice_update.as_ref().is_some_and(|update| {
-                            matches!(update.purpose(), VoiceUpdatePurpose::Settings)
-                        }) {
-                            let settings_update = pending_voice_update
-                                .take()
-                                .expect("matched settings update");
-                            reject_spokesperson_tts_settings(
-                                settings_update.id,
-                                session_tts.as_ref().expect("initialized TTS snapshot"),
-                                "Spokesperson session ended before the settings update completed"
-                                    .into(),
-                                &mut writer,
-                            )?;
-                            if let Err(error) = settings_update.finish_candidate() {
-                                write_protocol_fatal(
-                                    &mut writer,
-                                    "Spokesperson session renewal failed",
-                                    &format!(
-                                        "{message}; voice-change candidate cleanup failed: {error}"
-                                    ),
-                                )?;
-                                break;
-                            }
-                        }
-                        let work = spokesperson_host_work(
-                            &turn_gate,
-                            active.as_ref(),
-                            &responses,
-                            &directive_speeches,
-                            &cancelled_directives,
-                        );
-                        let quiescent = turn_gate.lifecycle.settings_are_quiescent(work)
-                            && !core.has_unresolved_handoff();
-                        if !quiescent {
-                            write_protocol_fatal(
-                                &mut writer,
-                                unavailable_spokesperson_title(connection_lost, quiescent),
-                                &message,
-                            )?;
-                            cancel_live_playback(&mut active);
-                            break;
-                        }
-                        let recovery_action = turn_gate.lifecycle.session_loss_action(
-                            pending_voice_update
-                                .as_ref()
-                                .map(VoiceUpdateTransaction::purpose),
-                            work,
-                            core.has_unresolved_handoff(),
-                        );
-                        let start_recovery = match recovery_action {
-                            RealtimeSessionLossAction::ContinuePendingRecovery => {
-                                pending_voice_update
-                                    .as_mut()
-                                    .expect("renewal exists")
-                                    .recover_after_session_loss(message.clone())?;
-                                false
-                            }
-                            RealtimeSessionLossAction::ReplacePendingAndRecover => {
-                                unreachable!("settings updates were settled before recovery")
-                            }
-                            RealtimeSessionLossAction::Fail => {
-                                write_protocol_fatal(
-                                    &mut writer,
-                                    if connection_lost {
-                                        "Spokesperson connection was lost during recovery"
-                                    } else {
-                                        "Spokesperson session expired during renewal"
-                                    },
-                                    &message,
-                                )?;
-                                break;
-                            }
-                            RealtimeSessionLossAction::StartRecovery => true,
-                        };
-                        if start_recovery {
-                            let snapshot = session_tts.as_ref().expect("initialized TTS snapshot");
-                            let request = VoiceUpdateRequest {
-                                id: turn_gate.lifecycle.next_maintenance_id(),
-                                base_revision: snapshot.revision,
-                                settings: snapshot.settings.clone(),
-                                semantic_revision: core.semantic_revision(),
-                            };
-                            pending_voice_update = match VoiceUpdateTransaction::start_with_purpose(
-                                request,
-                                snapshot.revision,
-                                true,
-                                runtime_config
-                                    .as_ref()
-                                    .expect("initialized Spokesperson config"),
-                                core.semantic_transcript(),
-                                VoiceUpdatePurpose::SessionRecovery {
-                                    cause: message.clone(),
-                                },
-                            ) {
-                                Ok(update) => Some(update),
-                                Err(error) => {
-                                    write_protocol_fatal(
-                                        &mut writer,
-                                        "Spokesperson session renewal failed",
-                                        &format!("{message}; replacement failed: {error}"),
-                                    )?;
-                                    break;
-                                }
-                            };
-                        }
-                    }
-                    SpokespersonEvent::Failed(message) => {
-                        if let Some(request) = queued_tts_settings.take() {
-                            reject_spokesperson_tts_settings(
-                                request.id,
-                                session_tts.as_ref().expect("initialized TTS snapshot"),
-                                "Spokesperson failed before the queued settings update could begin"
-                                    .into(),
-                                &mut writer,
-                            )?;
-                        }
-                        write_protocol_fatal(&mut writer, "Spokesperson failed", &message)?;
-                        cancel_live_playback(&mut active);
-                        break;
-                    }
-                    SpokespersonEvent::Closed => {
-                        let recovering = pending_voice_update.as_ref().is_some_and(|update| {
-                            matches!(update.purpose(), VoiceUpdatePurpose::SessionRecovery { .. })
-                        });
-                        if initialized && !recovering {
-                            return Err("Spokesperson runtime closed unexpectedly".into());
-                        }
-                    }
-                }
-            }
-        }
-        flush_active_live_playback(&active, &mut responses)?;
-        while let Ok(request) = audio_control_rx.try_recv() {
-            let speech_id = match request {
-                AudioOutputControlRequest::Suspend { speech_id }
-                | AudioOutputControlRequest::Resume { speech_id } => speech_id,
-            };
-            let Some(_playback) = active
-                .as_ref()
-                .filter(|playback| playback.speech_id == speech_id)
-            else {
-                continue;
-            };
-            match request {
-                AudioOutputControlRequest::Suspend { speech_id } => {
-                    write_message(&mut writer, &SessionMessage::AudioSuspend { speech_id })?
-                }
-                AudioOutputControlRequest::Resume { speech_id } => {
-                    write_message(&mut writer, &SessionMessage::AudioResume { speech_id })?
-                }
-            }
-        }
-        flush_active_live_playback(&active, &mut responses)?;
-        while let Ok(result) = playback_rx.try_recv() {
-            match result {
-                Ok((response_id, speech_id)) => {
-                    let Some(_playback) =
-                        take_matching_live_playback(&mut active, &response_id, speech_id)
-                    else {
-                        continue;
-                    };
-                    let response = responses
-                        .get_mut(&response_id)
-                        .ok_or_else(|| "Spokesperson playback had no response state".to_string())?;
-                    response.playback_complete = true;
-                    apply_external_coordinator_event(
-                        &mut core,
-                        runtime.as_ref().expect("initialized runtime"),
-                        &serde_json::json!({
-                            "type": "output_audio_buffer.stopped",
-                            "response_id": response_id,
-                        }),
-                    )?;
-                    if response.claim_speech_terminal() {
-                        if let Some(prepare_id) = response.prepare_id {
-                            write_message(
-                                &mut writer,
-                                &SessionMessage::SpeechCompleted {
-                                    id: prepare_id,
-                                    speech_id,
-                                },
-                            )?;
-                        }
-                    }
-                    publish_live_response_if_complete(
-                        &response_id,
-                        &mut responses,
-                        &mut core,
-                        &mut emitted_live_token,
-                        &mut writer,
-                    )?;
-                }
-                Err((response_id, speech_id, message)) => {
-                    let Some(playback) =
-                        take_matching_live_playback(&mut active, &response_id, speech_id)
-                    else {
-                        continue;
-                    };
-                    if message == AUDIO_CANCELLED {
-                        apply_external_coordinator_event(
-                            &mut core,
-                            runtime.as_ref().expect("initialized runtime"),
-                            &serde_json::json!({
-                                "type": "output_audio_buffer.cleared",
-                                "response_id": response_id,
-                            }),
-                        )?;
-                        if let Some(response) = responses.get_mut(&response_id) {
-                            emit_live_interrupted_terminal(response, &playback, &mut writer)?;
-                            send_live_response_truncation(
-                                &response_id,
-                                response,
-                                runtime.as_ref().expect("initialized runtime"),
-                            )?;
-                        }
-                        publish_live_response_if_complete(
-                            &response_id,
-                            &mut responses,
-                            &mut core,
-                            &mut emitted_live_token,
-                            &mut writer,
-                        )?;
-                        continue;
-                    }
-                    if let Some(prepare_id) = playback.prepare_id {
-                        write_message(
-                            &mut writer,
-                            &SessionMessage::SpeechFailed {
-                                id: prepare_id,
-                                speech_id: playback.speech_id,
-                                message: message.clone(),
-                            },
-                        )?;
-                    }
-                    return Err(format!(
-                        "Spokesperson playback {response_id} failed: {message}"
-                    ));
-                }
-            }
-        }
-        if initialized && !turn_gate.input_blocks_output() {
-            start_next_live_playback(
-                &mut active,
-                &mut waiting_responses,
-                &mut responses,
-                &mut next_speech_id,
-                &audio_transport,
-                &audio_control_tx,
-                &playback_tx,
-                &mut core,
-                runtime.as_ref().expect("initialized runtime"),
-                &mut writer,
-            )?;
-        }
-        if !expert_output_reserved(
-            &directive_speeches,
-            &cancelled_directives,
-            active.as_ref(),
-            &responses,
-        ) {
-            if let Some(request) = turn_gate.take_ready(
-                active.is_some()
-                    || pending_voice_update.is_some()
-                    || queued_tts_settings.is_pending(),
-                responses.len(),
-            ) {
-                submit_expert_prepare(
-                    request,
-                    &mut core,
-                    runtime.as_ref().expect("initialized runtime"),
-                    &mut directive_speeches,
-                    &mut next_speech_id,
-                    &mut writer,
-                )?;
-            }
-        }
-        let conversation_active =
-            expert_session_status_cues_suppressed(&turn_gate, active.is_some());
-        let status_sound_result = status_sound_runtime.poll(conversation_active);
-        if let Err(message) = status_sound_result {
-            eprintln!("status sound playback disabled: {message}");
-        }
-
-        let Some(input) = receive_session_input(
-            &control_rx,
-            &pcm_rx,
-            &mut pending_control,
-            &mut processed_pcm,
-        ) else {
-            continue;
-        };
-        match input {
-            Input::Invalid(message) => {
-                write_protocol_fatal(&mut writer, "invalid session input", &message)?;
-                break;
-            }
-            Input::Eof => break,
-            Input::Request(SessionRequest::Shutdown) => {
-                if let Some(request) = queued_tts_settings.take() {
-                    reject_spokesperson_tts_settings(
-                        request.id,
-                        session_tts.as_ref().expect("initialized TTS snapshot"),
-                        "session shut down before the queued settings update could begin".into(),
-                        &mut writer,
-                    )?;
-                }
-                if let Some(delivery) = core.flush_expert_events("Voice conversation ended") {
-                    write_message(
-                        &mut writer,
-                        &SessionMessage::ExpertDelivery {
-                            through_token: emitted_live_token,
-                            events: delivery.events,
-                            display_text: delivery.display_text,
-                            handoff_ids: delivery.handoff_ids,
-                        },
-                    )?;
-                }
-                break;
-            }
-            Input::Pcm(_) if !initialized => {
-                write_protocol_fatal(
-                    &mut writer,
-                    "invalid session input",
-                    "PCM input requires an initialized session",
-                )?;
-                break;
-            }
-            Input::Pcm(frame) => {
-                if spokesperson_pcm_allowed(
-                    input_muted,
-                    active.is_some(),
-                    input_during_tts_slot
-                        .as_ref()
-                        .expect("hello initialized input policy")
-                        .snapshot()?,
-                ) {
-                    if let Some(update) = pending_voice_update
-                        .as_mut()
-                        .filter(|update| update.should_hold_input())
-                    {
-                        if let Err(frame) = update.hold_input(frame, INPUT_QUEUE_CAPACITY) {
-                            if let VoiceUpdatePurpose::SessionRecovery { cause } = update.purpose()
-                            {
-                                write_protocol_fatal(
-                                    &mut writer,
-                                    "Spokesperson session renewal failed",
-                                    &format!(
-                                        "{cause}; replacement could not keep up with microphone input"
-                                    ),
-                                )?;
-                                break;
-                            }
-                            rollback_spokesperson_voice_update(
-                                &mut pending_voice_update,
-                                runtime.as_ref().expect("initialized runtime"),
-                                session_tts.as_ref().expect("initialized TTS snapshot"),
-                                "Spokesperson voice change could not keep up with microphone input"
-                                    .into(),
-                                &mut writer,
-                            )?;
-                            runtime.as_ref().expect("initialized runtime").send(
-                                SpokespersonCommand::InputPcm48Khz(frame.as_samples().to_vec()),
-                            )?;
-                            continue;
-                        }
-                    } else {
-                        runtime.as_ref().expect("initialized runtime").send(
-                            SpokespersonCommand::InputPcm48Khz(frame.as_samples().to_vec()),
-                        )?;
-                    }
-                }
-            }
-            Input::Request(SessionRequest::Hello {
-                id,
-                input_during_tts,
-                status_sound_output_device,
-            }) => {
-                if initialized {
-                    write_protocol_fatal(
-                        &mut writer,
-                        "invalid hello",
-                        "hello may only be sent once",
-                    )?;
-                    break;
-                }
-                let mut spokesperson_config = OpenAiSpokespersonConfig::from_environment()?;
-                if let Some(url) = &config.endpoints.realtime {
-                    spokesperson_config.endpoint.clone_from(url);
-                }
-                apply_spokesperson_startup_settings(&config, &mut spokesperson_config)?;
-                let tts = berd_call::TtsConfigurationSnapshot {
-                    revision: 1,
-                    settings: TtsSettings::OpenAi {
-                        model: spokesperson_config.model().into(),
-                        voice: spokesperson_config.voice().into(),
-                        rate: spokesperson_config.speed(),
-                    },
-                };
-                let input_policy = InputDuringTtsSlot::new(input_during_tts);
-                let snapshot = VoiceSessionSnapshot {
-                    tts: tts.clone(),
-                    input_during_tts: input_policy.snapshot()?,
-                };
-                let (created, events) =
-                    OpenAiSpokespersonRuntime::spawn_observed(spokesperson_config.clone())?;
-                let readiness_deadline = Instant::now() + Duration::from_secs(30);
-                loop {
-                    let remaining = readiness_deadline.saturating_duration_since(Instant::now());
-                    match events.recv_timeout(remaining) {
-                        Ok(SpokespersonEvent::Provider(event)) => {
-                            apply_external_coordinator_event(&mut core, &created, &event)?;
-                        }
-                        Ok(SpokespersonEvent::Ready) => break,
-                        Ok(
-                            SpokespersonEvent::Failed(message)
-                            | SpokespersonEvent::SessionLost(message),
-                        ) => return Err(message),
-                        Ok(_) => {
-                            return Err("Spokesperson emitted an event before readiness".into())
-                        }
-                        Err(_) => return Err("Spokesperson startup timed out".into()),
-                    }
-                }
-                runtime = Some(created);
-                runtime_events = Some(events);
-                runtime_config = Some(spokesperson_config);
-                session_tts = Some(tts);
-                input_during_tts_slot = Some(input_policy);
-                initialized = true;
-                status_sound_runtime.set_output_device(status_sound_output_device);
-                turn_gate.lifecycle.session_started(Instant::now());
-                write_message(
-                    &mut writer,
-                    &SessionMessage::Ready {
-                        id,
-                        protocol: SESSION_PROTOCOL_VERSION,
-                        session: snapshot,
-                    },
-                )?;
-            }
-            Input::Request(_) if !initialized => {
-                write_protocol_fatal(
-                    &mut writer,
-                    "invalid session input",
-                    "hello must be the first request",
-                )?;
-                break;
-            }
-            Input::Request(SessionRequest::PrepareSpeak {
-                id,
-                acknowledgement,
-                text,
-                resolved_handoff_ids,
-            }) => {
-                let request = PendingExpertPrepare {
-                    id,
-                    acknowledgement,
-                    text,
-                    resolved_handoff_ids,
-                };
-                let routing = route_expert_prepare(
-                    &mut turn_gate,
-                    request,
-                    expert_output_reserved(
-                        &directive_speeches,
-                        &cancelled_directives,
-                        active.as_ref(),
-                        &responses,
-                    ),
-                    pending_voice_update.is_some() || queued_tts_settings.is_pending(),
-                    active.is_some(),
-                    responses.len(),
-                );
-                match routing {
-                    ExpertPrepareRouting::Ready(request) => submit_expert_prepare(
-                        request,
-                        &mut core,
-                        runtime.as_ref().expect("initialized runtime"),
-                        &mut directive_speeches,
-                        &mut next_speech_id,
-                        &mut writer,
-                    )?,
-                    ExpertPrepareRouting::Held => {}
-                    ExpertPrepareRouting::InProgress(id) => write_message(
-                        &mut writer,
-                        &SessionMessage::NotAdmitted {
-                            id,
-                            reason: NotAdmittedReason::InProgress,
-                        },
-                    )?,
-                }
-            }
-            Input::Request(SessionRequest::OutputReady { id, speech_id }) => {
-                let valid = directive_speeches
-                    .get(&id)
-                    .is_some_and(|directive| directive.speech_id == speech_id)
-                    || responses.values().any(|response| {
-                        response.prepare_id == Some(id) && response.speech_id == Some(speech_id)
-                    });
-                write_message(
-                    &mut writer,
-                    &SessionMessage::OutputReadyResult {
-                        id,
-                        speech_id,
-                        outcome: if valid {
-                            OutputReadyOutcome::Accepted
-                        } else {
-                            OutputReadyOutcome::Stale
-                        },
-                    },
-                )?;
-            }
-            Input::Request(SessionRequest::QueryState { id, after }) => {
-                write_message(
-                    &mut writer,
-                    &SessionMessage::State {
-                        id,
-                        confirmed_token: core.expert_pipe_cursor(),
-                        utterances_after: core
-                            .events_after(after)
-                            .into_iter()
-                            .map(pending_live_event)
-                            .collect(),
-                        unresolved_handoff_ids: core.unresolved_handoff_ids(),
-                    },
-                )?;
-            }
-            Input::Request(SessionRequest::DismissHandoffs {
-                id,
-                cursor,
-                handoff_ids,
-                reason,
-            }) => match core.dismiss_handoffs_with_context(cursor, &handoff_ids, &reason) {
-                Ok(dismissal) => {
-                    let request = dismissal.request;
-                    for event in request.into_iter().flat_map(|request| request.events) {
-                        runtime
-                            .as_ref()
-                            .expect("initialized runtime")
-                            .send(SpokespersonCommand::Provider(event))?;
-                    }
-                    match dismissal.exchange {
-                        RealtimePipeExchange::Accepted(accepted) => write_message(
-                            &mut writer,
-                            &SessionMessage::DismissHandoffsResult {
-                                id,
-                                outcome: DismissHandoffsOutcome::Applied,
-                                cursor: accepted.cursor,
-                                dismissed_handoff_ids: dismissal.dismissed_handoff_ids,
-                                message: None,
-                            },
-                        )?,
-                        RealtimePipeExchange::Rejected(rejected) => write_message(
-                            &mut writer,
-                            &SessionMessage::DismissHandoffsResult {
-                                id,
-                                outcome: DismissHandoffsOutcome::Rejected,
-                                cursor: rejected.cursor,
-                                dismissed_handoff_ids: Vec::new(),
-                                message: Some(format!(
-                                    "handoff dismissal was rejected: {:?}",
-                                    rejected.reason
-                                )),
-                            },
-                        )?,
-                    }
-                }
-                Err(message) => write_message(
-                    &mut writer,
-                    &SessionMessage::DismissHandoffsResult {
-                        id,
-                        outcome: DismissHandoffsOutcome::Rejected,
-                        cursor: core.expert_pipe_cursor(),
-                        dismissed_handoff_ids: Vec::new(),
-                        message: Some(message),
-                    },
-                )?,
-            },
-            Input::Request(SessionRequest::CompleteExpertTurn {
-                id,
-                retrying_handoff_ids,
-                max_attempts,
-            }) => {
-                let completion =
-                    core.complete_expert_turn_with_delivery(&retrying_handoff_ids, max_attempts)?;
-                emit_live_events(&core, &mut emitted_live_token, &mut writer)?;
-                let (outcome, handoff_ids, attempt, through_token, message, events) =
-                    match completion.reminder {
-                        RealtimeHandoffReminder::None => (
-                            ExpertTurnOutcome::Complete,
-                            Vec::new(),
-                            None,
-                            None,
-                            None,
-                            Vec::new(),
-                        ),
-                        RealtimeHandoffReminder::Reminder {
-                            handoff_ids,
-                            attempt,
-                            message,
-                            ..
-                        } => {
-                            let delivery = completion.expert_delivery.ok_or_else(|| {
-                                "handoff reminder did not produce an Expert delivery".to_string()
-                            })?;
-                            (
-                                ExpertTurnOutcome::Reminder,
-                                handoff_ids,
-                                Some(attempt),
-                                Some(emitted_live_token),
-                                Some(message),
-                                delivery.events,
-                            )
-                        }
-                        RealtimeHandoffReminder::Exhausted {
-                            handoff_ids,
-                            message,
-                        } => (
-                            ExpertTurnOutcome::Exhausted,
-                            handoff_ids,
-                            None,
-                            None,
-                            Some(message),
-                            Vec::new(),
-                        ),
-                    };
-                write_message(
-                    &mut writer,
-                    &SessionMessage::ExpertTurnResult {
-                        id,
-                        outcome,
-                        handoff_ids,
-                        attempt,
-                        through_token,
-                        message,
-                        events,
-                    },
-                )?;
-            }
-            Input::Request(SessionRequest::AudioBeginAccepted { speech_id }) => {
-                handle_live_audio_ack(speech_id, AudioHostAck::BeginAccepted, active.as_ref())?;
-            }
-            Input::Request(SessionRequest::AudioChunkAccepted {
-                speech_id,
-                sequence,
-            }) => {
-                let started = handle_live_audio_ack(
-                    speech_id,
-                    AudioHostAck::ChunkAccepted { sequence },
-                    active.as_ref(),
-                )?;
-                if started {
-                    if let Some(prepare_id) = active.as_ref().and_then(|item| item.prepare_id) {
-                        write_message(
-                            &mut writer,
-                            &SessionMessage::SpeechStarted {
-                                id: prepare_id,
-                                speech_id,
-                            },
-                        )?;
-                    }
-                }
-            }
-            Input::Request(SessionRequest::AudioPlayed {
-                speech_id,
-                played_frames,
-            }) => {
-                handle_live_audio_ack(
-                    speech_id,
-                    AudioHostAck::Played { played_frames },
-                    active.as_ref(),
-                )?;
-            }
-            Input::Request(SessionRequest::AudioDrained {
-                speech_id,
-                sequence,
-                played_frames,
-            }) => {
-                handle_live_audio_ack(
-                    speech_id,
-                    AudioHostAck::Drained {
-                        sequence,
-                        played_frames,
-                    },
-                    active.as_ref(),
-                )?;
-            }
-            Input::Request(SessionRequest::AudioCancelled {
-                speech_id,
-                played_frames,
-            }) => {
-                handle_live_audio_ack(
-                    speech_id,
-                    AudioHostAck::Cancelled { played_frames },
-                    active.as_ref(),
-                )?;
-            }
-            Input::Request(SessionRequest::AudioFailed {
-                speech_id,
-                played_frames,
-                message,
-            }) => {
-                handle_live_audio_ack(
-                    speech_id,
-                    AudioHostAck::Failed {
-                        played_frames,
-                        message,
-                    },
-                    active.as_ref(),
-                )?;
-            }
-            Input::Request(SessionRequest::AudioBeginFailed {
-                speech_id,
-                played_frames,
-                message,
-            }) => {
-                handle_live_audio_ack(
-                    speech_id,
-                    AudioHostAck::BeginFailed {
-                        played_frames,
-                        message,
-                    },
-                    active.as_ref(),
-                )?;
-            }
-            Input::Request(SessionRequest::AudioSuspended {
-                speech_id,
-                played_frames,
-            }) => {
-                handle_live_audio_ack(
-                    speech_id,
-                    AudioHostAck::Suspended { played_frames },
-                    active.as_ref(),
-                )?;
-            }
-            Input::Request(SessionRequest::AudioResumed {
-                speech_id,
-                played_frames,
-            }) => {
-                handle_live_audio_ack(
-                    speech_id,
-                    AudioHostAck::Resumed { played_frames },
-                    active.as_ref(),
-                )?;
-            }
-            Input::Request(SessionRequest::Cancel { id }) => {
-                let unbound_directive =
-                    directive_speeches
-                        .iter()
-                        .find_map(|(directive_id, directive)| {
-                            (directive.prepare_id == id)
-                                .then_some((*directive_id, directive.speech_id))
-                        });
-                let outcome = if turn_gate.cancel_pending(id) {
-                    CancelOutcome::Cancelled
-                } else if let Some((directive_id, _)) = unbound_directive {
-                    directive_speeches.remove(&directive_id);
-                    cancelled_directives.insert(directive_id);
-                    CancelOutcome::Cancelled
-                } else if active
-                    .as_ref()
-                    .is_some_and(|item| item.prepare_id == Some(id))
-                {
-                    cancel_live_playback(&mut active);
-                    CancelOutcome::Cancelled
-                } else {
-                    CancelOutcome::Stale
-                };
-                write_message(
-                    &mut writer,
-                    &SessionMessage::CancelResult {
-                        id,
-                        outcome,
-                        speech_id: None,
-                    },
-                )?;
-                if let Some((_, speech_id)) = unbound_directive {
-                    write_message(
-                        &mut writer,
-                        &SessionMessage::SpeechInterrupted {
-                            id,
-                            speech_id,
-                            spoken_through_utf8: 0,
-                        },
-                    )?;
-                }
-            }
-            Input::Request(SessionRequest::CancelSpeech { id, speech_id }) => {
-                let outcome = if active
-                    .as_ref()
-                    .is_some_and(|playback| playback.speech_id == speech_id)
-                {
-                    CancelOutcome::Cancelled
-                } else {
-                    CancelOutcome::Stale
-                };
-                write_message(
-                    &mut writer,
-                    &SessionMessage::CancelResult {
-                        id,
-                        outcome,
-                        speech_id: Some(speech_id),
-                    },
-                )?;
-                if outcome == CancelOutcome::Cancelled {
-                    cancel_live_playback(&mut active);
-                }
-            }
-            Input::Request(SessionRequest::SetConversationStatus {
-                id,
-                status,
-                settings,
-            }) => {
-                status_sound_runtime.update(status, settings);
-                write_message(
-                    &mut writer,
-                    &SessionMessage::ConversationStatusApplied {
-                        id,
-                        status,
-                        settings,
-                    },
-                )?;
-            }
-            Input::Request(SessionRequest::SetInputMuted { id, active: muted }) => {
-                if pending_voice_update.is_some() {
-                    rollback_spokesperson_voice_update(
-                        &mut pending_voice_update,
-                        runtime.as_ref().expect("initialized runtime"),
-                        session_tts.as_ref().expect("initialized TTS snapshot"),
-                        "Spokesperson voice change was superseded by an input control".into(),
-                        &mut writer,
-                    )?;
-                }
-                set_spokesperson_input_muted(
-                    id,
-                    muted,
-                    &mut input_muted,
-                    || runtime.as_ref().expect("initialized runtime").reset_input(),
-                    &mut writer,
-                )?;
-            }
-            Input::Request(SessionRequest::ResetInput { id }) => {
-                if pending_voice_update.is_some() {
-                    rollback_spokesperson_voice_update(
-                        &mut pending_voice_update,
-                        runtime.as_ref().expect("initialized runtime"),
-                        session_tts.as_ref().expect("initialized TTS snapshot"),
-                        "Spokesperson voice change was superseded by an input reset".into(),
-                        &mut writer,
-                    )?;
-                }
-                reset_spokesperson_input(
-                    id,
-                    || runtime.as_ref().expect("initialized runtime").reset_input(),
-                    &mut writer,
-                )?;
-            }
-            Input::Request(SessionRequest::SetInputDuringTts {
-                id,
-                expected_revision,
-                policy,
-            }) => {
-                if pending_voice_update.is_some() {
-                    rollback_spokesperson_voice_update(
-                        &mut pending_voice_update,
-                        runtime.as_ref().expect("initialized runtime"),
-                        session_tts.as_ref().expect("initialized TTS snapshot"),
-                        "Spokesperson voice change was superseded by an input policy update".into(),
-                        &mut writer,
-                    )?;
-                }
-                set_spokesperson_input_policy(
-                    id,
-                    expected_revision,
-                    policy,
-                    input_during_tts_slot
-                        .as_ref()
-                        .expect("hello initialized input policy"),
-                    &mut writer,
-                )?;
-            }
-            Input::Request(SessionRequest::SetTtsSettings {
-                id,
-                expected_revision,
-                settings,
-            }) => {
-                let request = PendingSpokespersonSettingsUpdate {
-                    id,
-                    base_revision: expected_revision,
-                    settings,
-                };
-                if queued_tts_settings.is_busy(pending_voice_update.is_some()) {
-                    reject_spokesperson_tts_settings(
-                        id,
-                        session_tts.as_ref().expect("initialized TTS snapshot"),
-                        "another Spokesperson settings update is in progress".into(),
-                        &mut writer,
-                    )?;
-                } else if let Err(message) = validate_queued_spokesperson_settings(
-                    &request,
-                    session_tts.as_ref().expect("initialized TTS snapshot"),
-                    runtime_config
-                        .as_ref()
-                        .expect("initialized Spokesperson config"),
-                ) {
-                    reject_spokesperson_tts_settings(
-                        id,
-                        session_tts.as_ref().expect("initialized TTS snapshot"),
-                        message,
-                        &mut writer,
-                    )?;
-                } else {
-                    if queued_tts_settings
-                        .try_enqueue(pending_voice_update.is_some(), request)
-                        .is_err()
-                    {
-                        return Err("validated idle settings queue rejected a request".into());
-                    }
-                }
-            }
-            Input::Request(SessionRequest::SetPaused { .. }) => {}
-        }
-    }
-    cancel_live_playback(&mut active);
-    if let Some(update) = pending_voice_update {
-        update.finish_candidate()?;
-    }
-    if let Some(runtime) = runtime {
-        runtime.finish()?;
-    }
-    Ok(())
-}
-
-fn spawn_live_playback(
-    response_id: String,
-    speech_id: u64,
-    prepare_id: Option<u64>,
-    transport: Arc<AudioPipeTransport>,
-    control: mpsc::Sender<AudioOutputControlRequest>,
-    completed: mpsc::Sender<LivePlaybackResult>,
-) -> Result<LivePlayback, String> {
-    let active = Arc::new(AtomicBool::new(true));
-    let output = Arc::new(RemotePcmAudioOutput::new(
-        speech_id,
-        TtsPcmSpec {
-            sample_rate: 24_000,
-            playback_rate: 1.0,
-        },
-        transport,
-        Arc::clone(&active),
-        control,
-    )?);
-    let (sender, receiver) = mpsc::sync_channel::<LivePlaybackInput>(64);
-    let worker_output = Arc::clone(&output);
-    let worker_response_id = response_id.clone();
-    thread::spawn(move || {
-        let result = (|| {
-            worker_output.start()?;
-            while let Ok(input) = receiver.recv() {
-                match input {
-                    LivePlaybackInput::Samples(samples) => worker_output.write(&samples)?,
-                    LivePlaybackInput::Finish => {
-                        worker_output.finish_writes()?;
-                        let deadline = Instant::now() + Duration::from_secs(3);
-                        while !worker_output.is_drained() {
-                            worker_output.check_health()?;
-                            if Instant::now() >= deadline {
-                                return Err("Spokesperson playback drain timed out".to_string());
-                            }
-                            thread::sleep(Duration::from_millis(5));
-                        }
-                        return Ok((worker_response_id.clone(), speech_id));
-                    }
-                }
-            }
-            Err("Spokesperson playback input closed before completion".to_string())
-        })();
-        let _ = completed.send(result.map_err(|message| (worker_response_id, speech_id, message)));
-    });
-    Ok(LivePlayback {
-        response_id,
-        speech_id,
-        prepare_id,
-        output,
-        active,
-        sender,
-    })
-}
-
-fn submit_expert_prepare(
-    request: PendingExpertPrepare,
-    core: &mut RealtimeExpertSpokespersonSession,
-    runtime: &OpenAiSpokespersonRuntime,
-    directive_speeches: &mut HashMap<u64, DirectiveSpeech>,
-    next_speech_id: &mut u64,
-    writer: &mut impl Write,
-) -> Result<(), String> {
-    if !core
-        .unknown_handoff_ids(&request.resolved_handoff_ids)
-        .is_empty()
-    {
-        return write_message(
-            writer,
-            &SessionMessage::NotAdmitted {
-                id: request.id,
-                reason: NotAdmittedReason::InvalidHandoff,
-            },
-        );
-    }
-    match core.prepare_expert_directive(request.acknowledgement, request.text) {
-        ExpertDirectiveOutcome::Pending(events) => write_message(
-            writer,
-            &SessionMessage::Pending {
-                id: request.id,
-                utterances: events.into_iter().map(pending_live_event).collect(),
-            },
-        ),
-        ExpertDirectiveOutcome::Rejected(_) => write_message(
-            writer,
-            &SessionMessage::NotAdmitted {
-                id: request.id,
-                reason: NotAdmittedReason::EmptyText,
-            },
-        ),
-        ExpertDirectiveOutcome::Accepted {
-            confirmed_token,
-            message,
-            ..
-        } => {
-            let speech_id = *next_speech_id;
-            *next_speech_id += 1;
-            directive_speeches.insert(
-                request.id,
-                DirectiveSpeech {
-                    prepare_id: request.id,
-                    speech_id,
-                    text: message.clone(),
-                },
-            );
-            core.record_expert_turn(message.clone());
-            let resolved_handoff_ids = request.resolved_handoff_ids;
-            core.mark_handoffs_resolving(&resolved_handoff_ids)?;
-            let coordination = core.request_expert_message(RealtimeExpertMessage {
-                message,
-                mode: RealtimeExpertMessageMode::Say,
-                event_id: None,
-                directive_id: Some(request.id),
-                resolved_handoff_ids,
-            })?;
-            for event in coordination.events {
-                runtime.send(SpokespersonCommand::Provider(event))?;
-            }
-            write_message(
-                writer,
-                &SessionMessage::Admitted {
-                    id: request.id,
-                    speech_id,
-                    confirmed_token,
-                },
-            )
-        }
-    }
-}
-
-fn interrupt_unbound_directives(
-    directive_speeches: &mut HashMap<u64, DirectiveSpeech>,
-    cancelled_directives: &mut HashSet<u64>,
-    writer: &mut impl Write,
-) -> Result<(), String> {
-    for (directive_id, directive) in directive_speeches.drain() {
-        cancelled_directives.insert(directive_id);
-        write_message(
-            writer,
-            &SessionMessage::SpeechInterrupted {
-                id: directive.prepare_id,
-                speech_id: directive.speech_id,
-                spoken_through_utf8: 0,
-            },
-        )?;
-    }
-    Ok(())
-}
-
-fn bind_expert_response(
-    response_id: String,
-    directive_id: u64,
-    directive_speeches: &mut HashMap<u64, DirectiveSpeech>,
-    cancelled_directives: &mut HashSet<u64>,
-    responses: &mut HashMap<String, LiveResponse>,
-) -> Result<(), String> {
-    let response = responses
-        .entry(response_id)
-        .or_insert_with(|| LiveResponse::new(None, None));
-    if cancelled_directives.remove(&directive_id) {
-        response.interrupted = true;
-        response.playback_complete = true;
-        return Ok(());
-    }
-    let directive = directive_speeches
-        .remove(&directive_id)
-        .ok_or_else(|| "Spokesperson bound an unknown Expert directive".to_string())?;
-    if response.prepare_id.is_some() || response.speech_id.is_some() {
-        return Err("Spokesperson response was bound more than once".into());
-    }
-    response.prepare_id = Some(directive.prepare_id);
-    response.speech_id = Some(directive.speech_id);
-    response.expert_text = Some(directive.text);
-    Ok(())
-}
-
-fn cancel_live_playback(active: &mut Option<LivePlayback>) {
-    if let Some(playback) = active.as_ref() {
-        playback.active.store(false, Ordering::SeqCst);
-        playback.output.notify_cancel_requested();
-    }
-}
-
-fn emit_live_interrupted_terminal(
-    response: &mut LiveResponse,
-    playback: &LivePlayback,
-    writer: &mut impl Write,
-) -> Result<(), String> {
-    response.playback_complete = true;
-    response.interrupted = true;
-    response
-        .delivery
-        .set_played_frames(playback.output.played_frames());
-    if response.claim_speech_terminal() {
-        if let Some(prepare_id) = playback.prepare_id {
-            write_message(
-                writer,
-                &SessionMessage::SpeechInterrupted {
-                    id: prepare_id,
-                    speech_id: playback.speech_id,
-                    spoken_through_utf8: expert_spoken_through_utf8(response),
-                },
-            )?;
-        }
-    }
-    Ok(())
-}
-
-fn interrupt_live_responses(
-    interrupted_response_ids: &HashSet<String>,
-    active_response_id: Option<&str>,
-    responses: &mut HashMap<String, LiveResponse>,
-    waiting_responses: &mut VecDeque<String>,
-) {
-    for (response_id, response) in responses {
-        if !interrupted_response_ids.contains(response_id) {
-            continue;
-        }
-        response.interrupted = true;
-        response.pending_audio.clear();
-        response.pending_frames = 0;
-        if Some(response_id.as_str()) != active_response_id {
-            response.playback_complete = true;
-        }
-    }
-    waiting_responses.retain(|response_id| !interrupted_response_ids.contains(response_id));
-}
-
-fn take_matching_live_playback(
-    active: &mut Option<LivePlayback>,
-    response_id: &str,
-    speech_id: u64,
-) -> Option<LivePlayback> {
-    active
-        .as_ref()
-        .is_some_and(|playback| {
-            playback.response_id == response_id && playback.speech_id == speech_id
-        })
-        .then(|| active.take())
-        .flatten()
-}
-
-#[allow(clippy::too_many_arguments)]
-fn start_next_live_playback(
-    active: &mut Option<LivePlayback>,
-    waiting_responses: &mut VecDeque<String>,
-    responses: &mut HashMap<String, LiveResponse>,
-    next_speech_id: &mut u64,
-    audio_transport: &Arc<AudioPipeTransport>,
-    audio_control_tx: &mpsc::Sender<AudioOutputControlRequest>,
-    playback_tx: &mpsc::Sender<LivePlaybackResult>,
-    core: &mut RealtimeExpertSpokespersonSession,
-    runtime: &OpenAiSpokespersonRuntime,
-    writer: &mut impl Write,
-) -> Result<(), String> {
-    if active.is_some() {
-        return Ok(());
-    }
-    while let Some(response_id) = waiting_responses.pop_front() {
-        let Some(response) = responses.get_mut(&response_id) else {
-            continue;
-        };
-        if response.interrupted || response.playback_complete || response.pending_audio.is_empty() {
-            continue;
-        }
-        let speech_id = response.speech_id.unwrap_or_else(|| {
-            let id = *next_speech_id;
-            *next_speech_id += 1;
-            response.speech_id = Some(id);
-            id
-        });
-        if response.prepare_id.is_none() {
-            write_message(writer, &SessionMessage::SpokespersonSpeech { speech_id })?;
-        }
-        let playback = spawn_live_playback(
-            response_id.clone(),
-            speech_id,
-            response.prepare_id,
-            Arc::clone(audio_transport),
-            audio_control_tx.clone(),
-            playback_tx.clone(),
-        )?;
-        apply_external_coordinator_event(
-            core,
-            runtime,
-            &serde_json::json!({
-                "type": "output_audio_buffer.started",
-                "response_id": response_id,
-            }),
-        )?;
-        *active = Some(playback);
-        flush_active_live_playback(active, responses)?;
-        break;
-    }
-    Ok(())
-}
-
-fn apply_external_coordinator_event(
-    core: &mut RealtimeExpertSpokespersonSession,
-    runtime: &OpenAiSpokespersonRuntime,
-    event: &serde_json::Value,
-) -> Result<(), String> {
-    let update = core.handle_response_event(event)?;
-    for event in update.events {
-        runtime.send(SpokespersonCommand::Provider(event))?;
-    }
-    Ok(())
-}
-
-fn flush_active_live_playback(
-    active: &Option<LivePlayback>,
-    responses: &mut HashMap<String, LiveResponse>,
-) -> Result<(), String> {
-    let Some(playback) = active.as_ref() else {
-        return Ok(());
-    };
-    let response = responses
-        .get_mut(&playback.response_id)
-        .ok_or_else(|| "Spokesperson playback had no response state".to_string())?;
-    if !playback.active.load(Ordering::SeqCst) {
-        response.pending_audio.clear();
-        response.pending_frames = 0;
-        return Ok(());
-    }
-    while let Some(samples) = response.pending_audio.pop_front() {
-        let sample_count = samples.len();
-        match playback
-            .sender
-            .try_send(LivePlaybackInput::Samples(samples))
-        {
-            Ok(()) => response.pending_frames -= sample_count,
-            Err(mpsc::TrySendError::Full(LivePlaybackInput::Samples(samples))) => {
-                response.pending_audio.push_front(samples);
-                break;
-            }
-            Err(mpsc::TrySendError::Disconnected(_)) => {
-                return Err("Spokesperson playback worker closed while streaming".into())
-            }
-            Err(mpsc::TrySendError::Full(LivePlaybackInput::Finish)) => {
-                unreachable!("audio queue contains samples")
-            }
-        }
-    }
-    if response.audio_done && response.pending_audio.is_empty() && !response.finish_sent {
-        match playback.sender.try_send(LivePlaybackInput::Finish) {
-            Ok(()) => response.finish_sent = true,
-            Err(mpsc::TrySendError::Full(LivePlaybackInput::Finish)) => {}
-            Err(mpsc::TrySendError::Disconnected(_)) => {
-                return Err("Spokesperson playback worker closed before finish".into())
-            }
-            Err(mpsc::TrySendError::Full(LivePlaybackInput::Samples(_))) => {
-                unreachable!("finish queue contains finish")
-            }
-        }
-    }
-    Ok(())
-}
-
-fn mark_live_response_server_finished(response: &mut LiveResponse) {
-    response.server_finished = true;
-    // `response.done` is the authoritative end of the provider response. Some
-    // terminal paths do not emit a separate output_audio.done event.
-    response.audio_done = true;
-}
-
-fn handle_live_audio_ack(
-    speech_id: u64,
-    ack: AudioHostAck,
-    active: Option<&LivePlayback>,
-) -> Result<bool, String> {
-    let playback = active
-        .filter(|item| item.speech_id == speech_id)
-        .ok_or_else(|| "audio acknowledgement does not match Spokesperson playback".to_string())?;
-    playback.output.handle_ack(ack)
-}
-
-fn pending_live_event(
-    event: berd_call::causal_inbox::CausalMessage<LiveSideEvent>,
-) -> berd_call::protocol::PendingUtterance {
-    let origin = live_event_origin(&event.payload);
-    berd_call::protocol::PendingUtterance {
-        token: event.token,
-        text: render_live_event(event.token, &event.payload),
-        origin: Some(origin),
-    }
-}
-
-fn live_event_origin(event: &LiveSideEvent) -> berd_call::protocol::UtteranceOrigin {
-    match event {
-        LiveSideEvent::UserTranscript { .. } => berd_call::protocol::UtteranceOrigin::User,
-        LiveSideEvent::SpokespersonTranscript { .. } => {
-            berd_call::protocol::UtteranceOrigin::Spokesperson
-        }
-        LiveSideEvent::Handoff { .. } => berd_call::protocol::UtteranceOrigin::Handoff,
-    }
-}
-
-fn render_live_event(token: u64, event: &LiveSideEvent) -> String {
-    match event {
-        LiveSideEvent::UserTranscript { text } => {
-            expert_transcript_message(RealtimeTranscriptSpeaker::User, text, false)
-        }
-        LiveSideEvent::SpokespersonTranscript { text, interrupted } => {
-            expert_transcript_message(RealtimeTranscriptSpeaker::Spokesperson, text, *interrupted)
-        }
-        LiveSideEvent::Handoff { call_id, message } => {
-            expert_handoff_message(call_id, token, message)
-        }
-    }
-}
-
-fn emit_live_events(
-    core: &RealtimeExpertSpokespersonSession,
-    emitted_token: &mut u64,
-    writer: &mut impl Write,
-) -> Result<(), String> {
-    for event in core.events_after(*emitted_token) {
-        write_message(
-            writer,
-            &SessionMessage::LiveEvent {
-                token: event.token,
-                text: render_live_event(event.token, &event.payload),
-                origin: Some(live_event_origin(&event.payload)),
-            },
-        )?;
-        *emitted_token = event.token;
-    }
-    Ok(())
-}
-
-fn record_and_emit_live_event(
-    core: &mut RealtimeExpertSpokespersonSession,
-    emitted_live_token: &mut u64,
-    event: LiveSideEvent,
-    writer: &mut impl Write,
-) -> Result<LiveSideEvent, String> {
-    let (recorded, expert_delivery) = core.record_live_event_with_delivery(event)?;
-    emit_live_events(core, emitted_live_token, writer)?;
-    if let Some(delivery) = expert_delivery {
-        write_message(
-            writer,
-            &SessionMessage::ExpertDelivery {
-                through_token: *emitted_live_token,
-                events: delivery.events,
-                display_text: delivery.display_text,
-                handoff_ids: delivery.handoff_ids,
-            },
-        )?;
-    }
-    Ok(recorded.payload)
-}
-
-fn publish_live_response_if_complete(
-    response_id: &str,
-    responses: &mut HashMap<String, LiveResponse>,
-    core: &mut RealtimeExpertSpokespersonSession,
-    emitted_live_token: &mut u64,
-    writer: &mut impl Write,
-) -> Result<(), String> {
-    if responses.get(response_id).is_some_and(|response| {
-        response.server_finished
-            && response.playback_complete
-            && !response.delivery.truncation_pending()
-            && !response.delivery.has_transcript()
-    }) {
-        responses.remove(response_id);
-        core.finish_spokesperson_turn(response_id, String::new(), false);
-        return Ok(());
-    }
-    let ready = responses.get(response_id).is_some_and(|response| {
-        response.server_finished
-            && response.playback_complete
-            && !response.delivery.truncation_pending()
-            && response.delivery.has_transcript()
-    });
-    if !ready {
-        return Ok(());
-    }
-    let response = responses
-        .remove(response_id)
-        .expect("ready response exists");
-    let transcript = response
-        .delivery
-        .delivered_transcript(response.interrupted, 24_000);
-    core.finish_spokesperson_turn(response_id, transcript.clone(), response.interrupted);
-    record_and_emit_live_event(
-        core,
-        emitted_live_token,
-        LiveSideEvent::SpokespersonTranscript {
-            text: transcript,
-            interrupted: response.interrupted,
-        },
-        writer,
-    )?;
-    Ok(())
-}
-
-fn live_truncation_pending(responses: &HashMap<String, LiveResponse>) -> bool {
-    responses
-        .values()
-        .any(|response| response.delivery.truncation_pending())
-}
-
-fn require_live_response_truncation(response: &mut LiveResponse) -> Result<(), String> {
-    response.delivery.require_all_truncations()
-}
-
-fn send_live_response_truncation(
-    response_id: &str,
-    response: &mut LiveResponse,
-    runtime: &OpenAiSpokespersonRuntime,
-) -> Result<(), String> {
-    if !response.delivery.truncation_pending() {
-        return Ok(());
-    }
-    for truncation in response.delivery.unsent_truncations(24_000)? {
-        runtime.send(SpokespersonCommand::TruncateOutput {
-            response_id: response_id.into(),
-            item_id: truncation.key.item_id.clone(),
-            content_index: truncation.key.content_index,
-            audio_end_ms: truncation.audio_end_ms,
-        })?;
-        response.delivery.mark_truncation_sent(
-            &truncation.key.item_id,
-            truncation.key.output_index,
-            truncation.key.content_index,
-        )?;
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-fn live_truncation_audio_end_ms(response: &LiveResponse) -> Result<u64, String> {
-    response
-        .delivery
-        .played_frames()
-        .min(response.delivery.total_frames())
-        .checked_mul(1_000)
-        .ok_or_else(|| "Spokesperson truncation duration overflowed".to_string())
-        .map(|frames_ms| frames_ms / 24_000)
-}
-
-fn expert_spoken_through_utf8(response: &LiveResponse) -> u64 {
-    let Some(expert_text) = response.expert_text.as_deref() else {
-        return 0;
-    };
-    if !response.delivery.has_transcript() {
-        return 0;
-    }
-    let delivered = response
-        .delivery
-        .delivered_transcript(response.interrupted, 24_000);
-    let cutoff = expert_text
-        .char_indices()
-        .zip(delivered.chars())
-        .take_while(|((_, expert), spoken)| expert == spoken)
-        .map(|((offset, expert), _)| offset + expert.len_utf8())
-        .last()
-        .unwrap_or(0);
-    let completed_word_cutoff = if cutoff == expert_text.len()
-        || expert_text[cutoff..]
-            .chars()
-            .next()
-            .is_some_and(|character| !character.is_alphanumeric())
-    {
-        cutoff
-    } else {
-        expert_text[..cutoff]
-            .char_indices()
-            .scan(false, |in_word, (offset, character)| {
-                let word_ended = *in_word && !character.is_alphanumeric();
-                *in_word = character.is_alphanumeric();
-                Some(word_ended.then_some(offset))
-            })
-            .flatten()
-            .last()
-            .unwrap_or(0)
-    };
-    u64::try_from(completed_word_cutoff).expect("spoken Expert prefix fits in u64")
-}
-
 fn acknowledge_output_ready(
     current: &mut ActivePlayback,
     input_controls: Option<&VoiceInputControls>,
@@ -5239,8 +2768,8 @@ fn acknowledge_output_ready(
 ) -> Result<(), String> {
     current.assistant_activity = input_controls.map(|controls| {
         controls
-            .begin_assistant_activity(0.65, current.input_during_tts.policy)
-            .expect("balanced assistant threshold is valid")
+            .begin_assistant_activity(current.input_during_tts.policy)
+            .expect("assistant activity generation is available")
     });
     write_message(
         writer,
@@ -5329,7 +2858,7 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
     let mut rate = None;
     let mut stt_backend = "macos";
     let mut stt_model_dir = None;
-    let mut mode = SessionMode::Conventional;
+    let mut stt_hints = Vec::new();
     let mut endpoints = SessionEndpointOverrides::default();
     let mut index = 2;
     while index < args.len() {
@@ -5354,18 +2883,19 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
             }
             "--stt-backend" => stt_backend = value,
             "--stt-model-dir" => stt_model_dir = Some(PathBuf::from(value)),
-            "--realtime-url" => {
-                endpoints.realtime = Some(parse_endpoint_url(value, "--realtime-url", true)?)
+            "--stt-hint" => {
+                let hint = value.trim();
+                if hint.is_empty() || hint.len() > 256 || stt_hints.len() >= 100 {
+                    return Err(
+                        "--stt-hint accepts up to 100 nonempty phrases of at most 256 bytes".into(),
+                    );
+                }
+                if !stt_hints.iter().any(|existing| existing == hint) {
+                    stt_hints.push(hint.to_string());
+                }
             }
             "--stt-url" => endpoints.stt = Some(parse_endpoint_url(value, "--stt-url", true)?),
             "--tts-url" => endpoints.tts = Some(parse_endpoint_url(value, "--tts-url", false)?),
-            "--mode" => {
-                mode = match value.as_str() {
-                    "conventional" => SessionMode::Conventional,
-                    "expert-spokesperson" => SessionMode::ExpertSpokesperson,
-                    _ => return Err("--mode must be conventional or expert-spokesperson".into()),
-                }
-            }
             "--pcm-output-fd" => {}
             _ => return Err(format!("unknown argument: {flag}").into()),
         }
@@ -5373,14 +2903,6 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
     }
     let tts = build_tts_backend_config(backend, voice, language, model_dir, rate)?;
     let stt = build_stt_backend_config(stt_backend, stt_model_dir)?;
-    if endpoints.realtime.is_some() && mode != SessionMode::ExpertSpokesperson {
-        return Err("--realtime-url requires --mode expert-spokesperson".into());
-    }
-    if mode == SessionMode::ExpertSpokesperson
-        && (endpoints.tts.is_some() || endpoints.stt.is_some())
-    {
-        return Err("--tts-url and --stt-url apply only to conventional mode; Expert-Spokesperson uses --realtime-url".into());
-    }
     if endpoints.tts.is_some() && !matches!(tts, TtsBackendConfig::OpenAi { .. }) {
         return Err("--tts-url requires --tts-backend openai".into());
     }
@@ -5390,7 +2912,7 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
     Ok(SessionConfig {
         tts,
         stt,
-        mode,
+        stt_hints,
         endpoints,
     })
 }
@@ -6007,7 +3529,7 @@ fn create_stt_benchmark_report(
         &pack,
         config.runs,
         config.mode,
-        || create_input_runtime(&config.stt, None),
+        || create_input_runtime(&config.stt, None, &[]),
     )))
 }
 
@@ -6019,7 +3541,7 @@ fn stt_benchmark_target(config: &SttBackendConfig) -> Result<SttBenchmarkTarget,
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned()),
             locale: None,
-            vad_threshold: 0.5,
+            vad_threshold: DEFAULT_VAD_THRESHOLD,
             endpoint_source: None,
             model_source: Some("explicit --stt-model-dir".into()),
             credential_source: None,
@@ -6032,7 +3554,7 @@ fn stt_benchmark_target(config: &SttBackendConfig) -> Result<SttBenchmarkTarget,
                     backend: "macos".into(),
                     model: Some(status.model_status),
                     locale: status.locale,
-                    vad_threshold: 0.5,
+                    vad_threshold: DEFAULT_VAD_THRESHOLD,
                     endpoint_source: None,
                     model_source: Some("installed current-locale model".into()),
                     credential_source: None,
@@ -6067,10 +3589,14 @@ fn stt_benchmark_target(config: &SttBackendConfig) -> Result<SttBenchmarkTarget,
                 backend: "openai".into(),
                 model: Some(model),
                 locale: None,
-                vad_threshold: 0.5,
+                vad_threshold: DEFAULT_VAD_THRESHOLD,
                 endpoint_source: Some(endpoint_source.into()),
                 model_source: Some(model_source.into()),
-                credential_source: Some("OPENAI_API_KEY environment variable".into()),
+                credential_source: Some(format!(
+                    "{} environment variable",
+                    berd_call::openai::openai_key_var("OPENAI_STT_API_KEY")
+                        .unwrap_or("OPENAI_STT_API_KEY")
+                )),
             })
         }
     }
@@ -6115,10 +3641,8 @@ fn create_openai_tts_configuration(
     voice: String,
     endpoint: Option<&str>,
 ) -> Result<TtsConfiguration, String> {
-    let api_key = std::env::var("OPENAI_API_KEY")
-        .ok()
-        .filter(|key| !key.trim().is_empty())
-        .ok_or_else(|| "OPENAI_API_KEY is required".to_string())?;
+    let api_key = berd_call::openai::openai_key("OPENAI_TTS_API_KEY")
+        .ok_or_else(|| "OPENAI_TTS_API_KEY or OPENAI_API_KEY is required".to_string())?;
     let base =
         std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".into());
     Ok(TtsConfiguration::openai(
@@ -6345,6 +3869,7 @@ fn run_synthesis_command(config: SynthesisConfig) -> Result<(), SynthesisFailure
 fn create_input_runtime(
     config: &SttBackendConfig,
     endpoint_override: Option<&str>,
+    _hints: &[String],
 ) -> Result<
     (
         VoiceInputRuntime,
@@ -6365,7 +3890,9 @@ fn create_input_runtime(
                     )
                 })?;
                 validate_macos_stt_status(&status)?;
-                VoiceInputEngineConfig::MacSpeech
+                VoiceInputEngineConfig::MacSpeech {
+                    hints: _hints.to_vec(),
+                }
             }
             #[cfg(not(target_os = "macos"))]
             {
@@ -6376,10 +3903,9 @@ fn create_input_runtime(
             }
         }
         SttBackendConfig::OpenAi => {
-            let api_key = std::env::var("OPENAI_API_KEY")
-                .ok()
-                .filter(|key| !key.trim().is_empty())
-                .ok_or_else(|| "OPENAI_API_KEY is required for OpenAI STT".to_string())?;
+            let api_key = berd_call::openai::openai_key("OPENAI_STT_API_KEY").ok_or_else(|| {
+                "OPENAI_STT_API_KEY or OPENAI_API_KEY is required for OpenAI STT".to_string()
+            })?;
             let endpoint = endpoint_override
                 .map(str::to_string)
                 .or_else(|| {
@@ -6408,7 +3934,7 @@ fn create_input_runtime(
     };
     VoiceInputRuntime::start(VoiceInputConfig {
         engine,
-        speech_vad_threshold: 0.5,
+        speech_vad_threshold: DEFAULT_VAD_THRESHOLD,
         controls: VoiceInputControls::default(),
     })
     .map_err(|error| match config {
@@ -6521,7 +4047,7 @@ fn public_tts_rejection_message(kind: TtsConfigurationRejectionKind) -> &'static
 fn public_tts_startup_error(config: &TtsBackendConfig) -> String {
     match config {
         TtsBackendConfig::OpenAi { .. } => {
-            "OpenAI TTS could not initialize; verify OPENAI_API_KEY and the selected model and voice"
+            "OpenAI TTS could not initialize; verify OPENAI_TTS_API_KEY or OPENAI_API_KEY and the selected model and voice"
                 .into()
         }
         TtsBackendConfig::Siri { .. } =>
@@ -6543,7 +4069,7 @@ fn public_stt_startup_error(config: &SttBackendConfig) -> String {
                 .into()
         }
         SttBackendConfig::OpenAi => {
-            "OpenAI speech recognition could not initialize; verify OPENAI_API_KEY and the selected transcription model"
+            "OpenAI speech recognition could not initialize; verify OPENAI_STT_API_KEY or OPENAI_API_KEY and the selected transcription model"
                 .into()
         }
     }
@@ -6585,20 +4111,152 @@ fn reject_tts_configuration_update(
     )
 }
 
+/// A held reply, with the voice it asked for.
+type HeldPrepare = (PrepareRequest, Option<TtsConfigurationLease>);
+
+/// The voice one reply asked for, or `None` after telling the host it can't
+/// have it.
+fn speak_voice(
+    slot: Option<&ConfiguredTtsSlot>,
+    voice: Option<String>,
+    language: Option<String>,
+    id: u64,
+    writer: &mut impl Write,
+) -> Result<Option<Option<TtsConfigurationLease>>, String> {
+    let Some(voice) = voice else {
+        return Ok(Some(None));
+    };
+    let lease = slot
+        .ok_or_else(|| "this call's replies have no voice of their own".to_string())
+        .and_then(|slot| slot.lease_voice(&voice, language.as_deref()));
+    match lease {
+        Ok(lease) => Ok(Some(Some(lease))),
+        Err(message) => {
+            refuse_voice(id, &voice, &message, writer)?;
+            Ok(None)
+        }
+    }
+}
+
+fn refuse_voice(
+    id: u64,
+    voice: &str,
+    message: &str,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    eprintln!("berd-call: speech {id} can't use voice {voice}: {message}");
+    write_message(
+        writer,
+        &SessionMessage::NotAdmitted {
+            id,
+            reason: NotAdmittedReason::InvalidVoice,
+        },
+    )
+}
+
+/// Speech requests waiting on a worker to build a voice the session hasn't used yet, since that
+/// can take seconds and the session must keep serving audio and input meanwhile.
+struct VoiceBuilds {
+    controls: mpsc::Sender<OrderedControl>,
+    pending: HashSet<u64>,
+}
+
+impl VoiceBuilds {
+    /// Takes the requests that wait on a voice, and hands each back once its voice is built.
+    fn filter(
+        &mut self,
+        input: Input,
+        slot: Option<&Arc<ConfiguredTtsSlot>>,
+        writer: &mut impl Write,
+    ) -> Result<Option<Input>, String> {
+        match input {
+            Input::VoiceBuilt(request) => {
+                let SessionRequest::PrepareSpeak { id, .. } = request else {
+                    unreachable!("only speech waits on a voice")
+                };
+                Ok(self.pending.remove(&id).then_some(Input::Request(request)))
+            }
+            Input::VoiceUnavailable { id, voice, message } => {
+                if self.pending.remove(&id) {
+                    refuse_voice(id, &voice, &message, writer)?;
+                }
+                Ok(None)
+            }
+            Input::Request(SessionRequest::Cancel { id }) if self.pending.remove(&id) => {
+                write_message(
+                    writer,
+                    &SessionMessage::CancelResult {
+                        id,
+                        outcome: CancelOutcome::Cancelled,
+                        speech_id: None,
+                    },
+                )?;
+                write_message(
+                    writer,
+                    &SessionMessage::NotAdmitted {
+                        id,
+                        reason: NotAdmittedReason::Cancelled,
+                    },
+                )?;
+                Ok(None)
+            }
+            Input::Request(request @ SessionRequest::PrepareSpeak { id, .. }) => {
+                let missing = slot.and_then(|slot| {
+                    missing_voice(slot, &request).map(|voice| (Arc::clone(slot), voice))
+                });
+                let Some((slot, (voice, language))) = missing else {
+                    return Ok(Some(Input::Request(request)));
+                };
+                let controls = self.controls.clone();
+                self.pending.insert(id);
+                thread::spawn(move || {
+                    let input = match slot.lease_voice(&voice, language.as_deref()) {
+                        Ok(_) => Input::VoiceBuilt(request),
+                        Err(message) => Input::VoiceUnavailable { id, voice, message },
+                    };
+                    let _ = controls.send(OrderedControl {
+                        after_pcm: 0,
+                        input,
+                    });
+                });
+                Ok(None)
+            }
+            input => Ok(Some(input)),
+        }
+    }
+}
+
+/// The voice and language a speech request asks for, when the slot hasn't built them yet.
+fn missing_voice(
+    slot: &ConfiguredTtsSlot,
+    request: &SessionRequest,
+) -> Option<(String, Option<String>)> {
+    let SessionRequest::PrepareSpeak {
+        voice: Some(voice),
+        language,
+        ..
+    } = request
+    else {
+        return None;
+    };
+    (!slot.has_voice(voice, language.as_deref())).then(|| (voice.clone(), language.clone()))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn process_prepare(
     request: PrepareRequest,
+    voice: Option<TtsConfigurationLease>,
     core: &mut SessionCore,
     tts_slot: &ConfiguredTtsSlot,
     input_during_tts_slot: &InputDuringTtsSlot,
     active: &mut Option<ActivePlayback>,
-    held: &mut Option<PrepareRequest>,
+    held: &mut Option<HeldPrepare>,
     writer: &mut impl Write,
 ) -> Result<(), String> {
     let id = request.id;
     match core.prepare(request.clone()) {
         PrepareOutcome::Hold => {
-            *held = Some(request);
+            *held = Some((request, voice));
         }
         PrepareOutcome::Pending(utterances) => {
             write_message(writer, &SessionMessage::Pending { id, utterances })?;
@@ -6611,7 +4269,7 @@ fn process_prepare(
             confirmed_token,
             text,
         } => {
-            let tts = tts_slot.lease()?;
+            let tts = voice.map_or_else(|| tts_slot.lease(), Ok)?;
             let input_during_tts = input_during_tts_slot.snapshot()?;
             *active = Some(ActivePlayback {
                 prepare_id: id,
@@ -6639,7 +4297,7 @@ fn process_prepare(
 }
 
 fn reevaluate_held(
-    held: &mut Option<PrepareRequest>,
+    held: &mut Option<HeldPrepare>,
     core: &mut SessionCore,
     tts_slot: Option<&ConfiguredTtsSlot>,
     input_during_tts_slot: Option<&InputDuringTtsSlot>,
@@ -6647,9 +4305,10 @@ fn reevaluate_held(
     writer: &mut impl Write,
 ) -> Result<(), String> {
     if !core.user_speaking() && !core.recognition_pending() && active.is_none() {
-        if let Some(pending_prepare) = held.take() {
+        if let Some((pending_prepare, voice)) = held.take() {
             process_prepare(
                 pending_prepare,
+                voice,
                 core,
                 tts_slot.expect("held prepare requires initialized TTS"),
                 input_during_tts_slot
@@ -6687,9 +4346,17 @@ fn handle_voice_input_event(
             )?;
             update_provisional_suspension(core, active)?;
         }
+        VoiceInputEvent::InterimTranscript { text, .. } => write_message(
+            writer,
+            &SessionMessage::UserInterim {
+                token: *next_token,
+                text,
+            },
+        )?,
         VoiceInputEvent::FinalTranscript {
             text,
             storage_receipt,
+            ..
         } => store_and_publish_voice_final(
             text,
             || storage_receipt.stored(),
@@ -6768,14 +4435,7 @@ fn store_and_publish_voice_final(
     *next_token = next;
     core.add_final(token, text.clone())?;
     mark_stored();
-    write_message(
-        writer,
-        &SessionMessage::LiveEvent {
-            token,
-            text,
-            origin: None,
-        },
-    )?;
+    write_message(writer, &SessionMessage::LiveEvent { token, text })?;
     interrupt_active(core, active, writer)
 }
 
@@ -6984,12 +4644,12 @@ fn handle_reset_input(
 
 fn handle_cancel(
     id: u64,
-    held: &mut Option<PrepareRequest>,
+    held: &mut Option<HeldPrepare>,
     core: &mut SessionCore,
     active: &mut Option<ActivePlayback>,
     writer: &mut impl Write,
 ) -> Result<(), String> {
-    if held.as_ref().is_some_and(|held| held.id == id) {
+    if held.as_ref().is_some_and(|(held, _)| held.id == id) {
         held.take();
         write_message(
             writer,
@@ -7122,7 +4782,6 @@ fn write_state(
             id,
             confirmed_token: core.confirmed_token(),
             utterances_after: core.utterances_after(after),
-            unresolved_handoff_ids: Vec::new(),
         },
     )
 }
@@ -7133,6 +4792,41 @@ fn write_message(writer: &mut impl Write, message: &SessionMessage) -> Result<()
         .write_all(b"\n")
         .and_then(|_| writer.flush())
         .map_err(|error| error.to_string())
+}
+
+struct SessionInputProgress {
+    phase: Mutex<(&'static str, Instant)>,
+    processed: AtomicU64,
+}
+
+impl Default for SessionInputProgress {
+    fn default() -> Self {
+        Self {
+            phase: Mutex::new(("init", Instant::now())),
+            processed: AtomicU64::new(0),
+        }
+    }
+}
+
+impl SessionInputProgress {
+    fn enter(&self, phase: &'static str) {
+        *self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = (phase, Instant::now());
+    }
+
+    fn overflow(&self, accepted: u64) -> String {
+        // Never wait on the consumer. The phase lock is held only while replacing this tuple.
+        let (phase, age) = self
+            .phase
+            .try_lock()
+            .map(|state| (state.0, state.1.elapsed().as_millis()))
+            .unwrap_or(("transition", 0));
+        // Processed counts dequeued frames, not completed recognition work; this snapshot may race.
+        let processed = self.processed.load(Ordering::Relaxed);
+        format!("berd-call: PCM overflow accepted={accepted} processed={processed} phase={phase} phase_age_ms={age}")
+    }
 }
 
 fn receive_session_input(
@@ -7184,6 +4878,8 @@ fn read_framed_requests(
     mut reader: impl Read,
     control_sender: mpsc::Sender<OrderedControl>,
     pcm_sender: SyncSender<Box<VoiceInputFrame>>,
+    progress: &SessionInputProgress,
+    diagnostics: &mut impl Write,
 ) {
     let mut sent_pcm = 0_u64;
     loop {
@@ -7201,10 +4897,12 @@ fn read_framed_requests(
             Input::Pcm(frame) => match pcm_sender.try_send(frame) {
                 Ok(()) => sent_pcm = sent_pcm.saturating_add(1),
                 Err(mpsc::TrySendError::Full(_)) => {
+                    let diagnostic = progress.overflow(sent_pcm);
                     let _ = control_sender.send(OrderedControl {
                         after_pcm: sent_pcm,
                         input: Input::Invalid("session PCM input queue is full".into()),
                     });
+                    let _ = writeln!(diagnostics, "{diagnostic}");
                     return;
                 }
                 Err(mpsc::TrySendError::Disconnected(_)) => return,
@@ -7286,8 +4984,6 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         | SessionRequest::PrepareSpeak { id, .. }
         | SessionRequest::OutputReady { id, .. }
         | SessionRequest::QueryState { id, .. }
-        | SessionRequest::DismissHandoffs { id, .. }
-        | SessionRequest::CompleteExpertTurn { id, .. }
         | SessionRequest::Cancel { id }
         | SessionRequest::CancelSpeech { id, .. } => Some(*id),
         SessionRequest::SetPaused { .. }
@@ -7311,36 +5007,6 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         }
         SessionRequest::PrepareSpeak { text, .. } if text.len() > MAX_SPEAK_TEXT_BYTES => {
             return Err("speak text exceeds 16 KiB".into())
-        }
-        SessionRequest::PrepareSpeak {
-            resolved_handoff_ids,
-            ..
-        } => validate_handoff_ids(resolved_handoff_ids)?,
-        SessionRequest::DismissHandoffs {
-            handoff_ids,
-            reason,
-            ..
-        } => {
-            validate_handoff_ids(handoff_ids)?;
-            if handoff_ids.is_empty() {
-                return Err("at least one handoff id is required".into());
-            }
-            if reason.trim().is_empty() {
-                return Err("handoff dismissal reason must not be empty".into());
-            }
-            if reason.len() > MAX_HANDOFF_REASON_BYTES {
-                return Err("handoff dismissal reason exceeds 4 KiB".into());
-            }
-        }
-        SessionRequest::CompleteExpertTurn {
-            retrying_handoff_ids,
-            max_attempts,
-            ..
-        } => {
-            validate_handoff_ids(retrying_handoff_ids)?;
-            if *max_attempts == 0 || *max_attempts > 10 {
-                return Err("max attempts must be between 1 and 10".into());
-            }
         }
         SessionRequest::OutputReady { speech_id: 0, .. } => {
             return Err("speech id must be positive".into())
@@ -7382,29 +5048,6 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
     Ok(request)
 }
 
-fn validate_handoff_ids(handoff_ids: &[String]) -> Result<(), String> {
-    if handoff_ids.len() > MAX_HANDOFF_IDS {
-        return Err("request contains more than 64 handoff ids".into());
-    }
-    if handoff_ids
-        .iter()
-        .any(|handoff_id| handoff_id.trim().is_empty())
-    {
-        return Err("handoff id must not be empty".into());
-    }
-    if handoff_ids
-        .iter()
-        .any(|handoff_id| handoff_id.len() > MAX_HANDOFF_ID_BYTES)
-    {
-        return Err("handoff id exceeds 512 bytes".into());
-    }
-    let unique = handoff_ids.iter().collect::<std::collections::HashSet<_>>();
-    if unique.len() != handoff_ids.len() {
-        return Err("handoff ids must be unique".into());
-    }
-    Ok(())
-}
-
 fn spawn_playback(
     speech_id: u64,
     text: String,
@@ -7436,14 +5079,12 @@ fn play_tts(
     active: &AtomicBool,
 ) -> Result<(bool, DeliveryProgress), PlaybackFailure> {
     if let Err(message) = output.start() {
+        let delivery = DeliveryProgress {
+            sample_rate: backend.pcm_spec().sample_rate,
+            segments: Vec::new(),
+        };
         if message == AUDIO_CANCELLED {
-            return Ok((
-                false,
-                DeliveryProgress {
-                    sample_rate: backend.pcm_spec().sample_rate,
-                    segments: Vec::new(),
-                },
-            ));
+            return Ok((false, delivery));
         }
         return Err(PlaybackFailure {
             message,
@@ -7496,49 +5137,78 @@ fn synthesize_to_output_with_finish(
             message,
             output_quiescent: false,
         })?;
-    if playback
-        .synthesize_segment(backend, text, &mut |_| Ok(()), on_started, &mut |_| Ok(()))
-        .map_err(|failure| PlaybackFailure {
-            message: failure.message,
-            output_quiescent: failure.output_quiescent,
-        })?
-        == OutboundOutcome::Interrupted
-    {
-        return Ok((false, playback.snapshot()));
+    let completed = (|| {
+        if playback
+            .synthesize_segment(backend, text, &mut |_| Ok(()), on_started, &mut |_| Ok(()))
+            .map_err(|failure| PlaybackFailure {
+                message: failure.message,
+                output_quiescent: failure.output_quiescent,
+            })?
+            == OutboundOutcome::Interrupted
+        {
+            return Ok(false);
+        }
+        if let Err(message) = finish_writes() {
+            let output_quiescent = output.cancel_and_snapshot().is_ok();
+            return Err(PlaybackFailure {
+                message,
+                output_quiescent,
+            });
+        }
+        let outcome = playback
+            .finish(
+                DrainPolicy {
+                    timeout: Some(Duration::from_secs(2)),
+                    timeout_outcome: DrainTimeoutOutcome::Fail,
+                    ..DrainPolicy::default()
+                },
+                &mut |_| Ok(()),
+            )
+            .map_err(|failure| PlaybackFailure {
+                message: failure.message,
+                output_quiescent: failure.output_quiescent,
+            })?;
+        Ok(outcome == OutboundOutcome::Completed)
+    })();
+    match completed {
+        Ok(completed) => Ok((completed, playback.snapshot())),
+        // Speech the host stopped playing, as when the speakers change, ends where it was cut off, as if you had talked over it.
+        Err(failure) if failure.message == AUDIO_HOST_FAILED && failure.output_quiescent => {
+            Ok((false, playback.snapshot()))
+        }
+        Err(failure) => Err(failure),
     }
-    if let Err(message) = finish_writes() {
-        let output_quiescent = output.cancel_and_snapshot().is_ok();
-        return Err(PlaybackFailure {
-            message,
-            output_quiescent,
-        });
-    }
-    let outcome = playback
-        .finish(
-            DrainPolicy {
-                timeout: Some(Duration::from_secs(2)),
-                timeout_outcome: DrainTimeoutOutcome::Fail,
-                ..DrainPolicy::default()
-            },
-            &mut |_| Ok(()),
-        )
-        .map_err(|failure| PlaybackFailure {
-            message: failure.message,
-            output_quiescent: failure.output_quiescent,
-        })?;
-    Ok((outcome == OutboundOutcome::Completed, playback.snapshot()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use berd_call::input::InputDuringTtsPolicy;
     use berd_call::{PcmAudioOutput, TtsOutcome, TtsPcmSpec};
     use serde_json::{json, Value};
     use std::io::{Cursor, Read, Write};
     use std::os::fd::IntoRawFd;
     use std::os::unix::net::UnixStream;
     use std::sync::Mutex;
+
+    #[test]
+    fn standalone_updates_require_a_managed_install_outside_app_bundles() {
+        let directory = tempfile::tempdir().unwrap();
+        let bin = directory.path().join("bin with spaces");
+        std::fs::create_dir_all(bin.join(".berd-call")).unwrap();
+        let executable = bin.join("berd-call");
+        assert!(standalone_update_helper(&executable).is_none());
+        std::fs::write(bin.join(".berd-call/installed"), "0.6.5\n").unwrap();
+        std::fs::write(bin.join(".berd-call/update"), "").unwrap();
+        assert_eq!(
+            standalone_update_helper(&executable),
+            Some(bin.join(".berd-call/update"))
+        );
+        let app = directory.path().join("Buzz.app/Contents/MacOS");
+        std::fs::create_dir_all(app.join(".berd-call")).unwrap();
+        std::fs::write(app.join(".berd-call/installed"), "0.6.5\n").unwrap();
+        std::fs::write(app.join(".berd-call/update"), "").unwrap();
+        assert!(standalone_update_helper(&app.join("berd-call")).is_none());
+    }
 
     #[cfg(target_os = "macos")]
     #[test]
@@ -7599,14 +5269,6 @@ mod tests {
         assert!(standard_session_status_cues_suppressed(&core, false));
         core.set_user_speaking(false);
         assert!(!standard_session_status_cues_suppressed(&core, false));
-
-        let mut gate = ExpertTurnGate::default();
-        gate.begin_user_speaking("pending-transcript".into());
-        assert!(expert_session_status_cues_suppressed(&gate, false));
-        gate.finish_user_speaking();
-        assert!(gate.input_blocks_output());
-        assert!(!expert_session_status_cues_suppressed(&gate, false));
-        assert!(expert_session_status_cues_suppressed(&gate, true));
     }
     fn synthesis_config(tts: SynthesisTtsConfig, output: PathBuf) -> SynthesisConfig {
         SynthesisConfig {
@@ -7616,757 +5278,21 @@ mod tests {
         }
     }
 
-    fn live_playback_fixture(
-        prepare_id: Option<u64>,
-    ) -> (LivePlayback, mpsc::Receiver<AudioOutputControlRequest>) {
-        let (child, _host) = UnixStream::pair().unwrap();
-        let transport =
-            Arc::new(unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap());
-        let active = Arc::new(AtomicBool::new(true));
-        let (control, control_rx) = mpsc::channel();
-        let output = Arc::new(
-            RemotePcmAudioOutput::new(
-                3,
-                TtsPcmSpec {
-                    sample_rate: 24_000,
-                    playback_rate: 1.0,
-                },
-                transport,
-                Arc::clone(&active),
-                control,
-            )
-            .unwrap(),
-        );
-        let (sender, _receiver) = mpsc::sync_channel(1);
-        (
-            LivePlayback {
-                response_id: "response-a".into(),
-                speech_id: 3,
-                prepare_id,
-                output,
-                active,
-                sender,
-            },
-            control_rx,
-        )
-    }
-
     #[test]
-    fn expert_spokesperson_emits_user_input_before_confirmed_state_can_reference_it() {
-        let mut core = RealtimeExpertSpokespersonSession::new(0, "external-test");
-        let mut emitted_token = 0;
-        let mut output = Vec::new();
-        record_and_emit_live_event(
-            &mut core,
-            &mut emitted_token,
-            LiveSideEvent::UserTranscript {
-                text: "hello".into(),
-            },
-            &mut output,
-        )
+    fn cli_accepts_auto_input_policy() {
+        let (_, request) = parse_host_settings_args(&args(&[
+            "berd-call",
+            "settings",
+            "--input-during-tts",
+            "auto",
+        ]))
         .unwrap();
         assert!(matches!(
-            core.prepare_expert_directive(Some(1), "hi".into()),
-            ExpertDirectiveOutcome::Accepted {
-                confirmed_token: 1,
-                ..
+            request,
+            host_control::ControlRequest::InputDuringTts {
+                policy: InputDuringTtsPolicy::Auto
             }
         ));
-        write_message(
-            &mut output,
-            &SessionMessage::State {
-                id: 9,
-                confirmed_token: core.expert_pipe_cursor(),
-                utterances_after: Vec::new(),
-                unresolved_handoff_ids: Vec::new(),
-            },
-        )
-        .unwrap();
-
-        let messages = messages(&output);
-        assert_eq!(messages[0]["type"], "live_event");
-        assert_eq!(messages[0]["token"], 1);
-        assert_eq!(messages[0]["origin"], "user");
-        assert_eq!(messages[1]["type"], "state");
-        assert_eq!(messages[1]["confirmed_token"], 1);
-    }
-
-    #[test]
-    fn live_handoff_exposes_its_id_for_provider_tool_output() {
-        let mut core = RealtimeExpertSpokespersonSession::new(0, "external-test");
-        let mut emitted_token = 0;
-        let mut output = Vec::new();
-        let handoff_id = match record_and_emit_live_event(
-            &mut core,
-            &mut emitted_token,
-            LiveSideEvent::Handoff {
-                call_id: "provider-call-1".into(),
-                message: "Look something up".into(),
-            },
-            &mut output,
-        )
-        .unwrap()
-        {
-            LiveSideEvent::Handoff { call_id, .. } => call_id,
-            _ => panic!("a live handoff must expose its generated ID"),
-        };
-        assert_eq!(handoff_id, "handoff-external-test-1");
-        let tool_output = berd_call::openai_realtime_protocol::accepted_handoff_tool_output(
-            "provider-call-1",
-            &handoff_id,
-        )
-        .unwrap();
-        assert_eq!(tool_output["type"], "conversation.item.create");
-        assert_eq!(tool_output["item"]["call_id"], "provider-call-1");
-    }
-
-    #[test]
-    fn interrupted_spokesperson_history_keeps_only_estimated_delivered_prefix() {
-        let mut response = LiveResponse::new(None, Some(3));
-        response
-            .delivery
-            .record_audio("assistant", 0, 0, 24_000, false)
-            .unwrap();
-        response
-            .delivery
-            .replace_transcript("assistant", 0, 0, "One two three four five six.".into())
-            .unwrap();
-        response.interrupted = true;
-        response.delivery.set_played_frames(12_000);
-
-        let delivered = response.delivery.delivered_transcript(true, 24_000);
-
-        assert_eq!(delivered, "One two three");
-        assert!(!delivered.contains("four"));
-    }
-
-    #[test]
-    fn expert_waits_for_the_complete_live_response_after_handoff() {
-        let mut core = RealtimeExpertSpokespersonSession::new(0, "external-test");
-        core.add_live_event(
-            1,
-            LiveSideEvent::Handoff {
-                call_id: "call-1".into(),
-                message: "inspect this".into(),
-            },
-        )
-        .unwrap();
-        let mut gate = ExpertTurnGate::default();
-        gate.response_started("response-a", 0).unwrap();
-        let request = PendingExpertPrepare {
-            id: 7,
-            acknowledgement: Some(1),
-            text: "answer".into(),
-            resolved_handoff_ids: Vec::new(),
-        };
-        assert!(matches!(
-            gate.defer_if_busy(request, false, 1),
-            ExpertPrepareRouting::Held
-        ));
-        assert!(gate.take_ready(false, 1).is_none());
-
-        core.add_live_event(
-            2,
-            LiveSideEvent::SpokespersonTranscript {
-                text: "Let me check that.".into(),
-                interrupted: false,
-            },
-        )
-        .unwrap();
-        gate.response_finished("response-a");
-        let request = gate
-            .take_ready(false, 0)
-            .expect("settled response releases held Expert request");
-        assert!(matches!(
-            core.prepare_expert_directive(request.acknowledgement, request.text),
-            ExpertDirectiveOutcome::Accepted {
-                confirmed_token: 2,
-                message,
-            } if message == "answer"
-        ));
-    }
-
-    #[test]
-    fn second_held_expert_prepare_is_nonfatal_and_cancel_removes_the_first() {
-        let mut gate = ExpertTurnGate::default();
-        gate.response_started("response-a", 0).unwrap();
-        assert!(matches!(
-            gate.defer_if_busy(
-                PendingExpertPrepare {
-                    id: 7,
-                    acknowledgement: Some(1),
-                    text: "first".into(),
-                    resolved_handoff_ids: Vec::new(),
-                },
-                false,
-                1,
-            ),
-            ExpertPrepareRouting::Held
-        ));
-        assert!(matches!(
-            gate.defer_if_busy(
-                PendingExpertPrepare {
-                    id: 8,
-                    acknowledgement: Some(1),
-                    text: "second".into(),
-                    resolved_handoff_ids: Vec::new(),
-                },
-                false,
-                1,
-            ),
-            ExpertPrepareRouting::InProgress(8)
-        ));
-        assert!(gate.cancel_pending(7));
-        gate.response_finished("response-a");
-        assert!(gate.take_ready(false, 0).is_none());
-    }
-
-    #[test]
-    fn accepted_expert_prepare_blocks_a_second_before_response_binding() {
-        let mut gate = ExpertTurnGate::default();
-        let directives = HashMap::from([(
-            7,
-            DirectiveSpeech {
-                prepare_id: 7,
-                speech_id: 3,
-                text: "first".into(),
-            },
-        )]);
-        let responses = HashMap::new();
-        let routing = route_expert_prepare(
-            &mut gate,
-            PendingExpertPrepare {
-                id: 8,
-                acknowledgement: Some(1),
-                text: "second".into(),
-                resolved_handoff_ids: Vec::new(),
-            },
-            expert_output_reserved(&directives, &HashSet::new(), None, &responses),
-            false,
-            false,
-            0,
-        );
-
-        assert!(matches!(routing, ExpertPrepareRouting::InProgress(8)));
-        assert!(gate.pending_prepare.is_none());
-    }
-
-    #[test]
-    fn second_spokesperson_response_queues_behind_active_playback() {
-        let mut responses = HashMap::from([("response-a".into(), LiveResponse::new(None, None))]);
-        let mut waiting = VecDeque::new();
-        let outcome = stage_live_audio_delta(
-            "response-b",
-            vec![0.25; 32],
-            &mut responses,
-            &mut waiting,
-            Some(("response-a", true)),
-        )
-        .unwrap();
-
-        assert!(matches!(outcome, LiveAudioDelta::Queued));
-        assert_eq!(waiting, ["response-b"]);
-        assert_eq!(responses["response-b"].pending_frames, 32);
-    }
-
-    #[test]
-    fn cancelled_playback_keeps_its_slot_and_ignores_late_audio() {
-        let (child, _host) = UnixStream::pair().unwrap();
-        let transport =
-            Arc::new(unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap());
-        let authority = Arc::new(AtomicBool::new(true));
-        let (control, _control_rx) = mpsc::channel();
-        let output = Arc::new(
-            RemotePcmAudioOutput::new(
-                3,
-                TtsPcmSpec {
-                    sample_rate: 24_000,
-                    playback_rate: 1.0,
-                },
-                transport,
-                Arc::clone(&authority),
-                control,
-            )
-            .unwrap(),
-        );
-        let (sender, _receiver) = mpsc::sync_channel(1);
-        let mut active = Some(LivePlayback {
-            response_id: "response-a".into(),
-            speech_id: 3,
-            prepare_id: None,
-            output,
-            active: authority,
-            sender,
-        });
-        cancel_live_playback(&mut active);
-        assert!(active.is_some());
-        assert!(!active.as_ref().unwrap().active.load(Ordering::SeqCst));
-
-        let mut responses = HashMap::from([("response-a".into(), LiveResponse::new(None, None))]);
-        let mut waiting = VecDeque::new();
-        assert!(matches!(
-            stage_live_audio_delta(
-                "response-a",
-                vec![0.5],
-                &mut responses,
-                &mut waiting,
-                Some(("response-a", false)),
-            )
-            .unwrap(),
-            LiveAudioDelta::Ignored
-        ));
-        assert!(waiting.is_empty());
-    }
-
-    #[test]
-    fn barge_in_discards_queued_responses_without_waiting_for_a_worker() {
-        let mut active_response = LiveResponse::new(None, None);
-        active_response
-            .delivery
-            .record_audio("active", 0, 0, 1, false)
-            .unwrap();
-        let mut queued_response = LiveResponse::new(None, None);
-        queued_response
-            .delivery
-            .record_audio("queued", 0, 0, 1, false)
-            .unwrap();
-        queued_response.queue_audio(vec![0.5; 32], 0).unwrap();
-        let mut responses = HashMap::from([
-            ("response-a".into(), active_response),
-            ("response-b".into(), queued_response),
-        ]);
-        let mut waiting = VecDeque::from(["response-b".into()]);
-
-        interrupt_live_responses(
-            &HashSet::from(["response-a".into(), "response-b".into()]),
-            Some("response-a"),
-            &mut responses,
-            &mut waiting,
-        );
-
-        assert!(responses["response-a"].interrupted);
-        assert!(!responses["response-a"].playback_complete);
-        assert!(responses["response-b"].interrupted);
-        assert!(responses["response-b"].playback_complete);
-        assert!(responses["response-b"].pending_audio.is_empty());
-        assert!(waiting.is_empty());
-    }
-
-    #[test]
-    fn barge_in_terminalizes_an_admitted_directive_before_response_binding() {
-        let mut directives = HashMap::from([(
-            7,
-            DirectiveSpeech {
-                prepare_id: 11,
-                speech_id: 3,
-                text: "hello".into(),
-            },
-        )]);
-        let mut cancelled = HashSet::new();
-        let mut output = Vec::new();
-        interrupt_unbound_directives(&mut directives, &mut cancelled, &mut output).unwrap();
-        assert_eq!(
-            messages(&output),
-            [json!({
-                "type":"speech_interrupted",
-                "id":11,
-                "speech_id":3,
-                "spoken_through_utf8":0
-            })]
-        );
-
-        let mut responses = HashMap::from([("response-a".into(), LiveResponse::new(None, None))]);
-        bind_expert_response(
-            "response-a".into(),
-            7,
-            &mut directives,
-            &mut cancelled,
-            &mut responses,
-        )
-        .unwrap();
-        assert!(responses["response-a"].interrupted);
-        assert!(responses["response-a"].playback_complete);
-        assert!(cancelled.is_empty());
-
-        let mut directives = HashMap::from([(
-            8,
-            DirectiveSpeech {
-                prepare_id: 12,
-                speech_id: 4,
-                text: "Exact Expert wording".into(),
-            },
-        )]);
-        bind_expert_response(
-            "response-b".into(),
-            8,
-            &mut directives,
-            &mut cancelled,
-            &mut responses,
-        )
-        .unwrap();
-        assert_eq!(
-            responses["response-b"].expert_text.as_deref(),
-            Some("Exact Expert wording")
-        );
-    }
-
-    #[test]
-    fn interrupted_response_is_retained_until_server_terminal() {
-        let mut response = LiveResponse::new(None, None);
-        response.interrupted = true;
-        response.playback_complete = true;
-        response
-            .delivery
-            .replace_transcript("assistant", 0, 0, "best effort".into())
-            .unwrap();
-        let mut responses = HashMap::from([("response-a".into(), response)]);
-        let mut core = RealtimeExpertSpokespersonSession::new(0, "external-test");
-        let mut emitted_token = 0;
-        let mut output = Vec::new();
-
-        publish_live_response_if_complete(
-            "response-a",
-            &mut responses,
-            &mut core,
-            &mut emitted_token,
-            &mut output,
-        )
-        .unwrap();
-        assert!(responses.contains_key("response-a"));
-
-        let mut waiting = VecDeque::new();
-        assert!(matches!(
-            stage_live_audio_delta(
-                "response-a",
-                vec![0.5; 32],
-                &mut responses,
-                &mut waiting,
-                None,
-            )
-            .unwrap(),
-            LiveAudioDelta::Ignored
-        ));
-        responses.get_mut("response-a").unwrap().server_finished = true;
-        publish_live_response_if_complete(
-            "response-a",
-            &mut responses,
-            &mut core,
-            &mut emitted_token,
-            &mut output,
-        )
-        .unwrap();
-
-        assert!(!responses.contains_key("response-a"));
-        let emitted = messages(&output);
-        assert_eq!(emitted.len(), 2);
-        assert_eq!(emitted[0]["type"], "live_event");
-        assert_eq!(emitted[1]["type"], "expert_delivery");
-    }
-
-    #[test]
-    fn late_audio_after_interruption_requires_zero_ms_truncation_before_release() {
-        let mut response = LiveResponse::new(None, None);
-        response.interrupted = true;
-        response.playback_complete = true;
-        response
-            .delivery
-            .record_audio("assistant-late", 0, 0, 2_400, true)
-            .unwrap();
-        assert!(response.delivery.truncation_pending());
-        assert_eq!(live_truncation_audio_end_ms(&response).unwrap(), 0);
-        response.server_finished = true;
-        response
-            .delivery
-            .replace_transcript("assistant-late", 0, 0, "unheard output".into())
-            .unwrap();
-        let mut responses = HashMap::from([("response-late".into(), response)]);
-        let mut core = RealtimeExpertSpokespersonSession::new(0, "external-test");
-        let mut emitted_token = 0;
-        let mut output = Vec::new();
-
-        publish_live_response_if_complete(
-            "response-late",
-            &mut responses,
-            &mut core,
-            &mut emitted_token,
-            &mut output,
-        )
-        .unwrap();
-        assert!(responses.contains_key("response-late"));
-        assert!(output.is_empty());
-
-        responses
-            .get_mut("response-late")
-            .unwrap()
-            .delivery
-            .acknowledge_truncation("assistant-late", 0);
-        publish_live_response_if_complete(
-            "response-late",
-            &mut responses,
-            &mut core,
-            &mut emitted_token,
-            &mut output,
-        )
-        .unwrap();
-        assert!(!responses.contains_key("response-late"));
-    }
-
-    #[test]
-    fn truncation_duration_is_bounded_for_zero_partial_and_full_delivery() {
-        let mut response = LiveResponse::new(None, None);
-        response
-            .delivery
-            .record_audio("assistant", 0, 0, 24_000, false)
-            .unwrap();
-        assert_eq!(live_truncation_audio_end_ms(&response).unwrap(), 0);
-        response.delivery.set_played_frames(12_000);
-        assert_eq!(live_truncation_audio_end_ms(&response).unwrap(), 500);
-        response.delivery.set_played_frames(48_000);
-        assert_eq!(live_truncation_audio_end_ms(&response).unwrap(), 1_000);
-    }
-
-    #[test]
-    fn queued_spokesperson_audio_is_bounded_across_responses() {
-        let mut first = LiveResponse::new(None, None);
-        first.pending_frames = MAX_PENDING_SPOKESPERSON_FRAMES;
-        let mut responses = HashMap::from([("response-a".into(), first)]);
-        let mut waiting = VecDeque::new();
-        assert_eq!(
-            stage_live_audio_delta(
-                "response-b",
-                vec![0.0],
-                &mut responses,
-                &mut waiting,
-                Some(("response-a", true)),
-            )
-            .unwrap_err(),
-            "Spokesperson queued more than 15 seconds of audio in total"
-        );
-    }
-
-    #[test]
-    fn spokesperson_input_controls_are_nonfatal_revisioned_and_gate_pcm() {
-        let mut muted = false;
-        let mut reset_count = 0;
-        let mut output = Vec::new();
-        set_spokesperson_input_muted(
-            1,
-            true,
-            &mut muted,
-            || {
-                reset_count += 1;
-                Ok(())
-            },
-            &mut output,
-        )
-        .unwrap();
-        reset_spokesperson_input(
-            2,
-            || {
-                reset_count += 1;
-                Ok(())
-            },
-            &mut output,
-        )
-        .unwrap();
-
-        let slot = InputDuringTtsSlot::new(InputDuringTtsPolicy::AllowBargeIn);
-        set_spokesperson_input_policy(
-            3,
-            1,
-            InputDuringTtsPolicy::SuppressInput,
-            &slot,
-            &mut output,
-        )
-        .unwrap();
-        set_spokesperson_input_policy(4, 1, InputDuringTtsPolicy::AllowBargeIn, &slot, &mut output)
-            .unwrap();
-
-        assert!(muted);
-        assert_eq!(reset_count, 2);
-        assert!(!spokesperson_pcm_allowed(
-            false,
-            true,
-            slot.snapshot().unwrap()
-        ));
-        assert!(spokesperson_pcm_allowed(
-            false,
-            false,
-            slot.snapshot().unwrap()
-        ));
-        assert!(!spokesperson_pcm_allowed(
-            true,
-            false,
-            slot.snapshot().unwrap()
-        ));
-        let messages = messages(&output);
-        assert_eq!(
-            messages[0],
-            json!({"type":"input_mute_applied","id":1,"active":true})
-        );
-        assert_eq!(messages[1], json!({"type":"input_reset_applied","id":2}));
-        assert_eq!(messages[2]["outcome"], "applied");
-        assert_eq!(messages[2]["snapshot"]["revision"], 2);
-        assert_eq!(messages[3]["outcome"], "rejected");
-        assert_eq!(messages[3]["snapshot"]["revision"], 2);
-    }
-
-    #[test]
-    fn connection_loss_titles_distinguish_active_turns_from_settings_updates() {
-        assert_eq!(
-            unavailable_spokesperson_title(true, false),
-            "Spokesperson connection was lost during an active turn"
-        );
-        assert_eq!(
-            unavailable_spokesperson_title(true, true),
-            "Spokesperson connection was lost during a settings update"
-        );
-        assert_eq!(
-            unavailable_spokesperson_title(false, true),
-            "Spokesperson session expired before it could renew"
-        );
-    }
-
-    #[test]
-    fn finalized_spokesperson_turn_cancels_without_resume_and_terminalizes_once() {
-        let (playback, controls) = live_playback_fixture(Some(11));
-        let mut active = Some(playback);
-        let mut gate = ExpertTurnGate::default();
-        gate.response_started("response-a", 0).unwrap();
-        gate.begin_user_speaking("item-1".into());
-        active
-            .as_ref()
-            .unwrap()
-            .output
-            .set_test_delivery_progress(24_000, 12_000);
-        gate.finish_user_speaking();
-        gate.resolve_user_final("item-1");
-
-        cancel_live_playback(&mut active);
-        assert!(!active.as_ref().unwrap().active.load(Ordering::SeqCst));
-        assert!(matches!(
-            controls.try_recv(),
-            Err(mpsc::TryRecvError::Empty)
-        ));
-        let mut response = LiveResponse::new(Some(11), Some(3));
-        response.expert_text = Some("One two three four five six.".into());
-        response
-            .delivery
-            .record_audio("assistant", 0, 0, 24_000, false)
-            .unwrap();
-        response
-            .delivery
-            .replace_transcript("assistant", 0, 0, "One two three four five six.".into())
-            .unwrap();
-        response.server_finished = true;
-        let mut output = Vec::new();
-        emit_live_interrupted_terminal(&mut response, active.as_ref().unwrap(), &mut output)
-            .unwrap();
-        let terminal = messages(&output);
-        assert_eq!(terminal.len(), 1);
-        assert_eq!(terminal[0]["type"], "speech_interrupted");
-        assert_eq!(terminal[0]["spoken_through_utf8"], "One two three".len());
-        let mut responses = HashMap::from([("response-a".into(), response)]);
-        let mut core = RealtimeExpertSpokespersonSession::new(0, "external-test");
-        let mut emitted_token = 0;
-        publish_live_response_if_complete(
-            "response-a",
-            &mut responses,
-            &mut core,
-            &mut emitted_token,
-            &mut output,
-        )
-        .unwrap();
-        let emitted = messages(&output);
-        assert_eq!(emitted[0]["type"], "speech_interrupted");
-        assert_eq!(emitted[0]["spoken_through_utf8"], "One two three".len());
-        assert_eq!(emitted[1]["type"], "live_event");
-        assert!(emitted[1]["text"]
-            .as_str()
-            .unwrap()
-            .contains("One two three"));
-        assert!(!emitted[1]["text"].as_str().unwrap().contains("four"));
-
-        let mut paraphrased = LiveResponse::new(Some(12), Some(4));
-        paraphrased.expert_text = Some("colour test".into());
-        paraphrased
-            .delivery
-            .record_audio("assistant", 0, 0, 12_000, false)
-            .unwrap();
-        paraphrased
-            .delivery
-            .replace_transcript("assistant", 0, 0, "color test".into())
-            .unwrap();
-        let mut paraphrased_output = Vec::new();
-        emit_live_interrupted_terminal(
-            &mut paraphrased,
-            active.as_ref().unwrap(),
-            &mut paraphrased_output,
-        )
-        .unwrap();
-        assert_eq!(messages(&paraphrased_output)[0]["spoken_through_utf8"], 0);
-    }
-
-    #[test]
-    fn transcription_terminals_are_correlated_across_consecutive_vad_turns() {
-        let mut gate = ExpertTurnGate::default();
-        gate.begin_user_speaking("item-1".into());
-        gate.finish_user_speaking();
-        gate.begin_user_speaking("item-2".into());
-        gate.finish_user_speaking();
-
-        gate.discard_user_turn("item-1");
-        assert!(gate.input_blocks_output());
-        gate.discard_user_turn("item-2");
-        assert!(!gate.input_blocks_output());
-    }
-
-    #[test]
-    fn started_and_finished_user_response_releases_held_expert_prepare() {
-        let mut gate = ExpertTurnGate::default();
-        gate.response_started("response-old", 0).unwrap();
-        assert!(matches!(
-            gate.defer_if_busy(
-                PendingExpertPrepare {
-                    id: 7,
-                    acknowledgement: Some(1),
-                    text: "answer after the user".into(),
-                    resolved_handoff_ids: Vec::new(),
-                },
-                false,
-                1,
-            ),
-            ExpertPrepareRouting::Held
-        ));
-        gate.response_finished("response-old");
-        gate.response_started("response-new", 0).unwrap();
-        assert!(gate.take_ready(false, 1).is_none());
-        gate.response_finished("response-new");
-        assert_eq!(gate.take_ready(false, 0).map(|request| request.id), Some(7));
-    }
-
-    #[test]
-    fn response_done_finishes_playback_without_a_separate_audio_done() {
-        let (playback, _controls) = live_playback_fixture(None);
-        let (sender, receiver) = mpsc::sync_channel(1);
-        let playback = LivePlayback { sender, ..playback };
-        let active = Some(playback);
-        let mut response = LiveResponse::new(None, Some(3));
-        response
-            .delivery
-            .record_audio("assistant", 0, 0, 1, false)
-            .unwrap();
-        assert!(!response.audio_done);
-        mark_live_response_server_finished(&mut response);
-        let mut responses = HashMap::from([("response-a".into(), response)]);
-
-        flush_active_live_playback(&active, &mut responses).unwrap();
-
-        assert!(matches!(
-            receiver.recv().unwrap(),
-            LivePlaybackInput::Finish
-        ));
-        assert!(responses["response-a"].finish_sent);
     }
 
     #[test]
@@ -8754,6 +5680,107 @@ mod tests {
 
     fn test_tts_lease() -> TtsConfigurationLease {
         test_tts_slot().lease().unwrap()
+    }
+
+    #[test]
+    fn a_new_voice_is_built_off_the_session_loop_and_its_request_handed_back() {
+        let slot = Arc::new(test_tts_slot());
+        let (controls, handed_back) = mpsc::channel::<OrderedControl>();
+        let mut builds = VoiceBuilds {
+            controls,
+            pending: HashSet::new(),
+        };
+        let mut writer = Vec::new();
+        let mut filter = |input, slot| builds.filter(input, slot, &mut writer).unwrap();
+        let prepare = |id, voice: &str| {
+            Input::Request(SessionRequest::PrepareSpeak {
+                id,
+                acknowledgement: None,
+                text: "Hello.".into(),
+                voice: Some(voice.into()),
+                language: None,
+            })
+        };
+        let next = || {
+            handed_back
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap()
+                .input
+        };
+        assert!(filter(prepare(1, "coral"), Some(&slot)).is_none());
+        assert!(matches!(
+            filter(next(), Some(&slot)),
+            Some(Input::Request(SessionRequest::PrepareSpeak { id: 1, .. }))
+        ));
+        assert!(matches!(
+            filter(prepare(2, "coral"), Some(&slot)),
+            Some(Input::Request(SessionRequest::PrepareSpeak { id: 2, .. }))
+        ));
+        assert!(filter(prepare(3, "nobody"), Some(&slot)).is_none());
+        assert!(filter(next(), Some(&slot)).is_none());
+        // A request cancelled while its voice is built is not revived by the build.
+        assert!(filter(prepare(4, "marin"), Some(&slot)).is_none());
+        assert!(filter(
+            Input::Request(SessionRequest::Cancel { id: 4 }),
+            Some(&slot)
+        )
+        .is_none());
+        assert!(filter(next(), Some(&slot)).is_none());
+        assert!(filter(prepare(5, "cedar"), None).is_some());
+        drop(filter);
+        let types: Vec<_> = String::from_utf8(writer)
+            .unwrap()
+            .lines()
+            .map(|line| {
+                let message: serde_json::Value = serde_json::from_str(line).unwrap();
+                format!(
+                    "{} {} {}",
+                    message["type"],
+                    message["id"],
+                    message["reason"]
+                        .as_str()
+                        .or(message["outcome"].as_str())
+                        .unwrap()
+                )
+            })
+            .collect();
+        assert_eq!(
+            types,
+            [
+                r#""not_admitted" 3 invalid_voice"#,
+                r#""cancel_result" 4 cancelled"#,
+                r#""not_admitted" 4 cancelled"#,
+            ]
+        );
+    }
+
+    #[test]
+    fn speech_in_another_voice_is_refused_when_the_voice_is_unavailable() {
+        let slot = test_tts_slot();
+        let mut writer = Vec::new();
+        assert!(speak_voice(Some(&slot), None, None, 1, &mut writer)
+            .unwrap()
+            .unwrap()
+            .is_none());
+        let coral = speak_voice(Some(&slot), Some("coral".into()), None, 2, &mut writer)
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(coral.snapshot().settings.voice(), "coral");
+        assert!(writer.is_empty());
+        for (id, slot, voice) in [(3, Some(&slot), "nobody"), (4, None, "coral")] {
+            assert!(speak_voice(slot, Some(voice.into()), None, id, &mut writer)
+                .unwrap()
+                .is_none());
+        }
+        let refusals = String::from_utf8(writer).unwrap();
+        assert_eq!(
+            refusals.lines().collect::<Vec<_>>(),
+            [
+                r#"{"type":"not_admitted","id":3,"reason":"invalid_voice"}"#,
+                r#"{"type":"not_admitted","id":4,"reason":"invalid_voice"}"#,
+            ]
+        );
     }
 
     fn test_input_policy_slot() -> InputDuringTtsSlot {
@@ -9250,6 +6277,7 @@ mod tests {
                 available_languages: vec!["en-US".into()],
                 voices: vec![berd_call::siri::SiriVoice {
                     name: "Aaron".into(),
+                    display_name: "Aaron".into(),
                     language: "en-US".into(),
                     size_bytes: 42,
                     installed: true,
@@ -9275,6 +6303,7 @@ mod tests {
                     "availableLanguages": ["en-US"],
                     "voices": [{
                         "name": "Aaron",
+                        "displayName": "Aaron",
                         "language": "en-US",
                         "sizeBytes": 42,
                         "installed": true
@@ -9351,7 +6380,7 @@ mod tests {
                 "event": "result",
                 "result": {
                     "backend": "openai",
-                    "voices": berd_call::openai_realtime_protocol::OPENAI_REALTIME_VOICE_IDS
+                    "voices": berd_call::openai::OPENAI_VOICE_IDS
                 }
             })
         );
@@ -9407,6 +6436,33 @@ mod tests {
                     "voice": {"name": "Aaron", "language": "en-US"},
                     "installed": true,
                     "availabilityWaitSeconds": 300
+                }
+            })
+        );
+
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            serde_json::to_value(ManagementResultEnvelope {
+                schema_version: MANAGEMENT_SCHEMA_VERSION,
+                operation: "voices.preview",
+                event: "result",
+                result: VoicePreviewResult {
+                    backend: "siri",
+                    voice: identity,
+                    rate: 1.5,
+                    source: berd_call::siri::SiriPreviewSource::Sample,
+                },
+            })
+            .unwrap(),
+            json!({
+                "schemaVersion": 1,
+                "operation": "voices.preview",
+                "event": "result",
+                "result": {
+                    "backend": "siri",
+                    "voice": {"name": "Aaron", "language": "en-US"},
+                    "rate": 1.5,
+                    "source": "sample"
                 }
             })
         );
@@ -9590,7 +6646,7 @@ mod tests {
                     rate: 1.0,
                 },
                 stt: SttBackendConfig::Macos,
-                mode: SessionMode::Conventional,
+                stt_hints: vec![],
                 endpoints: SessionEndpointOverrides::default(),
             }
         );
@@ -9600,7 +6656,7 @@ mod tests {
             SessionConfig {
                 tts: TtsBackendConfig::OpenAi { rate: 1.0 },
                 stt: SttBackendConfig::Macos,
-                mode: SessionMode::Conventional,
+                stt_hints: vec![],
                 endpoints: SessionEndpointOverrides::default(),
             }
         );
@@ -9676,7 +6732,7 @@ mod tests {
                     rate: 1.0,
                 },
                 stt: SttBackendConfig::Macos,
-                mode: SessionMode::Conventional,
+                stt_hints: vec![],
                 endpoints: SessionEndpointOverrides::default(),
             }
         );
@@ -9723,57 +6779,8 @@ mod tests {
     }
 
     #[test]
-    fn expert_spokesperson_uses_the_session_startup_rate() {
-        let session = SessionConfig {
-            tts: TtsBackendConfig::Siri {
-                voice: "Aaron".into(),
-                language: "en-US".into(),
-                rate: 1.5,
-            },
-            stt: SttBackendConfig::Macos,
-            mode: SessionMode::ExpertSpokesperson,
-            endpoints: SessionEndpointOverrides::default(),
-        };
-        let mut realtime = OpenAiSpokespersonConfig {
-            endpoint: "ws://localhost".into(),
-            api_key: "test-key".into(),
-            session: berd_call::openai_realtime_protocol::RealtimeSpokespersonSessionOptions {
-                model: Some("test-model".into()),
-                transcription_model: Some("test-transcription".into()),
-                voice: Some("marin".into()),
-                speed: Some(1.0),
-                ..Default::default()
-            },
-            semantic_transcript: Vec::new(),
-        };
-
-        apply_spokesperson_startup_settings(&session, &mut realtime).unwrap();
-
-        assert_eq!(realtime.speed(), 1.5);
-        assert_eq!(realtime.voice(), "marin");
-    }
-
-    #[test]
-    fn session_endpoint_overrides_are_independent_and_require_matching_modes() {
-        let realtime = parse_args(&args(&[
-            "berd-call",
-            "session",
-            "--tts-backend",
-            "openai",
-            "--mode",
-            "expert-spokesperson",
-            "--realtime-url",
-            "ws://127.0.0.1:18870/v1/realtime",
-        ]))
-        .unwrap();
-        assert_eq!(
-            realtime.endpoints.realtime.as_deref(),
-            Some("ws://127.0.0.1:18870/v1/realtime")
-        );
-        assert_eq!(realtime.endpoints.stt, None);
-        assert_eq!(realtime.endpoints.tts, None);
-
-        let chained = parse_args(&args(&[
+    fn session_endpoint_overrides_are_independent_and_require_matching_backends() {
+        let overrides = parse_args(&args(&[
             "berd-call",
             "session",
             "--tts-backend",
@@ -9787,26 +6794,16 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!(
-            chained.endpoints.tts.as_deref(),
+            overrides.endpoints.tts.as_deref(),
             Some("https://proxy.example/v1/audio/speech?api-version=1")
         );
         assert_eq!(
-            chained.endpoints.stt.as_deref(),
+            overrides.endpoints.stt.as_deref(),
             Some("wss://proxy.example/v1/realtime?intent=transcription")
         );
         assert!(parse_endpoint_url("http://example.test/speech", "--tts-url", false).is_err());
         assert!(parse_endpoint_url("ws://example.test/realtime", "--stt-url", true).is_err());
         assert!(parse_endpoint_url("http://127.0.0.1:18870/speech", "--tts-url", false).is_ok());
-        assert!(parse_args(&args(&[
-            "berd-call",
-            "session",
-            "--tts-backend",
-            "openai",
-            "--realtime-url",
-            "ws://localhost/realtime"
-        ]))
-        .unwrap_err()
-        .contains("expert-spokesperson"));
         assert!(parse_args(&args(&[
             "berd-call",
             "session",
@@ -9824,18 +6821,6 @@ mod tests {
         ]))
         .unwrap_err()
         .contains("--stt-backend openai"));
-        assert!(parse_args(&args(&[
-            "berd-call",
-            "session",
-            "--tts-backend",
-            "openai",
-            "--mode",
-            "expert-spokesperson",
-            "--tts-url",
-            "https://localhost/audio/speech"
-        ]))
-        .unwrap_err()
-        .contains("only to conventional mode"));
     }
 
     #[test]
@@ -9859,7 +6844,7 @@ mod tests {
                     rate: 1.0,
                 },
                 stt: SttBackendConfig::Macos,
-                mode: SessionMode::Conventional,
+                stt_hints: vec![],
                 endpoints: SessionEndpointOverrides::default(),
             }
         );
@@ -9920,7 +6905,7 @@ mod tests {
                 stt: SttBackendConfig::Parakeet {
                     model_dir: PathBuf::from("/models/parakeet")
                 },
-                mode: SessionMode::Conventional,
+                stt_hints: vec![],
                 endpoints: SessionEndpointOverrides::default(),
             }
         );
@@ -10364,7 +7349,7 @@ mod tests {
                     rate: 1.0
                 },
                 stt: SttBackendConfig::OpenAi,
-                mode: SessionMode::Conventional,
+                stt_hints: vec![],
                 endpoints: SessionEndpointOverrides::default(),
             }
         );
@@ -10410,7 +7395,13 @@ mod tests {
         let (control_sender, control_receiver) = mpsc::channel();
         let (pcm_sender, pcm_receiver) = mpsc::sync_channel(3);
 
-        read_framed_requests(Cursor::new(bytes), control_sender, pcm_sender);
+        read_framed_requests(
+            Cursor::new(bytes),
+            control_sender,
+            pcm_sender,
+            &SessionInputProgress::default(),
+            &mut Vec::new(),
+        );
 
         assert!(matches!(
             control_receiver.recv().unwrap().input,
@@ -10456,7 +7447,13 @@ mod tests {
             header.extend_from_slice(&(length as u32).to_le_bytes());
             let (control_sender, control_receiver) = mpsc::channel();
             let (pcm_sender, _pcm_receiver) = mpsc::sync_channel(1);
-            read_framed_requests(Cursor::new(header), control_sender, pcm_sender);
+            read_framed_requests(
+                Cursor::new(header),
+                control_sender,
+                pcm_sender,
+                &SessionInputProgress::default(),
+                &mut Vec::new(),
+            );
             let Input::Invalid(message) = control_receiver.recv().unwrap().input else {
                 panic!("invalid frame must be terminal")
             };
@@ -10473,7 +7470,13 @@ mod tests {
         let (control_sender, control_receiver) = mpsc::channel();
         let (pcm_sender, pcm_receiver) = mpsc::sync_channel(1);
 
-        read_framed_requests(Cursor::new(bytes), control_sender, pcm_sender);
+        read_framed_requests(
+            Cursor::new(bytes),
+            control_sender,
+            pcm_sender,
+            &SessionInputProgress::default(),
+            &mut Vec::new(),
+        );
 
         assert!(pcm_receiver.recv().is_ok());
         let control = control_receiver.recv().unwrap();
@@ -10483,6 +7486,153 @@ mod tests {
         };
         assert_eq!(message, "session PCM input queue is full");
         assert!(control_receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn pcm_overflow_reports_fatal_before_blocked_diagnostics() {
+        struct GatedWriter(Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>);
+        impl Write for GatedWriter {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                if let Some((entered, release)) = self.0.take() {
+                    entered.send(()).unwrap();
+                    release.recv_timeout(Duration::from_secs(2)).unwrap();
+                }
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let (control_tx, control_rx) = mpsc::channel();
+        let (pcm_tx, _pcm_rx) = mpsc::sync_channel(1);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let bytes = framed(PCM_FRAME_KIND, &[0_u8; PCM_FRAME_BYTES]).repeat(2);
+        let worker = thread::spawn(move || {
+            read_framed_requests(
+                Cursor::new(bytes),
+                control_tx,
+                pcm_tx,
+                &SessionInputProgress::default(),
+                &mut GatedWriter(Some((entered_tx, release_rx))),
+            );
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let terminal = control_rx.try_recv();
+        release_tx.send(()).unwrap();
+        worker.join().unwrap();
+        let terminal = terminal.expect("blocked diagnostics must not delay fatal control");
+        assert_eq!(terminal.after_pcm, 1);
+        assert!(matches!(terminal.input, Input::Invalid(_)));
+    }
+
+    #[test]
+    fn pcm_overflow_diagnostic_does_not_wait_for_a_phase_transition() {
+        let progress = SessionInputProgress::default();
+        let _transition = progress.phase.lock().unwrap();
+        assert_eq!(
+            progress.overflow(32),
+            "berd-call: PCM overflow accepted=32 processed=0 phase=transition phase_age_ms=0"
+        );
+    }
+
+    #[test]
+    fn pcm_overflow_reports_stalled_phase_without_reordering_input() {
+        struct GatedReader {
+            first: Cursor<Vec<u8>>,
+            rest: Cursor<Vec<u8>>,
+            reached: mpsc::Sender<()>,
+            resume: mpsc::Receiver<()>,
+            resumed: bool,
+        }
+        impl Read for GatedReader {
+            fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+                if self.first.position() < self.first.get_ref().len() as u64 {
+                    return self.first.read(bytes);
+                }
+                if !self.resumed {
+                    self.reached.send(()).unwrap();
+                    self.resume.recv_timeout(Duration::from_secs(2)).unwrap();
+                    self.resumed = true;
+                }
+                self.rest.read(bytes)
+            }
+        }
+        let frame = framed(PCM_FRAME_KIND, &[0_u8; PCM_FRAME_BYTES]);
+        let mut rest = frame.repeat(INPUT_QUEUE_CAPACITY + 1);
+        rest.extend_from_slice(&framed(JSON_FRAME_KIND, br#"{"type":"shutdown"}"#));
+        let (reached_tx, reached_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let reader = GatedReader {
+            first: Cursor::new(frame),
+            rest: Cursor::new(rest),
+            reached: reached_tx,
+            resume: resume_rx,
+            resumed: false,
+        };
+        let progress = Arc::new(SessionInputProgress::default());
+        let reader_progress = Arc::clone(&progress);
+        let (control_tx, control_rx) = mpsc::channel();
+        let (pcm_tx, pcm_rx) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
+        let worker = thread::spawn(move || {
+            let mut diagnostics = Vec::new();
+            read_framed_requests(
+                reader,
+                control_tx,
+                pcm_tx,
+                &reader_progress,
+                &mut diagnostics,
+            );
+            diagnostics
+        });
+        reached_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let mut pending = None;
+        let mut processed = 0;
+        assert!(matches!(
+            receive_session_input(&control_rx, &pcm_rx, &mut pending, &mut processed),
+            Some(Input::Pcm(_))
+        ));
+        progress.processed.store(processed, Ordering::Relaxed);
+        *progress.phase.lock().unwrap() =
+            ("status_sounds", Instant::now() - Duration::from_secs(1));
+        resume_tx.send(()).unwrap();
+        let control = control_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(control.after_pcm, 1 + INPUT_QUEUE_CAPACITY as u64);
+        assert!(
+            matches!(control.input, Input::Invalid(ref message) if message == "session PCM input queue is full")
+        );
+        assert!(control_rx.recv_timeout(Duration::from_secs(2)).is_err());
+        let diagnostic = String::from_utf8(worker.join().unwrap()).unwrap();
+        assert!(
+            diagnostic.starts_with(
+                "berd-call: PCM overflow accepted=33 processed=1 phase=status_sounds phase_age_ms="
+            ),
+            "{diagnostic:?}"
+        );
+        assert!(
+            diagnostic
+                .trim()
+                .rsplit('=')
+                .next()
+                .unwrap()
+                .parse::<u64>()
+                .unwrap()
+                >= 1000
+        );
+        assert_eq!(diagnostic.lines().count(), 1);
+        assert!(diagnostic.len() < 200);
+        // The fatal control remains behind every accepted frame.
+        pending = Some(control);
+        for _ in 0..INPUT_QUEUE_CAPACITY {
+            assert!(matches!(
+                receive_session_input(&control_rx, &pcm_rx, &mut pending, &mut processed),
+                Some(Input::Pcm(_))
+            ));
+        }
+        assert!(matches!(
+            receive_session_input(&control_rx, &pcm_rx, &mut pending, &mut processed),
+            Some(Input::Invalid(_))
+        ));
     }
 
     #[test]
@@ -10529,31 +7679,6 @@ mod tests {
     }
 
     #[test]
-    fn handoff_lifecycle_requests_reject_ambiguous_or_unbounded_ids() {
-        let duplicate = SessionRequest::DismissHandoffs {
-            id: 9,
-            cursor: 3,
-            handoff_ids: vec!["call-1".into(), "call-1".into()],
-            reason: "Superseded".into(),
-        };
-        assert_eq!(
-            validate_request(duplicate).unwrap_err(),
-            "handoff ids must be unique"
-        );
-
-        let empty = SessionRequest::PrepareSpeak {
-            id: 10,
-            acknowledgement: None,
-            text: "answer".into(),
-            resolved_handoff_ids: vec!["  ".into()],
-        };
-        assert_eq!(
-            validate_request(empty).unwrap_err(),
-            "handoff id must not be empty"
-        );
-    }
-
-    #[test]
     fn ready_requires_the_runtime_ready_event() {
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
         sender.blocking_send(VoiceInputEvent::Ready).unwrap();
@@ -10596,6 +7721,7 @@ mod tests {
                 acknowledgement: None,
                 text: "reply".into(),
             },
+            None,
             &mut core,
             &test_tts_slot(),
             &input_policy,
@@ -10641,6 +7767,7 @@ mod tests {
                 acknowledgement: None,
                 text: "old voice".into(),
             },
+            None,
             &mut core,
             &slot,
             &input_policy,
@@ -11057,6 +8184,46 @@ mod tests {
     }
 
     #[test]
+    fn interim_words_carry_the_token_their_final_will_take() {
+        let mut core = SessionCore::default();
+        let mut active = None;
+        let mut output = Vec::new();
+        let mut next_token = 7;
+        handle_voice_input_event(
+            VoiceInputEvent::InterimTranscript {
+                recognition_id: "recognition".into(),
+                text: "you sh".into(),
+            },
+            &mut core,
+            &mut active,
+            &mut next_token,
+            &mut output,
+        )
+        .unwrap();
+        assert_eq!(next_token, 7);
+        store_and_publish_voice_final(
+            "you should".into(),
+            || {},
+            &mut core,
+            &mut active,
+            &mut next_token,
+            &mut output,
+        )
+        .unwrap();
+        let messages: Vec<Value> = String::from_utf8(output)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(
+            messages[0],
+            json!({"type":"user_interim","token":7,"text":"you sh"})
+        );
+        assert_eq!(messages[1]["type"], "live_event");
+        assert_eq!(messages[1]["token"], 7);
+    }
+
+    #[test]
     fn runtime_pending_provisionally_holds_reserved_output_without_a_terminal() {
         let mut core = SessionCore::default();
         let PrepareOutcome::Admitted {
@@ -11356,7 +8523,6 @@ mod tests {
         .unwrap();
         assert_eq!(parsed.port, 5300);
         assert_eq!(parsed.transcript, TranscriptDestination::Stdout);
-        assert!(!parsed.expert_spokesperson);
         assert_eq!(
             parsed.session_arguments,
             ["session", "--voice", "Aaron", "--language", "en-US"]
@@ -11385,6 +8551,12 @@ mod tests {
         let parsed = start(&["--codex", "--non-blocking"]).unwrap();
         assert_eq!(parsed.transcript, TranscriptDestination::Codex);
         assert!(parsed.non_blocking);
+        let parsed = start(&["--stream", "--non-blocking"]).unwrap();
+        assert_eq!(parsed.transcript, TranscriptDestination::Stdout);
+        assert_eq!(
+            parsed.session_arguments[1..],
+            ["--voice", "Aaron", "--language", "en-US"]
+        );
         assert!(start(&["--codex", "--stream"]).is_err());
         assert!(start(&["--codex", "--codex"]).is_err());
         assert!(start(&["--non-blocking"]).is_err());
@@ -11432,6 +8604,8 @@ mod tests {
                     rate: 1.5,
                 }),
                 input_policy: Some(berd_call::input::InputDuringTtsPolicy::SuppressInput),
+                status_sounds: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -11598,6 +8772,42 @@ mod tests {
             parse_host_settings_args(&args(&[
                 "berd-call",
                 "settings",
+                "--status-sounds",
+                "working-and-waiting",
+            ]))
+            .unwrap()
+            .1,
+            host_control::ControlRequest::StatusSounds {
+                mode: Some(berd_call::StatusSoundMode::WorkingAndWaiting),
+                status: None,
+            }
+        ));
+        assert!(matches!(
+            parse_host_settings_args(&args(&[
+                "berd-call",
+                "settings",
+                "--conversation-status",
+                "waiting",
+            ]))
+            .unwrap()
+            .1,
+            host_control::ControlRequest::StatusSounds {
+                mode: None,
+                status: Some(berd_call::ConversationStatus::Waiting),
+            }
+        ));
+        for (flag, value) in [
+            ("--status-sounds", "loud"),
+            ("--conversation-status", "idle"),
+        ] {
+            assert!(
+                parse_host_settings_args(&args(&["berd-call", "settings", flag, value])).is_err()
+            );
+        }
+        assert!(matches!(
+            parse_host_settings_args(&args(&[
+                "berd-call",
+                "settings",
                 "--port",
                 "5340",
                 "--restart",
@@ -11605,19 +8815,19 @@ mod tests {
                 "Aaron",
                 "--language",
                 "en-US",
-                "--mode",
-                "expert-spokesperson",
+                "--rate",
+                "1.25",
             ]))
             .unwrap(),
             (5340, host_control::ControlRequest::Restart { session_arguments })
-                if session_arguments.last().map(String::as_str) == Some("expert-spokesperson")
+                if session_arguments.last().map(String::as_str) == Some("1.25")
         ));
         assert!(parse_host_settings_args(&args(&[
             "berd-call",
             "settings",
             "--restart",
-            "--mode",
-            "sideways",
+            "--rate",
+            "fast",
         ]))
         .is_err());
         assert!(parse_host_settings_args(&args(&[
@@ -11652,16 +8862,29 @@ mod tests {
                 "5300",
                 "--re",
                 "17",
+                "--voice",
+                "Nora",
+                "--language",
+                "en-GB",
                 "hello",
             ]))
             .unwrap(),
             SpeakOptions {
                 port: 5300,
                 acknowledgement: Some(17),
-                resolved_handoff_ids: Vec::new(),
+                voice: Some("Nora".into()),
+                language: Some("en-GB".into()),
                 text: "hello".into(),
             }
         );
+        assert!(parse_speak_control_args(&args(&[
+            "berd-call",
+            "speak",
+            "--language",
+            "en-GB",
+            "hello"
+        ]))
+        .is_err());
         assert_eq!(
             parse_control_port(&args(&["berd-call", "status", "--port", "5301"])).unwrap(),
             5301
@@ -11670,5 +8893,38 @@ mod tests {
             parse_speak_control_args(&args(&["berd-call", "speak", "--legacy", "hello",])).is_err()
         );
         assert!(parse_control_port(&args(&["berd-call", "stop", "extra"])).is_err());
+    }
+}
+
+#[cfg(test)]
+mod speech_hint_tests {
+    use super::*;
+
+    #[test]
+    fn speech_hints_are_bounded_and_preserve_names() {
+        let args = |hints: &[&str]| {
+            [
+                "berd-call",
+                "session",
+                "--voice",
+                "Aaron",
+                "--language",
+                "en-US",
+            ]
+            .into_iter()
+            .chain(hints.iter().flat_map(|hint| ["--stt-hint", *hint]))
+            .map(String::from)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            parse_args(&args(&["Nora", " Aaron ", "Nora"]))
+                .unwrap()
+                .stt_hints,
+            ["Nora", "Aaron"]
+        );
+        assert!(parse_args(&args(&[""])).is_err());
+        assert!(parse_args(&args(&[&"a".repeat(257)])).is_err());
+        let many = (0..101).map(|i| format!("agent{i}")).collect::<Vec<_>>();
+        assert!(parse_args(&args(&many.iter().map(String::as_str).collect::<Vec<_>>())).is_err());
     }
 }

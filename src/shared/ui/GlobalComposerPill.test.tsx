@@ -1,3 +1,6 @@
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
+import { usePendingAutoModeStore } from "@/features/chat/lib/autoModelSelection";
 import {
   act,
   createEvent,
@@ -191,6 +194,7 @@ function expectSentImageAttachment(
   expected: Record<string, unknown>,
 ) {
   expect(onSend).toHaveBeenCalledWith("", {
+    useDefaultAutoMode: true,
     attachments: [expect.objectContaining({ kind: "image", ...expected })],
     executionTarget: { harnessId: "goose" },
     personaId: null,
@@ -205,6 +209,9 @@ function expectSent(
   expect(onSend).toHaveBeenCalledWith(text, {
     executionTarget: { harnessId: "goose" },
     personaId: null,
+    ...(usePendingAutoModeStore.getState().modeId === undefined
+      ? { useDefaultAutoMode: true }
+      : {}),
     ...options,
   });
 }
@@ -241,6 +248,8 @@ describe("GlobalComposerPill", () => {
   });
 
   beforeEach(() => {
+    useRuntimeConfigStore.setState({ config: DEFAULT_RUNTIME_CONFIG });
+    usePendingAutoModeStore.setState({ modeId: undefined });
     resetVoiceDictationShortcutControllerForTests();
     mockOpenDialog.mockReset();
     mockInspectAttachmentPaths.mockReset();
@@ -550,6 +559,7 @@ describe("GlobalComposerPill", () => {
       text: "keep this draft",
       selectedSkills: [],
       options: {
+        useDefaultAutoMode: true,
         executionTarget: { harnessId: "goose" },
         personaId: null,
       },
@@ -765,6 +775,7 @@ describe("GlobalComposerPill", () => {
   });
 
   it("applies the suggested persona's provider and model to the send payload", async () => {
+    usePendingAutoModeStore.getState().setModeId("balanced");
     const user = userEvent.setup();
     useAgentStore.setState({
       personas: [
@@ -796,6 +807,7 @@ describe("GlobalComposerPill", () => {
     });
 
     expect(screen.getByText("Research Scout")).toBeInTheDocument();
+    expect(usePendingAutoModeStore.getState().modeId).toBeNull();
 
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
@@ -1349,6 +1361,83 @@ describe("GlobalComposerPill", () => {
     expect(screen.queryByText("Project One")).not.toBeInTheDocument();
   });
 
+  it("carries inherited Auto intent without snapshotting the configured default", async () => {
+    const user = userEvent.setup();
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          autoRouting: {
+            url: "https://router.example",
+            defaultModeId: "old-default",
+            modes: [
+              {
+                id: "old-default",
+                displayName: "Old default",
+                modelProviderId: "openai",
+                fallback: { modelId: "old-model", effort: "medium" },
+                models: [{ modelId: "old-model", routerModel: "old" }],
+              },
+            ],
+          },
+        },
+      },
+    });
+    const onSend = renderGlobalComposer();
+    await user.type(screen.getByRole("textbox"), "Use refreshed defaults");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+    expect(onSend).toHaveBeenCalledWith(
+      "Use refreshed defaults",
+      expect.objectContaining({ useDefaultAutoMode: true }),
+    );
+    expect(onSend.mock.calls[0][1]).not.toHaveProperty("autoModeId");
+  });
+
+  it("sends the selected auto mode with its concrete Goose fallback", async () => {
+    const user = userEvent.setup();
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          autoRouting: {
+            url: "https://router.example",
+            modes: [
+              {
+                id: "balanced",
+                displayName: "Auto Balanced",
+                modelProviderId: "openai",
+                fallback: { modelId: "gpt-5", effort: "medium" },
+                models: [{ modelId: "gpt-5", routerModel: "gpt-5" }],
+              },
+            ],
+          },
+        },
+      },
+    });
+    const onSend = renderGlobalComposer();
+    await user.click(screen.getByRole("textbox"));
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "Auto Balanced" }));
+    await user.type(screen.getByRole("textbox"), "Route this task");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+    expect(onSend).toHaveBeenCalledWith(
+      "Route this task",
+      expect.objectContaining({
+        autoModeId: "balanced",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-5",
+          modelName: "gpt-5",
+        },
+      }),
+    );
+  });
+
   it("disables send until there is sendable content", async () => {
     const user = userEvent.setup();
     const onSend = renderGlobalComposer();
@@ -1632,6 +1721,7 @@ describe("GlobalComposerPill", () => {
       text: "",
       selectedSkills: [],
       options: {
+        useDefaultAutoMode: true,
         executionTarget: {
           harnessId: "goose",
           modelProviderId: "anthropic",
@@ -1819,6 +1909,7 @@ describe("GlobalComposerPill", () => {
       text: "",
       selectedSkills: [],
       options: {
+        useDefaultAutoMode: true,
         executionTarget: { harnessId: "goose" },
         personaId: null,
       },
@@ -1879,6 +1970,7 @@ describe("GlobalComposerPill", () => {
       text: "",
       selectedSkills: [],
       options: {
+        useDefaultAutoMode: true,
         attachments: [
           expect.objectContaining({
             kind: "image",

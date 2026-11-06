@@ -4,19 +4,22 @@ version = 4
 
 [[package]]
 name = "Berd"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
  "berd-call",
+ "berd-monitor",
  "block2",
  "builderbot-auth",
  "bytes",
  "chrono",
+ "claxon",
  "coreaudio-rs",
  "dirs",
  "doctor",
  "dunce",
+ "earshot",
  "etcetera 0.11.0",
  "fern",
  "flate2",
@@ -68,6 +71,7 @@ dependencies = [
  "tempfile",
  "time",
  "tokio",
+ "tokio-tungstenite",
  "toml 1.1.4+spec-1.1.0",
  "url",
  "uuid",
@@ -629,12 +633,15 @@ dependencies = [
  "clap",
  "fs2",
  "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
  "windows-sys 0.59.0",
 ]
 
 [[package]]
 name = "berdctl"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "clap",
  "indexmap 2.13.1",
@@ -6675,7 +6682,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-berdctl"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "axum",
  "getrandom 0.4.3",

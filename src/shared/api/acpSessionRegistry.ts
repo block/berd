@@ -398,6 +398,11 @@ export function getPreparedProviderId(sessionId: string): string | undefined {
   return prepared.get(sessionId)?.executionSelection?.providerId;
 }
 
+/** CWD actually prepared for the live backend session, including resolved defaults. */
+export function getPreparedWorkingDir(sessionId: string): string | undefined {
+  return prepared.get(sessionId)?.workingDir;
+}
+
 /** Return the complete backend execution selection observed by this window. */
 export function requireSessionInvocationSelection(
   sessionId: string,

@@ -1,3 +1,4 @@
+import { loadAutoMode } from "../stores/autoModePersistence";
 import type { AcpSessionInfo, AcpSessionsPage } from "@/shared/api/acp";
 import type {
   ArchiveMutationBySessionId,
@@ -35,6 +36,7 @@ export function acpSessionToChatSession(
   );
   return withWorkspaceBackfill({
     ...chatSessionFromAcpInfo(session, context),
+    autoModeId: loadAutoMode(session.sessionId),
     workspaceAttachments: persistedWorkspaceMetadata?.workspaceAttachments,
     activeWorkspaceId: persistedWorkspaceMetadata?.activeWorkspaceId,
   });
@@ -69,6 +71,8 @@ export function chatSessionFromAcpInfo(
     executionTarget,
     executionTargetSource: executionTarget ? "acp" : undefined,
     personaId: session.personaId ?? undefined,
+    sessionType: session.sessionType ?? undefined,
+    parentSessionId: session.parentSessionId ?? undefined,
     workingDir: session.workingDir ?? undefined,
     // Only set the key when context or the composite id proves that the
     // session came from a remote backend, so a local row cannot gain a tag.
@@ -131,6 +135,10 @@ function mergeSessionMetadata(
         executionTarget,
         executionTargetSource,
         personaId,
+        autoModeId:
+          existing?.autoModeId !== undefined
+            ? existing.autoModeId
+            : session.autoModeId,
         remoteHost,
         workspaceAttachments:
           existing?.workspaceAttachments ?? session.workspaceAttachments,

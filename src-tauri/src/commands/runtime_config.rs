@@ -4,12 +4,15 @@ use crate::services::kgoose;
 #[cfg(any(feature = "admin-runtime-config", test))]
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-#[cfg(feature = "admin-runtime-config")]
 use std::time::Duration;
 use tauri::State;
+
+const NEW_CHAT_RUNTIME_CONFIG_TIMEOUT: Duration = Duration::from_secs(5);
 
 const RUNTIME_CONFIG_DIR_NAME: &str = "runtime-config";
 const FAKE_RUNTIME_CONFIG_FILE_NAME: &str = "fake-endpoint.json";
@@ -76,6 +79,57 @@ pub struct RuntimeGooseConfig {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub default_model_id: Option<String>,
     pub model_providers: Vec<RuntimeGooseModelProvider>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub auto_routing: Option<RuntimeAutoRoutingConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeAutoRoutingConfig {
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub bearer_token_env: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub route_selector: Option<RuntimeRouteSelector>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub default_mode_id: Option<String>,
+    pub modes: Vec<RuntimeAutoRoutingMode>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeRouteSelector {
+    pub router_name: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub config: Option<serde_json::Map<String, serde_json::Value>>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeAutoRoutingMode {
+    pub id: String,
+    pub display_name: String,
+    pub model_provider_id: String,
+    pub fallback: RuntimeAutoRoutingFallback,
+    pub models: Vec<RuntimeAutoRoutingModel>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeAutoRoutingFallback {
+    pub model_id: String,
+    pub effort: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeAutoRoutingModel {
+    pub model_id: String,
+    pub router_model: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub harness: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub min_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub max_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -218,6 +272,14 @@ pub enum RuntimeConfigLoadResult {
     Ready {
         source: RuntimeConfigSource,
         config: Box<RuntimeConfig>,
+        /// Opaque native fingerprint. Callers echo it without re-encoding the
+        /// configuration, whose free JSON numbers can change in JavaScript.
+        #[serde(
+            rename = "autoRoutingRevision",
+            skip_serializing_if = "Option::is_none",
+            default
+        )]
+        auto_routing_revision: Option<String>,
     },
     Unavailable {
         source: RuntimeConfigSource,
@@ -226,11 +288,51 @@ pub enum RuntimeConfigLoadResult {
     },
 }
 
+impl RuntimeConfigLoadResult {
+    fn ready(source: RuntimeConfigSource, config: RuntimeConfig) -> Self {
+        let revision = config
+            .goose
+            .auto_routing
+            .as_ref()
+            .map(auto_routing_revision)
+            .transpose();
+        match revision {
+            Ok(auto_routing_revision) => Self::Ready {
+                source,
+                config: Box::new(config),
+                auto_routing_revision,
+            },
+            Err(message) => Self::Unavailable {
+                source,
+                reason: RuntimeConfigUnavailableReason::Invalid,
+                message,
+            },
+        }
+    }
+}
+
+/// Hash only native-owned data. In particular, never recreate this revision
+/// from renderer JSON: JavaScript rounds integers and normalizes float types.
+pub(crate) fn auto_routing_revision(config: &RuntimeAutoRoutingConfig) -> Result<String, String> {
+    let encoded = serde_json::to_vec(config)
+        .map_err(|_| "Failed to encode Auto routing revision".to_string())?;
+    Ok(hex::encode(Sha256::digest(encoded)))
+}
+
 pub struct RuntimeConfigState {
     fake_config_path: PathBuf,
     admin_cache_path: PathBuf,
     bundled_config_path: Option<PathBuf>,
-    cached: Mutex<Option<RuntimeConfigLoadResult>>,
+    cached: Mutex<RuntimeConfigCache>,
+}
+
+#[derive(Default)]
+struct RuntimeConfigCache {
+    generation: u64,
+    current: Option<RuntimeConfigLoadResult>,
+    // Compiled defaults are a development fallback, not evidence that a
+    // configured routing mode was deliberately removed from the source.
+    last_valid: Option<RuntimeConfigLoadResult>,
 }
 
 impl RuntimeConfigState {
@@ -239,7 +341,7 @@ impl RuntimeConfigState {
             fake_config_path: fake_runtime_config_path(&app_data_dir),
             admin_cache_path: admin_cache_path(&app_data_dir),
             bundled_config_path,
-            cached: Mutex::new(None),
+            cached: Mutex::new(RuntimeConfigCache::default()),
         }
     }
 
@@ -247,22 +349,26 @@ impl RuntimeConfigState {
         &self,
         distro_state: &DistroBundleState,
     ) -> Result<RuntimeConfigLoadResult, String> {
-        if let Some(result) = self
-            .cached
-            .lock()
-            .map_err(|_| "Runtime config cache lock poisoned".to_string())?
-            .clone()
-        {
-            return Ok(result);
-        }
+        let generation = {
+            let mut cached = self
+                .cached
+                .lock()
+                .map_err(|_| "Runtime config cache lock poisoned".to_string())?;
+            if let Some(result) = &cached.current {
+                return Ok(result.clone());
+            }
+            cached.generation += 1;
+            cached.generation
+        };
         let result = load_runtime_config_from_source(
             &self.fake_config_path,
             &self.admin_cache_path,
             self.bundled_config_path.as_deref(),
             distro_state,
+            true,
         )
         .await;
-        self.replace_cache(result)
+        self.finish_load(generation, result, false)
     }
 
     pub async fn ready_config(
@@ -283,14 +389,16 @@ impl RuntimeConfigState {
         &self,
         distro_state: &DistroBundleState,
     ) -> Result<RuntimeConfigLoadResult, String> {
+        let generation = self.begin_load()?;
         let result = load_runtime_config_from_source(
             &self.fake_config_path,
             &self.admin_cache_path,
             self.bundled_config_path.as_deref(),
             distro_state,
+            true,
         )
         .await;
-        self.replace_cache(result)
+        self.finish_load(generation, result, false)
     }
 
     #[cfg(debug_assertions)]
@@ -299,11 +407,20 @@ impl RuntimeConfigState {
         config: RuntimeConfig,
     ) -> Result<RuntimeConfigLoadResult, String> {
         validate_runtime_config(&config)?;
-        write_fake_runtime_config_to_path(&self.fake_config_path, &config)?;
-        self.replace_cache(RuntimeConfigLoadResult::Ready {
-            source: RuntimeConfigSource::FakeEndpoint,
-            config: Box::new(config),
-        })
+        let generation = {
+            let mut cached = self
+                .cached
+                .lock()
+                .map_err(|_| "Runtime config cache lock poisoned".to_string())?;
+            write_fake_runtime_config_to_path(&self.fake_config_path, &config)?;
+            cached.generation += 1;
+            cached.generation
+        };
+        self.finish_load(
+            generation,
+            RuntimeConfigLoadResult::ready(RuntimeConfigSource::FakeEndpoint, config),
+            false,
+        )
     }
 
     #[cfg(not(debug_assertions))]
@@ -319,24 +436,42 @@ impl RuntimeConfigState {
         &self,
         distro_state: &DistroBundleState,
     ) -> Result<RuntimeConfigLoadResult, String> {
-        match std::fs::remove_file(&self.fake_config_path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(format!(
-                    "Failed to remove fake runtime config '{}': {error}",
-                    self.fake_config_path.display()
-                ))
+        let generation = {
+            let mut cached = self
+                .cached
+                .lock()
+                .map_err(|_| "Runtime config cache lock poisoned".to_string())?;
+            match std::fs::remove_file(&self.fake_config_path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(format!(
+                        "Failed to remove fake runtime config '{}': {error}",
+                        self.fake_config_path.display()
+                    ))
+                }
             }
-        }
+            if matches!(
+                &cached.last_valid,
+                Some(RuntimeConfigLoadResult::Ready {
+                    source: RuntimeConfigSource::FakeEndpoint,
+                    ..
+                })
+            ) {
+                cached.last_valid = None;
+            }
+            cached.generation += 1;
+            cached.generation
+        };
         let result = load_runtime_config_from_source(
             &self.fake_config_path,
             &self.admin_cache_path,
             self.bundled_config_path.as_deref(),
             distro_state,
+            true,
         )
         .await;
-        self.replace_cache(result)
+        self.finish_load(generation, result, false)
     }
 
     #[cfg(not(debug_assertions))]
@@ -347,16 +482,92 @@ impl RuntimeConfigState {
         Ok(unsupported_fake_runtime_config())
     }
 
-    fn replace_cache(
+    /// Refresh the source for a new chat without discarding a working config
+    /// when the source is temporarily unavailable. The returned value is also
+    /// the effective config read by native routing commands.
+    pub async fn refresh_for_new_chat(
         &self,
+        distro_state: &DistroBundleState,
+    ) -> Result<RuntimeConfigLoadResult, String> {
+        self.refresh_for_new_chat_with(
+            load_runtime_config_from_source(
+                &self.fake_config_path,
+                &self.admin_cache_path,
+                self.bundled_config_path.as_deref(),
+                distro_state,
+                false,
+            ),
+            NEW_CHAT_RUNTIME_CONFIG_TIMEOUT,
+        )
+        .await
+    }
+
+    async fn refresh_for_new_chat_with(
+        &self,
+        load: impl Future<Output = RuntimeConfigLoadResult>,
+        timeout: Duration,
+    ) -> Result<RuntimeConfigLoadResult, String> {
+        let generation = self.begin_load()?;
+        let result = tokio::time::timeout(timeout, load)
+            .await
+            .unwrap_or_else(|_| {
+                runtime_config_refresh_unavailable("Runtime config refresh timed out".to_string())
+            });
+        self.finish_load(generation, result, true)
+    }
+
+    fn begin_load(&self) -> Result<u64, String> {
+        let mut cached = self
+            .cached
+            .lock()
+            .map_err(|_| "Runtime config cache lock poisoned".to_string())?;
+        cached.generation += 1;
+        Ok(cached.generation)
+    }
+
+    fn finish_load(
+        &self,
+        generation: u64,
         result: RuntimeConfigLoadResult,
+        retain_last_valid: bool,
     ) -> Result<RuntimeConfigLoadResult, String> {
         let result = runtime_config_load_result_for_local_byo_dev(result);
         let mut cached = self
             .cached
             .lock()
             .map_err(|_| "Runtime config cache lock poisoned".to_string())?;
-        *cached = Some(result.clone());
+        if generation != cached.generation {
+            // The newer load owns the cache, but it may not have committed yet.
+            // An older successful read remains usable by its caller in that gap.
+            return Ok(cached.current.clone().unwrap_or(result));
+        }
+        let result =
+            if retain_last_valid && matches!(result, RuntimeConfigLoadResult::Unavailable { .. }) {
+                cached
+                    .last_valid
+                    .clone()
+                    .or_else(|| {
+                        // Defaults still support unrelated native operations. Their
+                        // AppDefault source remains non-authoritative for Auto intent.
+                        cached.current.clone().filter(|current| {
+                            matches!(
+                                current,
+                                RuntimeConfigLoadResult::Ready {
+                                    source: RuntimeConfigSource::AppDefault,
+                                    ..
+                                }
+                            )
+                        })
+                    })
+                    .unwrap_or(result)
+            } else {
+                result
+            };
+        if matches!(&result, RuntimeConfigLoadResult::Ready { source, .. } if *source != RuntimeConfigSource::AppDefault)
+        {
+            cached.last_valid = Some(result.clone());
+        }
+        cached.current = Some(result.clone());
         Ok(result)
     }
 }
@@ -377,10 +588,21 @@ async fn load_runtime_config_from_source(
     cache_path: &Path,
     bundled_config_path: Option<&Path>,
     distro_state: &DistroBundleState,
+    allow_default_fallback: bool,
 ) -> RuntimeConfigLoadResult {
     #[cfg(debug_assertions)]
-    if fake_config_path.exists() {
-        return read_fake_runtime_config_from_path(fake_config_path);
+    {
+        let path = fake_config_path.to_owned();
+        match tokio::task::spawn_blocking(move || {
+            path.exists()
+                .then(|| read_fake_runtime_config_from_path(&path))
+        })
+        .await
+        {
+            Ok(Some(result)) => return result,
+            Ok(None) => {}
+            Err(error) => return runtime_config_refresh_unavailable(error.to_string()),
+        }
     }
     #[cfg(not(debug_assertions))]
     let _ = fake_config_path;
@@ -390,24 +612,33 @@ async fn load_runtime_config_from_source(
         let _ = bundled_config_path;
         match fetch_admin_runtime_config(distro_state).await {
             Ok((config, source_url)) => {
-                if let Err(error) = write_admin_cache_to_path(cache_path, &config, &source_url) {
-                    log::warn!("failed to write admin runtime config cache: {error}");
+                let path = cache_path.to_owned();
+                let cache_config = config.clone();
+                match tokio::task::spawn_blocking(move || {
+                    write_admin_cache_to_path(&path, &cache_config, &source_url)
+                })
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    error => log::warn!("failed to write admin runtime config cache: {error:?}"),
                 }
-                return RuntimeConfigLoadResult::Ready {
-                    source: RuntimeConfigSource::Endpoint,
-                    config: Box::new(config),
-                };
+                return RuntimeConfigLoadResult::ready(RuntimeConfigSource::Endpoint, config);
             }
-            Err(error) => log::warn!("failed to fetch admin runtime config: {error}"),
+            Err(error) => {
+                log::warn!("failed to fetch admin runtime config: {error}");
+                if !allow_default_fallback {
+                    return runtime_config_refresh_unavailable(error);
+                }
+            }
         }
 
         match read_admin_cache_from_path(cache_path) {
             Ok(cache) => {
                 log::info!("using cached admin runtime config");
-                return RuntimeConfigLoadResult::Ready {
-                    source: RuntimeConfigSource::CachedEndpoint,
-                    config: Box::new(cache.config),
-                };
+                return RuntimeConfigLoadResult::ready(
+                    RuntimeConfigSource::CachedEndpoint,
+                    cache.config,
+                );
             }
             Err(error) => log::warn!("failed to read cached admin runtime config: {error}"),
         }
@@ -421,10 +652,31 @@ async fn load_runtime_config_from_source(
         // runtime-config.json is the source of truth. A stale admin cache must
         // not shadow it, so the cache is intentionally ignored in this mode.
         let _ = (cache_path, distro_state);
-        load_bundled_runtime_config_from_source(
-            bundled_config_path,
-            allow_bundled_runtime_config_default_fallback(),
-        )
+        let path = bundled_config_path.map(Path::to_owned);
+        tokio::task::spawn_blocking(move || {
+            load_bundled_runtime_config_from_source(
+                path.as_deref(),
+                allow_default_fallback && allow_bundled_runtime_config_default_fallback(),
+            )
+        })
+        .await
+        .unwrap_or_else(|error| runtime_config_refresh_unavailable(error.to_string()))
+    }
+}
+
+fn runtime_config_refresh_unavailable(message: String) -> RuntimeConfigLoadResult {
+    RuntimeConfigLoadResult::Unavailable {
+        source: if cfg!(feature = "admin-runtime-config") {
+            RuntimeConfigSource::Endpoint
+        } else {
+            RuntimeConfigSource::BundledFile
+        },
+        reason: if cfg!(feature = "admin-runtime-config") {
+            RuntimeConfigUnavailableReason::EndpointUnavailable
+        } else {
+            RuntimeConfigUnavailableReason::ReadFailed
+        },
+        message,
     }
 }
 
@@ -454,10 +706,7 @@ fn load_bundled_runtime_config_from_source(
         Some(path) if path.exists() => match read_bundled_runtime_config_from_path(path) {
             Ok(config) => {
                 log::info!("using bundled runtime config '{}'", path.display());
-                RuntimeConfigLoadResult::Ready {
-                    source: RuntimeConfigSource::BundledFile,
-                    config: Box::new(config),
-                }
+                RuntimeConfigLoadResult::ready(RuntimeConfigSource::BundledFile, config)
             }
             Err((reason, message)) => bundled_runtime_config_unavailable_or_default(
                 reason,
@@ -570,10 +819,7 @@ fn read_fake_runtime_config_from_path(path: &Path) -> RuntimeConfigLoadResult {
             path.display()
         ));
     }
-    RuntimeConfigLoadResult::Ready {
-        source: RuntimeConfigSource::FakeEndpoint,
-        config: Box::new(config),
-    }
+    RuntimeConfigLoadResult::ready(RuntimeConfigSource::FakeEndpoint, config)
 }
 
 #[cfg(any(feature = "admin-runtime-config", test))]
@@ -636,7 +882,7 @@ fn runtime_config_load_result_for_local_byo_dev(
     #[cfg(debug_assertions)]
     if local_byo_key_providers_enabled() {
         return match result {
-            RuntimeConfigLoadResult::Ready { source, config }
+            RuntimeConfigLoadResult::Ready { source, config, .. }
                 if matches!(
                     source,
                     RuntimeConfigSource::AppDefault | RuntimeConfigSource::BundledFile
@@ -644,10 +890,7 @@ fn runtime_config_load_result_for_local_byo_dev(
             {
                 let mut config = *config;
                 clear_default_databricks_distribution_config(&mut config);
-                RuntimeConfigLoadResult::Ready {
-                    source,
-                    config: Box::new(config),
-                }
+                RuntimeConfigLoadResult::ready(source, config)
             }
             other => other,
         };
@@ -694,10 +937,7 @@ fn default_runtime_config_result(source: RuntimeConfigSource) -> RuntimeConfigLo
             message: format!("Default runtime config failed validation: {error}"),
         };
     }
-    RuntimeConfigLoadResult::Ready {
-        source,
-        config: Box::new(config),
-    }
+    RuntimeConfigLoadResult::ready(source, config)
 }
 
 pub(crate) fn default_runtime_config() -> RuntimeConfig {
@@ -717,6 +957,7 @@ pub(crate) fn default_goose_config() -> RuntimeGooseConfig {
     RuntimeGooseConfig {
         default_model_provider_id: None,
         default_model_id: None,
+        auto_routing: None,
         model_providers: vec![],
     }
 }
@@ -790,6 +1031,9 @@ fn validate_runtime_config(config: &RuntimeConfig) -> Result<(), String> {
 }
 
 fn validate_goose_config(goose: &RuntimeGooseConfig) -> Result<(), String> {
+    if let Some(config) = &goose.auto_routing {
+        validate_auto_routing(config, &goose.model_providers)?;
+    }
     validate_optional_runtime_id(
         goose.default_model_provider_id.as_deref(),
         "goose.defaultModelProviderId",
@@ -904,6 +1148,183 @@ fn validate_goose_config(goose: &RuntimeGooseConfig) -> Result<(), String> {
     }
     if !provider_ids.contains(default_provider_id) {
         return Err("goose.defaultModelProviderId must reference goose.modelProviders".to_string());
+    }
+    Ok(())
+}
+
+fn normalized_router_model(value: &str) -> String {
+    let chars: Vec<char> = value
+        .strip_prefix("system.ai.")
+        .unwrap_or(value)
+        .chars()
+        .collect();
+    chars
+        .iter()
+        .enumerate()
+        .map(|(index, c)| {
+            if *c == '.'
+                && index > 0
+                && chars[index - 1].is_ascii_digit()
+                && chars.get(index + 1).is_some_and(char::is_ascii_digit)
+            {
+                '-'
+            } else {
+                *c
+            }
+        })
+        .collect()
+}
+
+fn effort_rank(value: &str) -> Result<usize, String> {
+    ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+        .iter()
+        .position(|item| *item == value)
+        .ok_or_else(|| "autoRouting effort has unsupported value".to_string())
+}
+fn validate_router_json(value: &serde_json::Value) -> Result<(), String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, item) in map {
+                if [
+                    "secret",
+                    "token",
+                    "apikey",
+                    "api-key",
+                    "api_key",
+                    "password",
+                    "authorization",
+                    "bearer",
+                ]
+                .iter()
+                .any(|word| key.to_lowercase().contains(word))
+                {
+                    return Err("autoRouting routeSelector must not contain secrets".to_string());
+                }
+                validate_router_json(item)?;
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                validate_router_json(item)?;
+            }
+        }
+        serde_json::Value::String(item)
+            if item.to_lowercase().contains("bearer ")
+                || (item.contains("-----BEGIN") && item.contains("PRIVATE KEY")) =>
+        {
+            return Err("autoRouting routeSelector must not contain secrets".to_string())
+        }
+        _ => (),
+    }
+    Ok(())
+}
+fn validate_auto_routing(
+    config: &RuntimeAutoRoutingConfig,
+    providers: &[RuntimeGooseModelProvider],
+) -> Result<(), String> {
+    validate_runtime_id(&config.url, "autoRouting.url")?;
+    let url = reqwest::Url::parse(&config.url)
+        .map_err(|_| "autoRouting url must be valid".to_string())?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(
+            "autoRouting url must be http or https without credentials, query or fragment"
+                .to_string(),
+        );
+    }
+    if let Some(name) = &config.bearer_token_env {
+        let mut chars = name.chars();
+        if !chars
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase() || c == '_')
+            || !chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        {
+            return Err(
+                "autoRouting bearerTokenEnv must be an environment variable name".to_string(),
+            );
+        }
+    }
+    if matches!(config.timeout_ms, Some(0 | 120001..)) {
+        return Err("autoRouting timeoutMs must be between 1 and 120000".to_string());
+    }
+    if let Some(selector) = &config.route_selector {
+        validate_runtime_id(
+            &selector.router_name,
+            "autoRouting.routeSelector.router_name",
+        )?;
+        validate_router_json(
+            &serde_json::to_value(selector).map_err(|_| "Invalid routeSelector".to_string())?,
+        )?;
+    }
+    if config.modes.is_empty() {
+        return Err("autoRouting modes must not be empty".to_string());
+    }
+    let mut ids = HashSet::new();
+    for mode in &config.modes {
+        validate_runtime_id(&mode.id, "autoRouting.mode.id")?;
+        validate_non_empty(&mode.display_name, "autoRouting.mode.displayName")?;
+        validate_runtime_id(&mode.model_provider_id, "autoRouting.mode.modelProviderId")?;
+        if !ids.insert(&mode.id) {
+            return Err("autoRouting modes must have unique ids".to_string());
+        }
+        if !providers
+            .iter()
+            .any(|provider| provider.id == mode.model_provider_id)
+        {
+            return Err("autoRouting modelProviderId must reference modelProviders".to_string());
+        }
+        if mode.models.is_empty() {
+            return Err("autoRouting models must not be empty".to_string());
+        }
+        let mut models = HashSet::new();
+        let mut routes = HashSet::new();
+        for model in &mode.models {
+            validate_runtime_id(&model.model_id, "autoRouting.modelId")?;
+            validate_runtime_id(&model.router_model, "autoRouting.routerModel")?;
+            validate_optional_runtime_id(model.harness.as_deref(), "autoRouting.harness")?;
+            if !models.insert(&model.model_id)
+                || !routes.insert((
+                    normalized_router_model(&model.router_model),
+                    model.harness.as_deref().unwrap_or("codex"),
+                ))
+            {
+                return Err(
+                    "autoRouting models must have unique modelIds and router model/harness pairs"
+                        .to_string(),
+                );
+            }
+            if effort_rank(model.min_effort.as_deref().unwrap_or("none"))?
+                > effort_rank(model.max_effort.as_deref().unwrap_or("max"))?
+            {
+                return Err("autoRouting minEffort must not exceed maxEffort".to_string());
+            }
+        }
+        let fallback = mode
+            .models
+            .iter()
+            .find(|model| model.model_id == mode.fallback.model_id)
+            .ok_or("autoRouting fallback must reference a candidate model")?;
+        let effort = effort_rank(&mode.fallback.effort)?;
+        if effort < effort_rank(fallback.min_effort.as_deref().unwrap_or("none"))?
+            || effort > effort_rank(fallback.max_effort.as_deref().unwrap_or("max"))?
+        {
+            return Err("autoRouting fallback effort must be within candidate bounds".to_string());
+        }
+    }
+    validate_optional_runtime_id(
+        config.default_mode_id.as_deref(),
+        "autoRouting.defaultModeId",
+    )?;
+    if config
+        .default_mode_id
+        .as_ref()
+        .is_some_and(|id| !ids.contains(id))
+    {
+        return Err("autoRouting defaultModeId must reference a mode".to_string());
     }
     Ok(())
 }
@@ -1131,6 +1552,14 @@ pub async fn refresh_runtime_config(
 }
 
 #[tauri::command]
+pub async fn refresh_runtime_config_for_new_chat(
+    state: State<'_, RuntimeConfigState>,
+    distro_state: State<'_, DistroBundleState>,
+) -> Result<RuntimeConfigLoadResult, String> {
+    state.refresh_for_new_chat(distro_state.inner()).await
+}
+
+#[tauri::command]
 pub fn set_fake_runtime_config(
     state: State<'_, RuntimeConfigState>,
     config: RuntimeConfig,
@@ -1157,6 +1586,7 @@ mod tests {
 
     fn managed_goose_config() -> RuntimeGooseConfig {
         RuntimeGooseConfig {
+            auto_routing: None,
             default_model_provider_id: Some(TEST_RUNTIME_PROVIDER_ID.to_string()),
             default_model_id: Some(TEST_RUNTIME_MODEL_ID.to_string()),
             model_providers: vec![RuntimeGooseModelProvider {
@@ -1285,7 +1715,7 @@ mod tests {
 
     fn expect_ready(result: RuntimeConfigLoadResult) -> (RuntimeConfigSource, RuntimeConfig) {
         match result {
-            RuntimeConfigLoadResult::Ready { source, config } => (source, *config),
+            RuntimeConfigLoadResult::Ready { source, config, .. } => (source, *config),
             other => panic!("expected ready result, got {other:?}"),
         }
     }
@@ -1443,6 +1873,296 @@ mod tests {
         assert_eq!(source, RuntimeConfigSource::FakeEndpoint);
         assert_eq!(reason, RuntimeConfigUnavailableReason::Missing);
         assert!(message.contains("Failed to read fake runtime config"));
+    }
+
+    #[test]
+    fn ready_wire_result_exposes_native_auto_revision_without_renderer_reencoding() {
+        let mut config = valid_config();
+        let absent = serde_json::to_value(RuntimeConfigLoadResult::ready(
+            RuntimeConfigSource::BundledFile,
+            config.clone(),
+        ))
+        .unwrap();
+        assert!(absent.get("autoRoutingRevision").is_none());
+        config.goose = managed_goose_config();
+        config.goose.auto_routing = Some(serde_json::from_value(serde_json::json!({
+            "url":"https://gateway.example.com/route",
+            "routeSelector":{"router_name":"task_v3","config":{"float":1.0,"large":9007199254740993u64}},
+            "modes":[{"id":"auto","displayName":"Auto","modelProviderId":TEST_RUNTIME_PROVIDER_ID,
+            "fallback":{"modelId":TEST_RUNTIME_MODEL_ID,"effort":"high"},
+            "models":[{"modelId":TEST_RUNTIME_MODEL_ID,"routerModel":"system.ai.sol"}]}]
+        })).unwrap());
+        validate_runtime_config(&config).unwrap();
+        let revision = auto_routing_revision(config.goose.auto_routing.as_ref().unwrap()).unwrap();
+        let mut wire = serde_json::to_value(RuntimeConfigLoadResult::ready(
+            RuntimeConfigSource::BundledFile,
+            config,
+        ))
+        .unwrap();
+        assert_eq!(wire["autoRoutingRevision"], revision);
+        assert_eq!(revision.len(), 64);
+        wire["config"]["goose"]["autoRouting"]["routeSelector"]["config"]["float"] =
+            serde_json::json!(1);
+        wire["config"]["goose"]["autoRouting"]["routeSelector"]["config"]["large"] =
+            serde_json::json!(9007199254740992u64);
+        let echoed: RuntimeConfigLoadResult = serde_json::from_value(wire).unwrap();
+        match echoed {
+            RuntimeConfigLoadResult::Ready {
+                config,
+                auto_routing_revision: Some(echoed_revision),
+                ..
+            } => {
+                assert_eq!(echoed_revision, revision);
+                assert_ne!(
+                    auto_routing_revision(config.goose.auto_routing.as_ref().unwrap()).unwrap(),
+                    revision
+                );
+            }
+            other => panic!("Expected Ready with native revision, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn new_chat_refresh_retains_last_valid_config_on_source_failure() {
+        let (_dir, state) = temp_state();
+        let distro = empty_distro_state();
+        let expected = state.set_fake_config(valid_config()).unwrap();
+        std::fs::write(&state.fake_config_path, "invalid JSON").unwrap();
+        assert_eq!(state.refresh_for_new_chat(&distro).await.unwrap(), expected);
+        assert_eq!(state.get(&distro).await.unwrap(), expected);
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[tokio::test]
+    async fn new_chat_refresh_reloads_bundled_source_and_retains_it_when_deleted() {
+        let (_dir, state) = temp_state_with_bundled(Some(&valid_config()));
+        let distro = empty_distro_state();
+        state.get(&distro).await.unwrap();
+        let mut updated = valid_config();
+        updated.feature_toggles = Some(HashMap::from([("updated".to_string(), true)]));
+        let path = state.bundled_config_path.as_ref().unwrap();
+        std::fs::write(path, serde_json::to_vec(&updated).unwrap()).unwrap();
+        let expected = state.refresh_for_new_chat(&distro).await.unwrap();
+        assert_eq!(expect_ready(expected.clone()).1, updated);
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(state.refresh_for_new_chat(&distro).await.unwrap(), expected);
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[tokio::test]
+    async fn new_chat_source_failure_preserves_operational_app_default() {
+        let (_dir, state) = temp_state();
+        let distro = empty_distro_state();
+        let initial = state.get(&distro).await.unwrap();
+        assert_eq!(
+            expect_ready(initial.clone()).0,
+            RuntimeConfigSource::AppDefault
+        );
+        let result = state.refresh_for_new_chat(&distro).await.unwrap();
+        assert_eq!(result, initial);
+        assert_eq!(state.get(&distro).await.unwrap(), result);
+        assert_eq!(
+            state.ready_config(&distro).await.unwrap(),
+            default_runtime_config()
+        );
+        // Ready defaults keep native operations usable without claiming that
+        // the source successfully removed any previously configured Auto mode.
+        assert!(matches!(
+            result,
+            RuntimeConfigLoadResult::Ready {
+                source: RuntimeConfigSource::AppDefault,
+                ..
+            }
+        ));
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[tokio::test]
+    async fn new_chat_timeout_preserves_operational_app_default() {
+        let (_dir, state) = temp_state();
+        let distro = empty_distro_state();
+        let initial = state.get(&distro).await.unwrap();
+        assert_eq!(
+            expect_ready(initial.clone()).0,
+            RuntimeConfigSource::AppDefault
+        );
+        let result = state
+            .refresh_for_new_chat_with(std::future::pending(), Duration::from_millis(1))
+            .await
+            .unwrap();
+        assert_eq!(result, initial);
+        assert_eq!(
+            state.ready_config(&distro).await.unwrap(),
+            default_runtime_config()
+        );
+    }
+
+    #[tokio::test]
+    async fn new_chat_refresh_timeout_keeps_native_and_returned_config_equal() {
+        let (_dir, state) = temp_state();
+        let distro = empty_distro_state();
+        let expected = state.set_fake_config(valid_config()).unwrap();
+        let result = state
+            .refresh_for_new_chat_with(std::future::pending(), Duration::from_millis(1))
+            .await
+            .unwrap();
+        assert_eq!(result, expected);
+        assert_eq!(state.get(&distro).await.unwrap(), result);
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[tokio::test]
+    async fn new_chat_source_failure_does_not_restore_cleared_fake_override() {
+        let (_dir, state) = temp_state();
+        let distro = empty_distro_state();
+        state.set_fake_config(valid_config()).unwrap();
+        state.clear_fake_config(&distro).await.unwrap();
+        let result = state.refresh_for_new_chat(&distro).await.unwrap();
+        let (source, config) = expect_ready(result);
+        assert_eq!(source, RuntimeConfigSource::AppDefault);
+        assert_eq!(config, default_runtime_config());
+        assert_eq!(state.ready_config(&distro).await.unwrap(), config);
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[tokio::test]
+    async fn concurrent_new_chat_failure_does_not_restore_cleared_fake_override() {
+        let (_dir, state) = temp_state();
+        let distro = empty_distro_state();
+        state.set_fake_config(valid_config()).unwrap();
+        let (_, refreshed) = tokio::join!(
+            state.clear_fake_config(&distro),
+            state.refresh_for_new_chat(&distro),
+        );
+        let result = refreshed.unwrap();
+        assert!(!matches!(
+            result,
+            RuntimeConfigLoadResult::Ready {
+                source: RuntimeConfigSource::FakeEndpoint,
+                ..
+            }
+        ));
+        assert_eq!(state.get(&distro).await.unwrap(), result);
+    }
+
+    #[tokio::test]
+    async fn new_chat_initial_timeout_stays_unavailable() {
+        let (_dir, state) = temp_state();
+        let result = state
+            .refresh_for_new_chat_with(std::future::pending(), Duration::from_millis(1))
+            .await
+            .unwrap();
+        assert!(matches!(
+            result,
+            RuntimeConfigLoadResult::Unavailable { .. }
+        ));
+        assert_eq!(state.get(&empty_distro_state()).await.unwrap(), result);
+    }
+
+    #[tokio::test]
+    async fn older_refresh_cannot_overwrite_new_fake_override() {
+        let (_dir, state) = temp_state();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (finish_tx, finish_rx) = tokio::sync::oneshot::channel();
+        let stale = RuntimeConfigLoadResult::ready(
+            RuntimeConfigSource::BundledFile,
+            default_runtime_config(),
+        );
+        let (result, expected) = tokio::join!(
+            state.refresh_for_new_chat_with(
+                async {
+                    started_tx.send(()).unwrap();
+                    finish_rx.await.unwrap();
+                    stale
+                },
+                Duration::from_secs(5)
+            ),
+            async {
+                started_rx.await.unwrap();
+                let expected = state.set_fake_config(valid_config()).unwrap();
+                finish_tx.send(()).unwrap();
+                expected
+            },
+        );
+        assert_eq!(result.unwrap(), expected);
+        assert_eq!(state.get(&empty_distro_state()).await.unwrap(), expected);
+    }
+
+    #[tokio::test]
+    async fn older_success_remains_usable_while_newer_initial_load_is_pending() {
+        let (_dir, state) = temp_state();
+        let older =
+            RuntimeConfigLoadResult::ready(RuntimeConfigSource::BundledFile, valid_config());
+        let mut newer_config = valid_config();
+        newer_config.feature_toggles = Some(HashMap::from([("newer".to_string(), true)]));
+        let newer = RuntimeConfigLoadResult::ready(RuntimeConfigSource::BundledFile, newer_config);
+        let (newer_started_tx, newer_started_rx) = tokio::sync::oneshot::channel();
+        let (older_finished_tx, older_finished_rx) = tokio::sync::oneshot::channel();
+        let (older_result, newer_result) = tokio::join!(
+            biased;
+            async {
+                let result = state
+                    .refresh_for_new_chat_with(
+                        async {
+                            newer_started_rx.await.unwrap();
+                            older.clone()
+                        },
+                        Duration::from_secs(5),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(result, older);
+                {
+                    let cached = state.cached.lock().unwrap();
+                    assert_eq!(cached.generation, 2);
+                    assert!(cached.current.is_none());
+                    assert!(cached.last_valid.is_none());
+                }
+                older_finished_tx.send(()).unwrap();
+                result
+            },
+            state.refresh_for_new_chat_with(
+                async {
+                    newer_started_tx.send(()).unwrap();
+                    older_finished_rx.await.unwrap();
+                    newer.clone()
+                },
+                Duration::from_secs(5),
+            ),
+        );
+        assert_eq!(older_result, older);
+        assert_eq!(newer_result.unwrap(), newer);
+        assert_eq!(state.get(&empty_distro_state()).await.unwrap(), newer);
+        assert_eq!(
+            state.cached.lock().unwrap().last_valid.as_ref(),
+            Some(&newer)
+        );
+    }
+
+    #[tokio::test]
+    async fn older_startup_load_cannot_replace_new_chat_refresh() {
+        let (_dir, state) = temp_state();
+        // The startup get/explicit refresh use this same reservation/commit
+        // pair around their source await.
+        let startup_generation = state.begin_load().unwrap();
+        let expected = state
+            .refresh_for_new_chat_with(
+                async {
+                    RuntimeConfigLoadResult::ready(RuntimeConfigSource::BundledFile, valid_config())
+                },
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+        let result = state
+            .finish_load(
+                startup_generation,
+                default_runtime_config_result(RuntimeConfigSource::AppDefault),
+                false,
+            )
+            .unwrap();
+        assert_eq!(result, expected);
+        assert_eq!(state.get(&empty_distro_state()).await.unwrap(), expected);
     }
 
     #[tokio::test]
@@ -1671,6 +2391,71 @@ mod tests {
             expect_ready(state.get(&distro_state).await.expect("get default config"));
         assert_eq!(source, RuntimeConfigSource::AppDefault);
         assert_eq!(config, default_runtime_config());
+    }
+
+    #[test]
+    fn auto_routing_validation_matches_frontend_contract() {
+        let valid = serde_json::json!({
+            "url":"https://gateway.example.com/route", "bearerTokenEnv":"DATABRICKS_TOKEN",
+            "modes":[{"id":"auto","displayName":"Auto","modelProviderId":TEST_RUNTIME_PROVIDER_ID,
+            "fallback":{"modelId":"served","effort":"high"},
+            "models":[{"modelId":"served","routerModel":"system.ai.sol","minEffort":"high","maxEffort":"max"}]}]
+        });
+        let providers = managed_goose_config().model_providers;
+        let parse = |value: serde_json::Value| {
+            serde_json::from_value::<RuntimeAutoRoutingConfig>(value).unwrap()
+        };
+        validate_auto_routing(&parse(valid.clone()), &providers).unwrap();
+        let mut invalid = Vec::new();
+        for url in [
+            "file:///tmp/route",
+            "https://user:secret@example.com/route",
+            "https://example.com/route?token=value",
+            "https://example.com/route#fragment",
+        ] {
+            let mut value = valid.clone();
+            value["url"] = serde_json::json!(url);
+            invalid.push(value);
+        }
+        for env in ["", "token-value", "lowercase", "1TOKEN"] {
+            let mut value = valid.clone();
+            value["bearerTokenEnv"] = serde_json::json!(env);
+            invalid.push(value);
+        }
+        let mut value = valid.clone();
+        value["timeoutMs"] = serde_json::json!(0);
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["defaultModeId"] = serde_json::json!("missing");
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["modes"][0]["modelProviderId"] = serde_json::json!("missing");
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["modes"][0]["fallback"]["modelId"] = serde_json::json!("missing");
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["modes"][0]["fallback"]["effort"] = serde_json::json!("low");
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["modes"][0]["models"][0]["minEffort"] = serde_json::json!("invented");
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["modes"][0]["models"][0]["maxEffort"] = serde_json::json!("low");
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["routeSelector"] =
+            serde_json::json!({"router_name":"task_v3","config":{"nested":{"api_key":"secret"}}});
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["modes"] = serde_json::json!([valid["modes"][0], valid["modes"][0]]);
+        invalid.push(value);
+        for value in invalid {
+            assert!(
+                validate_auto_routing(&parse(value.clone()), &providers).is_err(),
+                "unexpected valid config: {value}"
+            );
+        }
     }
 
     #[test]

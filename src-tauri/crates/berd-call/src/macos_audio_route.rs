@@ -3,7 +3,7 @@ use std::ptr::{null, NonNull};
 use std::time::Duration;
 
 use coreaudio::audio_unit::macos_helpers::{
-    get_default_device_id, get_device_id_from_name, get_device_transport_type,
+    get_default_device_id, get_device_id_from_name, get_device_name, get_device_transport_type,
 };
 use objc2_core_audio::{
     kAudioDevicePropertyScopeOutput, kAudioDevicePropertyStreams, kAudioDeviceTransportTypeBuiltIn,
@@ -26,6 +26,10 @@ pub fn playback_latency_safety_duration(output_device: Option<&str>) -> Duration
     playback_latency_safety_duration_for_transport(
         device_id.and_then(|id| get_device_transport_type(id).ok()),
     )
+}
+
+pub fn default_output_device_name() -> Option<String> {
+    get_device_name(get_default_device_id(false)?).ok()
 }
 
 pub fn output_device_is_builtin_speaker(output_device: Option<&str>) -> bool {

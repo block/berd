@@ -582,10 +582,13 @@ fn secure_cache_permissions(destination: &Path) -> Result<(), String> {
         for suffix in ["", "-wal", "-shm"] {
             let mut path = destination.as_os_str().to_os_string();
             path.push(suffix);
-            let path = PathBuf::from(path);
-            if path.exists() {
-                std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-                    .map_err(error_string)?;
+            // A closing connection may delete its -wal/-shm files at any time,
+            // so a missing sidecar is not an error.
+            match std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(error_string(error));
+                }
+                _ => {}
             }
         }
     }

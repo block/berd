@@ -661,6 +661,28 @@ try {
         Assert-GooseBinaryIdentity -Path (Join-Path $identityDir "absent") -BinName "goose"
     }
 
+    # Existing managed Goose checkouts must follow goose-backend.lock.json when
+    # the pinned backend moves between repositories.
+    $remoteRepo = Join-Path $temp "goose-remote-new.git"
+    $oldRemoteRepo = Join-Path $temp "goose-remote-old.git"
+    $managedRepo = Join-Path $temp "goose-managed-remote"
+    Invoke-CheckedCommand -FilePath "git" -ArgumentList @("init", "--bare", $remoteRepo) -Label "init new Goose remote"
+    Invoke-CheckedCommand -FilePath "git" -ArgumentList @("init", "--bare", $oldRemoteRepo) -Label "init old Goose remote"
+    Invoke-CheckedCommand -FilePath "git" -ArgumentList @("clone", $remoteRepo, $managedRepo) -Label "clone managed Goose remote fixture"
+    Invoke-CheckedCommand -FilePath "git" -ArgumentList @("-C", $managedRepo, "remote", "set-url", "origin", $oldRemoteRepo) -Label "seed stale Goose remote URL"
+    $remoteSettings = [pscustomobject]@{
+        Remote = "origin"
+        CloneUrl = $remoteRepo
+        Mode = "required"
+    }
+    $remoteFailure = Sync-GooseManagedRemote `
+        -Paths ([pscustomobject]@{ Repo = $managedRepo }) `
+        -Settings $remoteSettings `
+        -Action "Build"
+    Assert-Equal "managed Goose remote reconciliation succeeds" ($null -eq $remoteFailure) $true
+    $remoteUrl = (& git -C $managedRepo remote get-url origin).Trim()
+    Assert-Equal "managed Goose remote follows lockfile repository" $remoteUrl $remoteRepo
+
     # ── Bundle and stage-sidecar call sites invoke native child processes ──
     # A successful in-process `& script.ps1` leaves $LASTEXITCODE unset, so the
     # old stale guard false-failed before the next step. Pin both public call

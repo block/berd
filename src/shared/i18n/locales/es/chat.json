@@ -83,7 +83,10 @@
     "voiceInputPermissionDescription": "Permite el acceso al micrófono para Berd en Configuración del Sistema y vuelve a intentar el dictado por voz.",
     "voiceInputPermissionTitle": "El acceso al micrófono está bloqueado",
     "voiceInputUnavailableDescription": "Otra app puede estar usando tu micrófono, o macOS no pudo iniciar la grabación. Cierra otras apps de grabación y vuelve a intentarlo.",
-    "voiceInputUnavailableTitle": "El micrófono no está disponible"
+    "voiceInputUnavailableTitle": "El micrófono no está disponible",
+    "autoModeMissing": "El modo automático seleccionado ya no está configurado.",
+    "autoModelUnavailable": "El modelo seleccionado no está disponible en el proveedor configurado.",
+    "autoEffortUnavailable": "Este modelo no admite ningún nivel de esfuerzo dentro de los límites del modo automático."
   },
   "contextPanel": {
     "actions": {
@@ -323,6 +326,15 @@
     "rootLoadError": "No se pudo cargar esta carpeta. Inténtalo de nuevo."
   },
   "image": {
+    "openInFolder": "Abrir en carpeta",
+    "actions": "Acciones de imagen",
+    "copy": "Copiar imagen",
+    "copied": "Imagen copiada",
+    "copyError": "No se pudo copiar la imagen.",
+    "revealError": "No se pudo mostrar esta imagen en su carpeta.",
+    "label": "Imagen",
+    "loading": "Cargando imagen…",
+    "unavailable": "Imagen no disponible",
     "view": "Ver {{label}}",
     "download": "Descargar imagen",
     "downloadStarted": "Descarga iniciada: {{filename}}",
@@ -449,8 +461,6 @@
     "sendAnyway": "Enviar de todos modos",
     "backgroundSendFailed": "No se pudo enviar el mensaje en cola. Reinténtalo o edita el mensaje.",
     "backgroundSendFailedTitle": "No se pudo enviar el mensaje en cola",
-    "voiceCoordinationFailed": "No se pudo entregar una actualización interna de voz, por lo que se detuvo la conversación de voz. Inicia la voz de nuevo para continuar.",
-    "voiceCoordinationFailedTitle": "Conversación de voz detenida",
     "configureWorktree": "¿Configurar un worktree nuevo?",
     "configureWorkspaces": "¿Configurar espacios de trabajo nuevos para el proyecto?",
     "configureWorkspacePlan": "¿Configurar {{worktreeLabel}}?",
@@ -638,7 +648,14 @@
     "starAgentModel": "Destacar {{model}}, {{agent}}",
     "unstarAgentModel": "Quitar {{model}}, {{agent}} de destacados",
     "starModel": "Destacar {{model}}",
-    "unstarModel": "Quitar {{model}} de destacados"
+    "unstarModel": "Quitar {{model}} de destacados",
+    "autoRouting": {
+      "selected": "Usando {{model}}",
+      "details": "¿Por qué este modelo?",
+      "fallback": "El enrutador no está disponible. Se usa la alternativa configurada.",
+      "routed": "Seleccionado para este mensaje. Cada nuevo mensaje vuelve a elegir.",
+      "pending": "Elige un modelo y esfuerzo para cada mensaje nuevo."
+    }
   },
   "tools": {
     "content": "Contenido",
@@ -772,5 +789,23 @@
     "openUnavailable": "Este archivo está en {{host}} y no se puede abrir desde esta máquina.",
     "viewerUnavailable": "Este archivo está en {{host}}. Ver archivos remotos todavía no es compatible."
   },
-  "archivedReadOnlyStatus": "Esta sesión está archivada y es de solo lectura."
+  "archivedReadOnlyStatus": "Esta sesión está archivada y es de solo lectura.",
+  "monitorStatus": {
+    "count_one": "1 monitor en ejecución",
+    "count_other": "{{count}} monitores en ejecución",
+    "watching": "Supervisando: {{label}}",
+    "more": "+{{count}}",
+    "inspect_one": "Inspeccionar 1 monitor en ejecución",
+    "inspect_other": "Inspeccionar {{count}} monitores en ejecución",
+    "title": "Monitores en ejecución",
+    "running": "En ejecución",
+    "stopping": "Deteniendo…",
+    "command": "Comando",
+    "started": "Inicio",
+    "detailsUnavailable": "No disponible para este monitor",
+    "stop": "Detener",
+    "confirmStop": "Detener monitor",
+    "stopDescription": "¿Detener este monitor y su comando en segundo plano? La sesión del agente seguirá en ejecución.",
+    "stopFailed": "No se pudo detener este monitor. Puede haber finalizado o sido reemplazado. Actualiza los detalles e inténtalo de nuevo."
+  }
 }

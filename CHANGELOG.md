@@ -1,5 +1,37 @@
 # Changelog
 
+## [v0.6.5](https://github.com/block/berd/releases/tag/v0.6.5) - 2026-11-04
+
+This release makes it easier to find past messages, reuse images, and keep track of ongoing work. Voice conversations also gain new controls and smoother playback.
+
+- **Search message history:** The search popup now has separate `Session Titles` and `Messages` tabs. Message results highlight matching text and take you directly to that message, with options to include archived chats.
+- **Favorite models:** Star models to keep them at the top of the model picker.
+- **Auto model selection:** Configured Auto modes choose a model and reasoning effort for each new prompt. See the chosen model and expand `Why this model?` for details, including why a fallback was used.
+- **Better image previews:** Supported local images can display even when saved outside the chat’s folder. Full-size previews now offer `Copy image`, `Download image`, and `Open in folder` when the original file is available.
+- **Longer-lived notifications:** Choose how long in-app completion notifications stay visible, or keep them open until you dismiss them, in `Settings → Notifications`.
+- **Clearer chat activity:** Working chats now use four animated dots, while unread replies use one stationary dot, so you can distinguish them without relying on color. Choose from three animation styles in `Settings → Appearance`.
+- **Monitor controls:** See when a chat has active background watchers, inspect what each is watching, and stop individual watchers without stopping the agent. Their updates now appear as labeled, expandable activity rows.
+- **Cleaner sidebar:** Delegated tasks and sub-agent sessions stay out of recent chats, even when inspected or opened.
+- **More reliable conversations:** Sending a message while scrolled back reliably returns you to the latest messages. Image-heavy chats are less likely to fail because of older screenshots, and history reloads after compaction handle workspace paths more reliably.
+- **Clearer failures:** Provider and delegated-task failures are reported instead of appearing to finish successfully. Partial replies remain visible, and you can continue in the same chat.
+- **Context controls:** Set Goose’s maximum context budget and compaction threshold in Behavior settings. GPT 6.1 Sol compaction also handles reasoning-off settings correctly.
+- **Model picker updates:** GPT-6 Astra, Sol, and Luna have clearer names and ordering, and Gemini 4 Argon has a readable label. Astra chats can receive automatic titles.
+- **Salesforce connection fix:** Salesforce now uses the company-managed connector and marketplace skill, with setup guidance in Connections.
+- **Remote chat cleanup:** Remove unavailable remote chats from the sidebar without them reappearing.
+- **Voice setup:** Fresh installs of local Parakeet speech recognition now complete correctly. OpenAI-compatible transcription and speech output can use separate endpoint URLs and saved keys.
+- **Cleaner spoken replies:** Voice reads Markdown link labels without spelling out their destinations. Long spoken replies stay in one transcript card, and floating call controls no longer get clipped.
+- **Voice status sounds:** Optional cues let you hear when the agent is working or waiting without competing with speech.
+- **Standalone Berd Call:** Run voice calls on Apple Silicon Macs without installing Berd or Goose. Standalone installations can update between calls without interrupting an active call.
+- **Call controls:** Berd Call’s menu bar lets you change voices and speech rate, mute the microphone, and end calls. Preferences carry across launches, Siri voices have readable names, and AirPods mute gestures are supported.
+- **Call reliability:** Improved microphone recovery after device changes, long-reply playback, speech cancellation, and response timing after you finish speaking. Calls also shut down cleanly when something fails.
+- **Simpler voice conversations:** Spokesperson mode has been removed. Voice calls now talk directly to your coding agent, while earlier Spokesperson transcripts remain readable.
+- Experimental: Save an SSH host and folder on a project so new chats automatically use that remote environment when the Remote SSH sessions experiment is enabled.
+- Experimental: `Early delivery` prepares an answer when you pause to reduce voice-response delays. It is enabled by default and can be turned off in Voice settings.
+
+**goose**: built with aaif-goose/goose commit [`361003ea3`](https://github.com/aaif-goose/goose/commit/361003ea3263587f4241a0f906affdcc0d5c9c1f), which is not a goose release.
+
+**Full Changelog**: https://github.com/block/berd/compare/v0.6.4...fcb3e5d96
+
 ## [v0.6.4](https://github.com/block/berd/releases/tag/v0.6.4) - 2026-09-10
 
 This release improves chat recovery, artifact actions, voice conversations, and agent setup across Berd.

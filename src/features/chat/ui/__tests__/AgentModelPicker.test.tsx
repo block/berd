@@ -94,6 +94,98 @@ describe("AgentModelPicker", () => {
     ).toHaveTextContent("GPT-4o");
   });
 
+  it("places configured auto modes first and shows the concrete model and routing details", async () => {
+    const user = userEvent.setup();
+    const onModeChange = vi.fn();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        availableModels={[{ id: "gpt-5", name: "GPT-5" }]}
+        currentModelId="gpt-5"
+        currentModelName="GPT-5"
+        autoRouting={{
+          modes: [
+            { id: "balanced", displayName: "Auto Balanced" },
+            { id: "fast", displayName: "Auto Fast" },
+          ],
+          selectedModeId: "balanced",
+          onModeChange,
+          decision: {
+            modeId: "balanced",
+            modelId: "gpt-5",
+            modelProviderId: "provider",
+            effort: "high",
+            source: "router",
+            rationale: "This task needs deeper reasoning.",
+            response: { custom: "full routing response" },
+          },
+        }}
+      />,
+    );
+    const trigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+    expect(trigger).toHaveTextContent("Auto Balanced");
+    expect(trigger).toHaveTextContent("GPT-5");
+    await user.click(trigger);
+    const autoMode = screen.getByRole("button", { name: "Auto Fast" });
+    expect(
+      autoMode.compareDocumentPosition(
+        screen.getByRole("button", { name: "GPT-5" }),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    await user.click(screen.getByText("Why this model?"));
+    expect(screen.getByText("This task needs deeper reasoning.")).toBeVisible();
+    expect(screen.getByText(/full routing response/)).toBeVisible();
+    await user.click(autoMode);
+    expect(onModeChange).toHaveBeenCalledWith("fast");
+  });
+
+  it("shows transport diagnostics in the expanded fallback details", async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        availableModels={[{ id: "gpt-5", name: "GPT-5" }]}
+        currentModelId="gpt-5"
+        currentModelName="GPT-5"
+        autoRouting={{
+          modes: [{ id: "balanced", displayName: "Auto Balanced" }],
+          selectedModeId: "balanced",
+          onModeChange: vi.fn(),
+          decision: {
+            modeId: "balanced",
+            modelId: "gpt-5",
+            modelProviderId: "provider",
+            effort: "high",
+            source: "fallback",
+            fallbackReason: "http_error",
+            failure: {
+              code: "http_error",
+              elapsedMs: 245,
+              timeoutMs: 5000,
+              httpStatus: 429,
+            },
+          },
+        }}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByText("Why this model?"));
+    const details = screen.getByText(/"failure":/);
+    expect(details).toBeVisible();
+    expect(details).toHaveTextContent('"code": "http_error"');
+    expect(details).toHaveTextContent('"elapsedMs": 245');
+    expect(details).toHaveTextContent('"timeoutMs": 5000');
+    expect(details).toHaveTextContent('"httpStatus": 429');
+  });
+
   // Harness agents (pi-acp, codex-acp, etc.) get a wider picker in the
   // new-chat composer because their ACP model names can be long; Goose keeps
   // the compact layout.

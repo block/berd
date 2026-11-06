@@ -125,7 +125,6 @@ enum OpenAiStreamCommand {
 pub struct OpenAiVoiceStatus {
     stt_configured: bool,
     tts_configured: bool,
-    realtime_configured: bool,
     stt_configuration_source: OpenAiVoiceConfigurationSource,
     tts_configuration_source: OpenAiVoiceConfigurationSource,
     stt_unavailable_reason: Option<String>,
@@ -317,26 +316,23 @@ pub async fn get_openai_voice_status(
         (
             openai_voice_credentials::is_present(OpenAiVoiceCredential::SpeechToText),
             openai_voice_credentials::is_present(OpenAiVoiceCredential::TextToSpeech),
-            openai_voice_credentials::is_present(OpenAiVoiceCredential::SelectedRealtimeAssistant),
         )
     })
     .await
     .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))?;
-    let (stt_result, tts_result, realtime_result) = credential_result;
+    let (stt_result, tts_result) = credential_result;
     let stt_error = stt_result.as_ref().err().cloned();
     let tts_error = tts_available
         .then(|| tts_result.as_ref().err().cloned())
         .flatten();
     let stt_configured = stt_result.unwrap_or(false);
     let tts_configured = tts_available && tts_result.unwrap_or(false);
-    let realtime_configured = realtime_result?;
     if state.credential_revision.load(Ordering::Acquire) == credential_revision {
         state.configured.store(stt_configured, Ordering::Release);
     }
     Ok(OpenAiVoiceStatus {
         stt_configured,
         tts_configured,
-        realtime_configured,
         stt_configuration_source: stt_configuration_source(),
         tts_configuration_source: tts_configuration_source(),
         stt_unavailable_reason: stt_error,
@@ -510,7 +506,7 @@ pub fn start_openai_voice_stream(
         let output_device = selected_output_device();
         let effective_output_device = effective_output_device_name(output_device.as_deref());
         let input_during_tts =
-            resolve_input_during_tts_policy(interruption_mode, effective_output_device.as_deref());
+            resolve_input_during_tts_policy(interruption_mode, output_device.as_deref());
         let output_latency_grace =
             playback_latency_safety_duration(effective_output_device.as_deref());
         let Some(admission) = native_voice.claim_assistant_speech(

@@ -17,7 +17,7 @@ Call runtime:
 
 Speech and models:
   synthesize              Render text to a WAV file
-  voices                  List or download Siri voices
+  voices                  List, download, or preview Siri voices
   models                  Inspect or install speech models
 
 Diagnostics:
@@ -25,6 +25,7 @@ Diagnostics:
   benchmark stt           Benchmark an STT backend
 
 Other:
+  telemetry               Show or change usage telemetry consent
   help [command]          Show help for a command
   version                 Print the installed version
 
@@ -40,7 +41,7 @@ Usage:
 The foreground process owns the default microphone and audio output. Session
 options are the same as `berd-call session`, except the PCM descriptor is owned
 internally. `--stream` prints cursor, role, and text as TSV. `--codex` delivers
-the same records to the calling Codex task (requires CODEX_THREAD_ID). A
+the same rows as `--stream` to the calling Codex task (requires CODEX_THREAD_ID). A
 menu-bar item controls speech rate, input muting, and ending the call; pass
 `--no-menu-bar` to omit it.
 
@@ -55,12 +56,14 @@ const SPEAK_HELP: &str = r#"Speak through the active local voice call.
 
 Usage:
   berd-call speak [--port PORT] [--re CURSOR]
-    [--resolves HANDOFF_ID]... TEXT
+    [--voice NAME [--language BCP47]] TEXT
 
 Speech waits for admission. The session setting controls whether it also waits
 for delivery. Non-blocking sessions require --stream or --codex and emit speech_result
 rows only for interruptions, failures, or pending user input. Interrupted results include
-estimatedSpokenText, a best-effort prefix based on delivered audio."#;
+estimatedSpokenText, a best-effort prefix based on delivered audio. --voice speaks
+this text in another voice of the call's reply backend without changing its saved
+voice, so several agents can share one call in distinct voices."#;
 
 const SETTINGS_HELP: &str = r#"Update settings for the active local voice call.
 
@@ -69,12 +72,19 @@ Usage:
   berd-call settings [--port PORT] --rate FLOAT
   berd-call settings [--port PORT] --voice NAME [--language BCP47]
   berd-call settings [--port PORT] --tts JSON
-  berd-call settings [--port PORT] --input-during-tts allow|suppress
+  berd-call settings [--port PORT] --input-during-tts auto|allow|suppress
   berd-call settings [--port PORT] --muted true|false
+  berd-call settings [--port PORT] --status-sounds off|working|working-and-waiting
+  berd-call settings [--port PORT] --conversation-status working|waiting
   berd-call settings [--port PORT] --restart [session options]
 
-The setting applies to subsequent speak calls. Non-blocking delivery requires
-a call started with --stream or --codex. Successful delivery produces no notification."#;
+The setting applies to subsequent speak calls.
+--conversation-status tells the call whether the agent is working on a reply
+or waiting for you; status sounds play only once something reports it. They
+play Pop while the agent works and, with working-and-waiting, Purr while it
+waits. The mode is saved for later calls.
+Non-blocking delivery requires a call started with --stream or --codex.
+Successful delivery produces no notification."#;
 
 const STATUS_HELP: &str = r#"Inspect the active local voice call.
 
@@ -88,16 +98,27 @@ Usage:
   berd-call wait-for-input [--port PORT] [--since CURSOR] [--timeout SECONDS]
 
 Both wait for active speech to finish. Catch-up returns immediately when there
-is no active speech; wait-for-input also waits for new user input or a handoff.
+is no active speech; wait-for-input also waits for new user input.
 The default cursor is the session's acknowledged input. Reading does not
 acknowledge input: reply using speak --re CURSOR. Results are JSON with
-utterances, cursor, unresolvedHandoffIds, and timedOut. Timeout defaults to
+utterances, cursor, and timedOut. Timeout defaults to
 30 seconds (range 1..3600). Cursors reset when the session restarts."#;
 
 const STOP_HELP: &str = r#"Stop the active local voice call.
 
 Usage:
   berd-call stop [--port PORT]"#;
+
+const TELEMETRY_HELP: &str = r#"Show or change usage telemetry consent.
+
+Usage:
+  berd-call telemetry [status | enable | disable]
+
+Calls report anonymous usage (start, end, duration, turn counts, end reason,
+audio backends, speech rate and voice, with the app version and a random
+installation id) only with consent. Consent is shared with Berd: enabling or disabling
+here changes Berd's telemetry setting too. Internal builds always report.
+Results are JSON with enabled and enforced."#;
 
 const SESSION_HELP: &str = r#"Run the host-facing framed voice-session protocol.
 
@@ -109,9 +130,8 @@ Usage:
 
 Each form also accepts:
     [--rate FLOAT]
-    [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH]
-    [--mode conventional|expert-spokesperson]
-    [--realtime-url WS_URL] [--stt-url WS_URL] [--tts-url HTTP_URL]
+    [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH] [--stt-hint PHRASE]...
+    [--stt-url WS_URL] [--tts-url HTTP_URL]
 
 The host owns microphone capture, audio playback, transcript delivery, and
 agent integration. See PROTOCOL.md for the framed stdin, stdout, and PCM
@@ -128,12 +148,18 @@ Usage:
 The command never overwrites an existing output file. OpenAI synthesis requires
 explicit --allow-paid-openai consent."#;
 
-const VOICES_HELP: &str = r#"Inspect or download Siri voices.
+const VOICES_HELP: &str = r#"Inspect, download, or preview Siri voices.
 
 Usage:
   berd-call voices list [--language BCP47]
   berd-call voices download --voice NAME --language BCP47
-    [--availability-wait-seconds 1..1800]"#;
+    [--availability-wait-seconds 1..1800]
+  berd-call voices preview --voice NAME --language BCP47 [--rate 0.5..2.0]
+
+preview plays the voice through the default output and exits when playback
+ends. It plays Apple's system sample, which works before the voice is
+downloaded, or else speaks a short sentence with an installed voice. SIGINT or
+SIGTERM stops playback and exits."#;
 
 const MODELS_HELP: &str = r#"Inspect or install speech models.
 
@@ -199,9 +225,10 @@ fn help_for(topic: &[&str]) -> Option<&'static str> {
         ["catch-up"] | ["wait-for-input"] => Some(POLL_INPUT_HELP),
         ["settings"] => Some(SETTINGS_HELP),
         ["stop"] => Some(STOP_HELP),
+        ["telemetry"] | ["telemetry", "status" | "enable" | "disable"] => Some(TELEMETRY_HELP),
         ["session"] => Some(SESSION_HELP),
         ["synthesize"] => Some(SYNTHESIZE_HELP),
-        ["voices"] | ["voices", "list" | "download"] => Some(VOICES_HELP),
+        ["voices"] | ["voices", "list" | "download" | "preview"] => Some(VOICES_HELP),
         ["models"]
         | ["models", "macos", "status" | "install"]
         | ["models", "openai", "voices"]

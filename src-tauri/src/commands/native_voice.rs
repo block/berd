@@ -25,7 +25,6 @@ use super::{
 pub(crate) const EVENT_NAME: &str = "voice-conversation:event";
 const MAX_PENDING_TRANSCRIPTS: usize = 64;
 const MAX_TRANSCRIPT_DELIVERY_ATTEMPTS: u8 = 3;
-const VAD_THRESHOLD: f32 = 0.5;
 const INPUT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[cfg(any(test, target_os = "macos"))]
@@ -147,16 +146,6 @@ pub enum InterruptionSensitivity {
     More,
 }
 
-impl InterruptionSensitivity {
-    pub(crate) fn vad_threshold(self) -> f32 {
-        match self {
-            Self::Less => 0.8,
-            Self::Balanced => 0.65,
-            Self::More => VAD_THRESHOLD,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum Lifecycle {
@@ -215,6 +204,18 @@ pub(crate) enum NativeVoiceEvent {
         text: String,
         revision: u64,
         delivery_attempts: u8,
+    },
+    RecognitionPending {
+        session_id: String,
+        pending: bool,
+        revision: u64,
+    },
+    InterimUser {
+        session_id: String,
+        lifecycle_id: String,
+        id: String,
+        text: String,
+        revision: u64,
     },
     Activity {
         session_id: String,
@@ -784,14 +785,31 @@ impl NativeVoiceState {
             .is_ok_and(|blocks| blocks.contains_key(session_id))
     }
 
+    fn start_input_pipeline(
+        &self,
+        engine: berd_call::input::VoiceInputEngineConfig,
+    ) -> Result<
+        (
+            berd_call::input::VoiceInputRuntime,
+            tokio::sync::mpsc::Receiver<berd_call::input::VoiceInputEvent>,
+        ),
+        String,
+    > {
+        berd_call::input::VoiceInputRuntime::start(berd_call::input::VoiceInputConfig {
+            engine,
+            speech_vad_threshold: berd_call::DEFAULT_VAD_THRESHOLD,
+            controls: self.input_controls.clone(),
+        })
+    }
+
     pub(crate) fn begin_assistant_speech(
         &self,
-        sensitivity: InterruptionSensitivity,
+        _sensitivity: InterruptionSensitivity,
         input_during_tts: berd_call::input::InputDuringTtsPolicy,
     ) -> AssistantSpeechGuard {
         let activity = self
             .input_controls
-            .begin_assistant_activity(sensitivity.vad_threshold(), input_during_tts)
+            .begin_assistant_activity(input_during_tts)
             .ok();
         let status_sound_activity = self.runtime.lock().ok().and_then(|runtime| {
             runtime.status_sounds.as_ref().and_then(|status_sounds| {
@@ -1433,6 +1451,43 @@ fn reject_pending_transcript(
     Ok(TranscriptRejection { attempts, terminal })
 }
 
+#[derive(Default)]
+struct EarlyVoiceTranscript {
+    utterance_id: String,
+    interim_text: String,
+    early_emitted: bool,
+}
+
+impl EarlyVoiceTranscript {
+    fn take_ready(&mut self) -> bool {
+        if self.early_emitted || self.interim_text.is_empty() {
+            return false;
+        }
+        self.early_emitted = true;
+        true
+    }
+
+    fn set_interim(&mut self, recognition_id: String, text: String) {
+        if self.utterance_id != recognition_id {
+            self.reset();
+            self.utterance_id = recognition_id;
+        }
+        self.interim_text = text.trim().to_string();
+    }
+
+    fn finish(&mut self, recognition_id: &str) {
+        if self.utterance_id == recognition_id {
+            self.reset();
+        }
+    }
+
+    fn reset(&mut self) {
+        self.utterance_id.clear();
+        self.interim_text.clear();
+        self.early_emitted = false;
+    }
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Tauri injects four guards beside the lifecycle claim.
 pub async fn start_native_voice_conversation(
@@ -1450,12 +1505,6 @@ pub async fn start_native_voice_conversation(
     let session_id = session_id.trim().to_string();
     if session_id.is_empty() || session_id.len() > 256 {
         return Err("session id must be between 1 and 256 bytes".to_string());
-    }
-    if app
-        .try_state::<super::voice_buddy::RealtimeVoiceControlsState>()
-        .is_some_and(|state| state.active_target().is_some())
-    {
-        return Err("An OpenAI Realtime voice conversation is already active.".to_string());
     }
     state.ensure_voice_input_not_quarantined()?;
     if input_backend == VoiceInputBackend::Macos
@@ -1510,7 +1559,7 @@ pub async fn start_native_voice_conversation(
         VoiceInputBackend::Macos => {
             #[cfg(target_os = "macos")]
             {
-                Ok(berd_call::input::VoiceInputEngineConfig::MacSpeech)
+                Ok(berd_call::input::VoiceInputEngineConfig::MacSpeech { hints: vec![] })
             }
             #[cfg(not(target_os = "macos"))]
             {
@@ -1544,11 +1593,7 @@ pub async fn start_native_voice_conversation(
             return Err(error);
         }
     };
-    let pipeline = berd_call::input::VoiceInputRuntime::start(berd_call::input::VoiceInputConfig {
-        engine,
-        speech_vad_threshold: VAD_THRESHOLD,
-        controls: state.input_controls.clone(),
-    });
+    let pipeline = state.start_input_pipeline(engine);
     let (pipeline, mut events) = match pipeline {
         Ok(result) => result,
         Err(error) => {
@@ -1748,6 +1793,7 @@ pub async fn start_native_voice_conversation(
         .ok_or_else(|| "Voice admission was not initialized.".to_string())?;
     let event_state = state.inner().clone();
     tauri::async_runtime::spawn(async move {
+        let mut early = EarlyVoiceTranscript::default();
         while let Some(event) = events.recv().await {
             let active = runtime.lock().ok().is_some_and(|current| {
                 current.session_id.as_deref() == Some(session_id.as_str())
@@ -1778,21 +1824,50 @@ pub async fn start_native_voice_conversation(
                 }
                 berd_call::input::VoiceInputEvent::RecognitionPendingChanged(pending) => {
                     admission.set_recognition_pending(pending);
-                    // The runtime owns recognition-pending sequencing. Berd's
-                    // renderer does not project that state yet.
+                    if !pending {
+                        early.reset();
+                    }
+                    let _ = event_window.emit(
+                        EVENT_NAME,
+                        NativeVoiceEvent::RecognitionPending {
+                            session_id: session_id.clone(),
+                            pending,
+                            revision,
+                        },
+                    );
+                }
+                berd_call::input::VoiceInputEvent::InterimTranscript {
+                    recognition_id,
+                    text,
+                } => {
+                    early.set_interim(recognition_id, text);
+                    if early.take_ready() {
+                        let _ = event_window.emit(
+                            EVENT_NAME,
+                            NativeVoiceEvent::InterimUser {
+                                session_id: session_id.clone(),
+                                lifecycle_id: lifecycle_id.clone(),
+                                id: early.utterance_id.clone(),
+                                text: early.interim_text.clone(),
+                                revision,
+                            },
+                        );
+                    }
                 }
                 berd_call::input::VoiceInputEvent::FinalTranscript {
+                    recognition_id,
                     text,
                     storage_receipt,
                 } => {
                     let transcript = PendingTranscript {
                         session_id: session_id.clone(),
                         lifecycle_id: lifecycle_id.clone(),
-                        id: uuid::Uuid::new_v4().to_string(),
+                        id: recognition_id.clone(),
                         text,
                         revision,
                         delivery_attempts: 0,
                     };
+                    early.finish(&recognition_id);
                     let Ok(disposition) = store_final_if_active(
                         &runtime,
                         &pending,
@@ -2568,7 +2643,6 @@ impl NativeVoiceState {
 }
 
 pub fn handle_voice_owner_window_destroyed(app: &AppHandle, window_label: &str) {
-    super::openai_realtime::handle_owner_window_destroyed(app, window_label);
     app.state::<VoiceCaptureState>()
         .release_window(window_label);
     let destroyed_lifecycle = app
@@ -2741,6 +2815,66 @@ fn store_final_if_active(
 mod tests {
     use super::*;
     use std::{thread, time::Instant};
+
+    #[test]
+    fn late_final_keeps_identity_after_hold_expires_and_new_provisional() {
+        let mut early = EarlyVoiceTranscript::default();
+        early.set_interim("old-recognition".into(), "old words".into());
+        assert!(early.take_ready());
+        let old_provisional = early.utterance_id.clone();
+        // RecognitionPendingChanged(false) expires the hold, not recognition.
+        early.reset();
+        early.set_interim("new-recognition".into(), "new words".into());
+        assert!(early.take_ready());
+        let new_provisional = early.utterance_id.clone();
+        assert_ne!(old_provisional, new_provisional);
+        // The old final arrives while the newer provisional is active.
+        let old_final = "old-recognition";
+        early.finish(old_final);
+        assert_eq!(old_final, old_provisional);
+        assert_eq!(early.utterance_id, new_provisional);
+        assert!(
+            !early.take_ready(),
+            "old final must not re-emit the new provisional"
+        );
+        let new_final = "new-recognition";
+        early.finish(new_final);
+        assert_eq!(new_final, new_provisional);
+    }
+
+    #[test]
+    fn speaking_interim_is_delivered_before_final_and_vad_end() {
+        let mut early = EarlyVoiceTranscript::default();
+        early.set_interim("recognition".into(), " first words ".into());
+        assert!(
+            early.take_ready(),
+            "private preparation must start while speaking"
+        );
+        assert_eq!(early.interim_text, "first words");
+        early.set_interim("recognition".into(), "first words continued".into());
+        assert!(!early.take_ready(), "one draft per recognition segment");
+        // The final can arrive before VAD ends. Its private draft already started.
+        early.finish("recognition");
+        assert!(!early.take_ready());
+        early.set_interim("next-recognition".into(), "   ".into());
+        assert!(!early.take_ready(), "blank interims must not start drafts");
+        early.set_interim("next-recognition".into(), "next words".into());
+        assert!(early.take_ready());
+    }
+
+    #[test]
+    fn recognition_resolution_allows_early_delivery_after_no_final_or_mute() {
+        let mut early = EarlyVoiceTranscript::default();
+        early.set_interim("first-recognition".into(), "first words".into());
+        assert!(early.take_ready());
+        assert!(!early.take_ready());
+        let previous_id = early.utterance_id.clone();
+        early.reset();
+        assert_ne!(early.utterance_id, previous_id);
+        assert!(!early.take_ready());
+        early.set_interim("next-recognition".into(), "next words".into());
+        assert!(early.take_ready());
+    }
 
     fn pending_transcript(
         session_id: &str,
@@ -3359,6 +3493,195 @@ mod tests {
             true,
         ));
         assert!(!caller_owns_target("voice-buddy", None, true,));
+    }
+
+    // Keep the CC-BY attribution beside the reused benchmark fixture. No generated audio is stored.
+    // LibriSpeech test-clean, CC-BY-4.0: crates/berd-call/fixtures/stt/librispeech-test-clean-mini/NOTICE.md
+    fn threshold_boundary_audio() -> Vec<f32> {
+        let bytes = include_bytes!(
+            "../../crates/berd-call/fixtures/stt/librispeech-test-clean-mini/1089-134686-0002.flac"
+        );
+        let mut reader = claxon::FlacReader::new(std::io::Cursor::new(bytes)).unwrap();
+        let scale = (1_u64 << (reader.streaminfo().bits_per_sample - 1)) as f32;
+        let speech: Vec<f32> = reader
+            .samples()
+            .map(|s| s.unwrap() as f32 / scale)
+            .collect();
+        // The short prefix crosses .65, but never .9, including its trailing silence.
+        // The longer repetition is a positive marker which crosses .9 on the same detector.
+        let mut probe = speech[..32 * 256].to_vec();
+        probe.resize(32_000, 0.0);
+        probe.extend_from_slice(&speech[..80 * 256]);
+        probe.resize(probe.len() + 32_000, 0.0);
+        let mut detector = earshot::Detector::new(earshot::DefaultPredictor::new());
+        let probabilities: Vec<_> = probe
+            .chunks_exact(256)
+            .map(|frame| detector.predict_f32(frame))
+            .collect();
+        let prefix_peak = probabilities[..125].iter().copied().fold(0.0_f32, f32::max);
+        assert!(
+            prefix_peak > 0.65 && prefix_peak < 0.9,
+            "prefix peak: {prefix_peak}"
+        );
+        assert!(
+            probabilities[125..].iter().any(|p| *p > 0.9),
+            "positive marker"
+        );
+        // Production OpenAI VAD decimates 48 kHz capture by three. Preserve these exact samples.
+        let mut capture: Vec<_> = probe.into_iter().flat_map(|sample| [sample; 3]).collect();
+        capture.resize(capture.len().div_ceil(960) * 960, 0.0);
+        capture
+    }
+
+    async fn sensitivity_runtime_trace(sensitivity: Option<InterruptionSensitivity>) -> Vec<bool> {
+        use berd_call::input::{VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame};
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}", listener.local_addr().unwrap());
+        // Mock only the transcription provider. The actual worker owns VAD, framing and controls.
+        let provider = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let mut audio_bytes = 0;
+            let mut commits = 0;
+            while let Some(Ok(Message::Text(text))) = socket.next().await {
+                let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+                let response = match value["type"].as_str().unwrap() {
+                    "session.update" => serde_json::json!({"type":"session.updated"}),
+                    "input_audio_buffer.append" => {
+                        use base64::Engine;
+                        audio_bytes += base64::engine::general_purpose::STANDARD
+                            .decode(value["audio"].as_str().unwrap())
+                            .unwrap()
+                            .len();
+                        continue;
+                    }
+                    "input_audio_buffer.commit" => {
+                        commits += 1;
+                        let item = format!("turn-{commits}");
+                        socket
+                            .send(Message::Text(
+                                serde_json::json!({
+                                    "type":"input_audio_buffer.committed", "item_id":item
+                                })
+                                .to_string()
+                                .into(),
+                            ))
+                            .await
+                            .unwrap();
+                        // A .65 prefix turn is shorter than two seconds. The .9 marker turn
+                        // includes over two seconds of speech, pre-roll and endpoint silence.
+                        let transcript = if audio_bytes > 24_000 * 2 * 2 {
+                            "marker"
+                        } else {
+                            "prefix"
+                        };
+                        audio_bytes = 0;
+                        serde_json::json!({
+                            "type":"conversation.item.input_audio_transcription.completed",
+                            "item_id":item, "transcript":transcript
+                        })
+                    }
+                    other => panic!("unexpected provider request: {other}"),
+                };
+                if socket
+                    .send(Message::Text(response.to_string().into()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        let state = NativeVoiceState::default();
+        let (pipeline, mut events) = state
+            .start_input_pipeline(VoiceInputEngineConfig::OpenAi {
+                endpoint,
+                api_key: "fixture-key".into(),
+                model: "fixture-model".into(),
+            })
+            .unwrap();
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .unwrap(),
+            Some(VoiceInputEvent::Ready)
+        ));
+        let _playback = sensitivity.map(|sensitivity| {
+            state.begin_assistant_speech(
+                sensitivity,
+                berd_call::input::InputDuringTtsPolicy::AllowBargeIn,
+            )
+        });
+        let audio = threshold_boundary_audio();
+        let mut trace = Vec::new();
+        let run = async {
+            let feed = async {
+                for frame in audio.chunks_exact(960) {
+                    pipeline
+                        .try_push_frame(VoiceInputFrame::try_from_samples(frame).unwrap())
+                        .unwrap();
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            };
+            let observe = async {
+                loop {
+                    match events.recv().await.expect("live input worker") {
+                        VoiceInputEvent::SpeakingChanged(speaking) => trace.push(speaking),
+                        VoiceInputEvent::FinalTranscript {
+                            text,
+                            storage_receipt,
+                            ..
+                        } => {
+                            storage_receipt.stored();
+                            if text == "marker" {
+                                break;
+                            }
+                            assert_eq!(text, "prefix");
+                        }
+                        VoiceInputEvent::Failed(error) => panic!("input failed: {error}"),
+                        _ => {}
+                    }
+                }
+            };
+            tokio::join!(feed, observe);
+        };
+        // A completed marker transcript is the positive processing barrier, not a silence timeout.
+        let result = tokio::time::timeout(Duration::from_secs(15), run).await;
+        pipeline.cancel();
+        pipeline.finish().await.unwrap();
+        provider.await.unwrap();
+        result.expect("worker completes the positive marker");
+        trace
+    }
+
+    async fn assert_sensitivity_preserves_production_vad_trace(
+        sensitivity: InterruptionSensitivity,
+    ) {
+        let idle = sensitivity_runtime_trace(None).await;
+        assert_eq!(idle, [true, false]);
+        assert_eq!(
+            sensitivity_runtime_trace(Some(sensitivity)).await,
+            idle,
+            "{sensitivity:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn interruption_sensitivity_less_preserves_production_vad_trace() {
+        assert_sensitivity_preserves_production_vad_trace(InterruptionSensitivity::Less).await;
+    }
+
+    #[tokio::test]
+    async fn interruption_sensitivity_balanced_preserves_production_vad_trace() {
+        assert_sensitivity_preserves_production_vad_trace(InterruptionSensitivity::Balanced).await;
+    }
+
+    #[tokio::test]
+    async fn interruption_sensitivity_more_preserves_production_vad_trace() {
+        assert_sensitivity_preserves_production_vad_trace(InterruptionSensitivity::More).await;
     }
 
     #[test]

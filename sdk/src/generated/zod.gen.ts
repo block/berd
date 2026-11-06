@@ -179,6 +179,7 @@ export const zSetToolPermissionsResponseUnstable = z.record(z.string(), z.unknow
  */
 export const zGooseToolCallRequestUnstable = z.object({
     sessionId: z.string(),
+    extensionName: z.string(),
     name: z.string(),
     arguments: z.unknown().optional().default(null)
 });

@@ -228,6 +228,20 @@ export type VoiceConversationEvent =
       deliveryAttempts: number;
     }
   | {
+      type: "recognitionPending";
+      sessionId: string;
+      pending: boolean;
+      revision: number;
+    }
+  | {
+      type: "interimUser";
+      sessionId: string;
+      lifecycleId: string;
+      id: string;
+      text: string;
+      revision: number;
+    }
+  | {
       type: "activity";
       sessionId: string;
       activity:

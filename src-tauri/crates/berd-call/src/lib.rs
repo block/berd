@@ -1,5 +1,8 @@
 //! Reusable voice primitives for Berd.
 
+/// Speech probability that counts as user speech for both active listening and assistant interruption.
+pub const DEFAULT_VAD_THRESHOLD: f32 = 0.9;
+
 /// Maximum time the macOS recognizer waits for native completion after input ends.
 pub const MAC_SPEECH_RECOGNITION_FINISH_TIMEOUT_SECONDS: u64 = 5;
 
@@ -9,7 +12,6 @@ pub mod benchmark;
 pub mod causal_inbox;
 mod configured_tts;
 pub mod endpoint_url;
-pub mod expert_spokesperson;
 pub mod input;
 pub mod local_assets;
 #[cfg(target_os = "macos")]
@@ -20,23 +22,17 @@ mod macos_audio_output;
 pub mod macos_audio_route;
 pub mod openai;
 pub mod openai_realtime;
-pub mod openai_realtime_protocol;
-pub mod openai_spokesperson;
 mod outbound;
 mod parakeet;
 pub mod parakeet_assets;
 mod pocket;
 pub mod pocket_assets;
 pub mod protocol;
-pub mod realtime_audio_delivery;
-pub mod realtime_host;
-pub mod realtime_host_lifecycle;
-pub mod realtime_pipe;
 pub mod session;
 pub mod siri;
-pub mod spokesperson_voice_update;
 mod status_sounds;
 mod synthesis;
+pub mod telemetry_store;
 mod tts;
 #[cfg(target_os = "macos")]
 pub mod update_guard;

@@ -1,3 +1,9 @@
+import { useAutoRoutingPicker } from "@/features/chat/hooks/useAutoRoutingPicker";
+import {
+  usePendingAutoModeStore,
+  getAutoModeExecutionTarget,
+  selectAutoMode,
+} from "@/features/chat/lib/autoModelSelection";
 import {
   useCallback,
   useEffect,
@@ -62,6 +68,9 @@ import { useTextareaAutosize } from "@/shared/hooks/useTextareaAutosize";
 import { useVoiceDictationShortcutTarget } from "@/features/chat/lib/voiceDictationShortcutController";
 
 export interface GlobalComposeOptions {
+  autoModeId?: string | null;
+  /** Resolve the configured Auto default after the new-chat refresh. */
+  useDefaultAutoMode?: boolean;
   executionTarget?: SessionExecutionTarget;
   projectId?: string | null;
   attachments?: ChatAttachmentDraft[];
@@ -453,6 +462,7 @@ export function GlobalComposerPill({
   }, []);
 
   const placeholder = t("globalPill.placeholder");
+  const autoRouting = useAutoRoutingPicker();
   const selectedProviderForPicker =
     providerOverride ?? currentExecutionTarget?.harnessId ?? selectedProvider;
   const {
@@ -470,6 +480,7 @@ export function GlobalComposerPill({
     providers,
     selectedProvider: selectedProviderForPicker,
     onProviderSelected: (providerId, providerModels) => {
+      selectAutoMode(null, null);
       personaOverrideUserOverrideForRef.current = selectedPersonaId;
       personaOverrideActiveRef.current = false;
       const nextModel = getPreferredModel(providerModels, providerId);
@@ -484,6 +495,7 @@ export function GlobalComposerPill({
       setSelectedProvider(providerId);
     },
     onModelSelected: (model, owningAgentId) => {
+      selectAutoMode(null, null);
       const agentId = owningAgentId ?? selectedAgentId;
       const providerId = owningAgentId ?? selectedProviderForPicker;
       const selection = modelOptionToSelection(model, providerId);
@@ -550,6 +562,7 @@ export function GlobalComposerPill({
       return;
     }
 
+    selectAutoMode(null, null);
     setProviderOverride(personaTarget.harnessId);
     setModelOverride(
       personaTarget.modelId
@@ -802,7 +815,13 @@ export function GlobalComposerPill({
         return false;
       }
 
-      const options: GlobalComposeOptions = {};
+      const autoModeId = usePendingAutoModeStore.getState().modeId;
+      const options: GlobalComposeOptions =
+        autoModeId === undefined
+          ? { useDefaultAutoMode: true }
+          : autoModeId
+            ? { autoModeId }
+            : {};
       if (attachments.length > 0) {
         options.attachments = attachments;
       }
@@ -887,7 +906,13 @@ export function GlobalComposerPill({
       });
     }
 
-    const options: GlobalComposeOptions = {};
+    const autoModeId = usePendingAutoModeStore.getState().modeId;
+    const options: GlobalComposeOptions =
+      autoModeId === undefined
+        ? { useDefaultAutoMode: true }
+        : autoModeId
+          ? { autoModeId }
+          : {};
     const remountSafeAttachments = makeRemountSafeDraftAttachments(attachments);
     if (remountSafeAttachments.length > 0) {
       options.attachments = remountSafeAttachments;
@@ -1082,7 +1107,13 @@ export function GlobalComposerPill({
       return;
     }
 
-    const options: GlobalComposeOptions = {};
+    const autoModeId = usePendingAutoModeStore.getState().modeId;
+    const options: GlobalComposeOptions =
+      autoModeId === undefined
+        ? { useDefaultAutoMode: true }
+        : autoModeId
+          ? { autoModeId }
+          : {};
     const remountSafeAttachments = makeRemountSafeDraftAttachments(attachments);
     if (remountSafeAttachments.length > 0) {
       options.attachments = remountSafeAttachments;
@@ -1500,6 +1531,24 @@ export function GlobalComposerPill({
           </ComposerActionButton>
 
           <AgentModelPicker
+            autoRouting={{
+              ...autoRouting,
+              onModeChange: (modeId) => {
+                const target = getAutoModeExecutionTarget(modeId);
+                if (!target) return;
+                const accepted = handleModelChange(
+                  target.modelId,
+                  {
+                    id: target.modelId,
+                    name: target.modelName,
+                    providerId: target.modelProviderId,
+                  },
+                  "goose",
+                );
+                if (accepted === false && selectedAgentId !== "goose") return;
+                selectAutoMode(null, modeId);
+              },
+            }}
             agents={pickerAgents}
             selectedAgentId={selectedAgentId}
             onAgentChange={handleProviderChange}

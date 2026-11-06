@@ -68,7 +68,7 @@ fn synthesis_usage_errors_are_exit_two_and_emit_no_json() {
         let output = berd_call(&args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
         assert!(output.stdout.is_empty(), "{args:?}");
-        assert!(String::from_utf8_lossy(&output.stderr).contains("usage:"));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("Usage:"));
     }
 }
 

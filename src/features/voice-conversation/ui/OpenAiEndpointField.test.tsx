@@ -5,7 +5,7 @@ import { renderWithProviders } from "@/test/render";
 import { OpenAiEndpointField } from "./OpenAiEndpointField";
 
 const voiceApi = vi.hoisted(() => ({
-  getEndpoints: vi.fn(async () => ({ realtime: null, stt: null, tts: null })),
+  getEndpoints: vi.fn(async () => ({ stt: null, tts: null })),
   getStatus: vi.fn(async () => ({ sttConfigured: true })),
 }));
 
@@ -18,7 +18,6 @@ vi.mock("../api/openAiVoice", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   voiceApi.getEndpoints.mockResolvedValue({
-    realtime: null,
     stt: null,
     tts: null,
   });
@@ -48,7 +47,6 @@ it("updates a locally saved key indicator when another default service clears th
 
 it("binds key save and removal to the displayed endpoint", async () => {
   voiceApi.getEndpoints.mockResolvedValue({
-    realtime: null,
     stt: "wss://first.test/realtime",
     tts: null,
   } as never);
@@ -67,7 +65,6 @@ it("binds key save and removal to the displayed endpoint", async () => {
   );
   await screen.findByDisplayValue("wss://first.test/realtime");
   voiceApi.getEndpoints.mockResolvedValue({
-    realtime: null,
     stt: "wss://second.test/realtime",
     tts: null,
   } as never);

@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, SocketAddrV4, TcpListener, TcpStream};
 use std::sync::Arc;
@@ -10,8 +9,6 @@ use serde_json::Value;
 
 const MAX_REQUEST_BYTES: u64 = 64 * 1024;
 const MAX_SPEAK_TEXT_BYTES: usize = 16 * 1024;
-const MAX_HANDOFF_IDS: usize = 64;
-const MAX_HANDOFF_ID_BYTES: usize = 512;
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const POLL_TIMEOUT_SECONDS: std::ops::RangeInclusive<u64> = 1..=3600;
 
@@ -27,7 +24,8 @@ pub(crate) trait HostControl: Send + Sync + 'static {
         &self,
         text: String,
         acknowledgement: Option<u64>,
-        resolved_handoff_ids: Vec<String>,
+        voice: Option<String>,
+        language: Option<String>,
     ) -> Result<Value, String>;
     fn stop(&self) -> Result<Value, String>;
     fn set_non_blocking(&self, enabled: bool) -> Result<Value, String>;
@@ -39,6 +37,12 @@ pub(crate) trait HostControl: Send + Sync + 'static {
         policy: berd_call::input::InputDuringTtsPolicy,
     ) -> Result<Value, String>;
     fn set_muted(&self, muted: bool) -> Result<Value, String>;
+    /// Changes the status sound mode, or reports whether the agent is working.
+    fn set_status_sounds(
+        &self,
+        mode: Option<berd_call::StatusSoundMode>,
+        status: Option<berd_call::ConversationStatus>,
+    ) -> Result<Value, String>;
     fn restart(&self, session_arguments: Vec<String>) -> Result<Value, String>;
 }
 
@@ -112,8 +116,10 @@ pub(crate) enum ControlRequest {
     Speak {
         text: String,
         acknowledgement: Option<u64>,
-        #[serde(rename = "resolvedHandoffIds")]
-        resolved_handoff_ids: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        voice: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        language: Option<String>,
     },
     Stop,
     NonBlocking {
@@ -134,6 +140,10 @@ pub(crate) enum ControlRequest {
     },
     Muted {
         muted: bool,
+    },
+    StatusSounds {
+        mode: Option<berd_call::StatusSoundMode>,
+        status: Option<berd_call::ConversationStatus>,
     },
     Restart {
         #[serde(rename = "sessionArguments")]
@@ -172,27 +182,34 @@ impl PendingResponse {
     }
 }
 
+fn read_timeout(request: &ControlRequest) -> Result<Option<Duration>, String> {
+    Ok(
+        if let ControlRequest::PollInput {
+            timeout_seconds, ..
+        } = request
+        {
+            if !POLL_TIMEOUT_SECONDS.contains(timeout_seconds) {
+                return Err("timeout must be between 1 and 3600 seconds".into());
+            }
+            Some(Duration::from_secs(*timeout_seconds) + IO_TIMEOUT)
+        } else if matches!(
+            request,
+            ControlRequest::Speak { .. }
+                | ControlRequest::TtsSettings { .. }
+                | ControlRequest::Rate { .. }
+                | ControlRequest::Voice { .. }
+                | ControlRequest::StatusSounds { .. }
+                | ControlRequest::Restart { .. }
+        ) {
+            None
+        } else {
+            Some(IO_TIMEOUT)
+        },
+    )
+}
+
 pub(crate) fn begin_request(port: u16, request: ControlRequest) -> Result<PendingResponse, String> {
-    let read_timeout = if let ControlRequest::PollInput {
-        timeout_seconds, ..
-    } = &request
-    {
-        if !POLL_TIMEOUT_SECONDS.contains(timeout_seconds) {
-            return Err("timeout must be between 1 and 3600 seconds".into());
-        }
-        Some(Duration::from_secs(*timeout_seconds) + IO_TIMEOUT)
-    } else if matches!(
-        &request,
-        ControlRequest::Speak { .. }
-            | ControlRequest::TtsSettings { .. }
-            | ControlRequest::Rate { .. }
-            | ControlRequest::Voice { .. }
-            | ControlRequest::Restart { .. }
-    ) {
-        None
-    } else {
-        Some(IO_TIMEOUT)
-    };
+    let read_timeout = read_timeout(&request)?;
     let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port))
         .map_err(|error| format!("could not connect to berd-call on port {port}: {error}"))?;
     configure_stream(&stream, read_timeout)?;
@@ -223,10 +240,11 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
                 ControlRequest::Speak {
                     text,
                     acknowledgement,
-                    resolved_handoff_ids,
+                    voice,
+                    language,
                 } => {
-                    validate_speak(&text, &resolved_handoff_ids)?;
-                    control.speak(text, acknowledgement, resolved_handoff_ids)
+                    validate_speak(&text, voice.as_deref(), language.is_some())?;
+                    control.speak(text, acknowledgement, voice, language)
                 }
                 ControlRequest::Stop => control.stop(),
                 ControlRequest::TtsSettings { settings } => control.set_tts(settings),
@@ -235,6 +253,9 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
                 ControlRequest::NonBlocking { enabled } => control.set_non_blocking(enabled),
                 ControlRequest::InputDuringTts { policy } => control.set_input_during_tts(policy),
                 ControlRequest::Muted { muted } => control.set_muted(muted),
+                ControlRequest::StatusSounds { mode, status } => {
+                    control.set_status_sounds(mode, status)
+                }
                 ControlRequest::Restart { session_arguments } => control.restart(session_arguments),
             },
         );
@@ -300,23 +321,15 @@ fn write_json_line(
         .map_err(|error| format!("could not write berd-call {label}: {error}"))
 }
 
-fn validate_speak(text: &str, resolved_handoff_ids: &[String]) -> Result<(), String> {
+fn validate_speak(text: &str, voice: Option<&str>, language: bool) -> Result<(), String> {
+    if voice.is_some_and(|voice| voice.trim().is_empty()) || language && voice.is_none() {
+        return Err("speak --language requires a nonempty --voice".into());
+    }
     if text.trim().is_empty() {
         return Err("speak text must not be empty".into());
     }
     if text.len() > MAX_SPEAK_TEXT_BYTES {
         return Err("speak text is larger than 16 KiB".into());
-    }
-    if resolved_handoff_ids.len() > MAX_HANDOFF_IDS
-        || resolved_handoff_ids
-            .iter()
-            .any(|id| id.is_empty() || id.len() > MAX_HANDOFF_ID_BYTES)
-    {
-        return Err("resolved handoff IDs are invalid".into());
-    }
-    let unique = resolved_handoff_ids.iter().collect::<HashSet<_>>();
-    if unique.len() != resolved_handoff_ids.len() {
-        return Err("resolved handoff IDs must be unique".into());
     }
     Ok(())
 }
@@ -361,6 +374,13 @@ mod tests {
         fn set_muted(&self, muted: bool) -> Result<Value, String> {
             Ok(json!({"muted": muted}))
         }
+        fn set_status_sounds(
+            &self,
+            mode: Option<berd_call::StatusSoundMode>,
+            status: Option<berd_call::ConversationStatus>,
+        ) -> Result<Value, String> {
+            Ok(json!({"statusSounds": mode, "conversationStatus": status}))
+        }
         fn restart(&self, session_arguments: Vec<String>) -> Result<Value, String> {
             Ok(json!({"sessionArguments": session_arguments}))
         }
@@ -372,12 +392,14 @@ mod tests {
             &self,
             text: String,
             acknowledgement: Option<u64>,
-            resolved_handoff_ids: Vec<String>,
+            voice: Option<String>,
+            language: Option<String>,
         ) -> Result<Value, String> {
             Ok(json!({
                 "spoken":text,
                 "acknowledgement":acknowledgement,
-                "resolvedHandoffIds":resolved_handoff_ids,
+                "voice":voice,
+                "language":language,
             }))
         }
 
@@ -423,14 +445,16 @@ mod tests {
                 ControlRequest::Speak {
                     text: "hello".into(),
                     acknowledgement: Some(7),
-                    resolved_handoff_ids: vec!["call-1".into()],
+                    voice: Some("Nora".into()),
+                    language: Some("en-GB".into()),
                 }
             )
             .unwrap(),
             json!({
                 "spoken":"hello",
                 "acknowledgement":7,
-                "resolvedHandoffIds":["call-1"],
+                "voice":"Nora",
+                "language":"en-GB",
             })
         );
         assert_eq!(
@@ -442,9 +466,23 @@ mod tests {
 
     #[test]
     fn speak_validation_rejects_invalid_values() {
-        assert!(validate_speak(" ", &[]).is_err());
-        assert!(validate_speak(&"x".repeat(16 * 1024 + 1), &[]).is_err());
-        assert!(validate_speak("hello", &["".into()]).is_err());
-        assert!(validate_speak("hello", &["same".into(), "same".into()]).is_err());
+        assert!(validate_speak(" ", None, false).is_err());
+        assert!(validate_speak(&"x".repeat(16 * 1024 + 1), None, false).is_err());
+        assert!(validate_speak("hello", None, true).is_err());
+        assert!(validate_speak("hello", Some(" "), false).is_err());
+        assert!(validate_speak("hello", Some("Nora"), true).is_ok());
+    }
+
+    #[test]
+    fn status_sounds_wait_for_the_session_without_a_read_timeout() {
+        let request = ControlRequest::StatusSounds {
+            mode: Some(berd_call::StatusSoundMode::Off),
+            status: None,
+        };
+        assert_eq!(read_timeout(&request).unwrap(), None);
+        assert_eq!(
+            read_timeout(&ControlRequest::Muted { muted: true }).unwrap(),
+            Some(IO_TIMEOUT)
+        );
     }
 }

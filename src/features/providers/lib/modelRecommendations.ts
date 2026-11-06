@@ -87,6 +87,10 @@ export function normalizedGooseModelDisplayName(id: string): string | null {
     return null;
   }
 
+  if (id === "goose-gemini-4-argon") {
+    return "Gemini 4 Argon";
+  }
+
   if (parsed.familyTokens[0] === "gpt") {
     return [
       `GPT-${parsed.version.join(".")}`,

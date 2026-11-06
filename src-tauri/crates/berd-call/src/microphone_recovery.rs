@@ -4,6 +4,12 @@ use std::time::{Duration, Instant};
 
 const RECOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 
+#[derive(Debug, Default)]
+pub(crate) struct CaptureChange {
+    pub(crate) invalidated: bool,
+    pub(crate) opened: bool,
+}
+
 pub(crate) struct MicrophoneRecovery<C> {
     capture: Option<(String, C)>,
     unavailable_since: Option<Instant>,
@@ -35,7 +41,7 @@ impl<C> MicrophoneRecovery<C> {
         failed: bool,
         close: impl FnOnce(&mut C) -> Result<(), String>,
         open: impl FnOnce() -> Result<C, String>,
-    ) -> Result<bool, String> {
+    ) -> Result<CaptureChange, String> {
         if self
             .unavailable_since
             .is_some_and(|since| now.saturating_duration_since(since) >= RECOVERY_TIMEOUT)
@@ -48,19 +54,26 @@ impl<C> MicrophoneRecovery<C> {
                 .as_ref()
                 .is_some_and(|(key, _)| desired.as_ref() == Ok(key))
         {
-            return Ok(false);
+            return Ok(CaptureChange::default());
         }
-        if let Some((_, mut capture)) = self.capture.take() {
+        let invalidated = if let Some((_, mut capture)) = self.capture.take() {
             close(&mut capture)?;
-        }
+            true
+        } else {
+            false
+        };
         self.unavailable_since.get_or_insert(now);
-        match desired.and_then(|key| open().map(|capture| (key, capture))) {
+        let opened = match desired.and_then(|key| open().map(|capture| (key, capture))) {
             Ok(capture) => {
                 self.capture = Some(capture);
-                Ok(true)
+                true
             }
-            Err(_) => Ok(false),
-        }
+            Err(_) => false,
+        };
+        Ok(CaptureChange {
+            invalidated,
+            opened,
+        })
     }
 }
 
@@ -89,15 +102,18 @@ mod tests {
             .unwrap();
         assert!(recovery.confirm_activity());
         assert!(!recovery.confirm_activity());
-        assert!(!recovery
-            .reconcile(
-                now + Duration::from_secs(20),
-                Ok("input".into()),
-                false,
-                |_| Ok(()),
-                || panic!("healthy capture must remain open")
-            )
-            .unwrap());
+        assert!(
+            !recovery
+                .reconcile(
+                    now + Duration::from_secs(20),
+                    Ok("input".into()),
+                    false,
+                    |_| Ok(()),
+                    || panic!("healthy capture must remain open")
+                )
+                .unwrap()
+                .opened
+        );
     }
 
     #[test]
@@ -146,41 +162,50 @@ mod tests {
     fn route_change_drops_old_capture_before_opening_new_one() {
         let dropped = Arc::new(AtomicBool::new(false));
         let mut recovery = MicrophoneRecovery::new("first".into(), Capture(dropped.clone()));
-        assert!(recovery
-            .reconcile(
-                Instant::now(),
-                Ok("second".into()),
-                false,
-                |_| Ok(()),
-                || {
-                    assert!(dropped.load(Ordering::SeqCst));
-                    Ok(Capture(Arc::new(AtomicBool::new(false))))
-                }
-            )
-            .unwrap());
-        assert!(!recovery
-            .reconcile(
-                Instant::now(),
-                Ok("second".into()),
-                false,
-                |_| Ok(()),
-                || panic!("unchanged route reopened")
-            )
-            .unwrap());
+        assert!(
+            recovery
+                .reconcile(
+                    Instant::now(),
+                    Ok("second".into()),
+                    false,
+                    |_| Ok(()),
+                    || {
+                        assert!(dropped.load(Ordering::SeqCst));
+                        Ok(Capture(Arc::new(AtomicBool::new(false))))
+                    }
+                )
+                .unwrap()
+                .opened
+        );
+        assert!(
+            !recovery
+                .reconcile(
+                    Instant::now(),
+                    Ok("second".into()),
+                    false,
+                    |_| Ok(()),
+                    || panic!("unchanged route reopened")
+                )
+                .unwrap()
+                .opened
+        );
     }
 
     #[test]
     fn stream_failure_reopens_the_same_device() {
         let mut recovery = MicrophoneRecovery::new("input".into(), 1);
-        assert!(recovery
-            .reconcile(
-                Instant::now(),
-                Ok("input".into()),
-                true,
-                |_| Ok(()),
-                || Ok(2)
-            )
-            .unwrap());
+        assert!(
+            recovery
+                .reconcile(
+                    Instant::now(),
+                    Ok("input".into()),
+                    true,
+                    |_| Ok(()),
+                    || Ok(2)
+                )
+                .unwrap()
+                .opened
+        );
         assert_eq!(recovery.capture(), Some(&2));
     }
 
@@ -188,25 +213,30 @@ mod tests {
     fn missing_input_can_return_without_ending_the_call() {
         let now = Instant::now();
         let mut recovery = MicrophoneRecovery::new("input".into(), 1);
-        assert!(!recovery
+        let change = recovery
             .reconcile(
                 now,
                 Err("disconnected".into()),
                 false,
                 |_| Ok(()),
-                || panic!("no device")
+                || panic!("no device"),
             )
-            .unwrap());
+            .unwrap();
+        assert!(change.invalidated);
+        assert!(!change.opened);
         assert!(recovery.capture().is_none());
-        assert!(recovery
-            .reconcile(
-                now + Duration::from_secs(2),
-                Ok("replacement".into()),
-                false,
-                |_| Ok(()),
-                || Ok(2)
-            )
-            .unwrap());
+        assert!(
+            recovery
+                .reconcile(
+                    now + Duration::from_secs(2),
+                    Ok("replacement".into()),
+                    false,
+                    |_| Ok(()),
+                    || Ok(2)
+                )
+                .unwrap()
+                .opened
+        );
         assert_eq!(recovery.capture(), Some(&2));
     }
 
@@ -214,24 +244,29 @@ mod tests {
     fn repeated_open_failures_have_a_bounded_recovery_window() {
         let now = Instant::now();
         let mut recovery = MicrophoneRecovery::new("input".into(), 1);
-        assert!(!recovery
+        let change = recovery
             .reconcile(
                 now,
                 Ok("input".into()),
                 true,
                 |_| Ok(()),
-                || Err("engine stopped".into())
+                || Err("engine stopped".into()),
             )
-            .unwrap());
-        assert!(!recovery
-            .reconcile(
-                now + Duration::from_secs(9),
-                Ok("input".into()),
-                false,
-                |_| Ok(()),
-                || Err("engine stopped".into())
-            )
-            .unwrap());
+            .unwrap();
+        assert!(change.invalidated);
+        assert!(!change.opened);
+        assert!(
+            !recovery
+                .reconcile(
+                    now + Duration::from_secs(9),
+                    Ok("input".into()),
+                    false,
+                    |_| Ok(()),
+                    || Err("engine stopped".into())
+                )
+                .unwrap()
+                .opened
+        );
         assert!(recovery
             .reconcile(
                 now + Duration::from_secs(10),

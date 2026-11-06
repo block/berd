@@ -26,6 +26,13 @@ import {
 import { createWebSocketStream } from "./createWebSocketStream";
 import { perfLog } from "@/shared/lib/perfLog";
 
+const privateSessionIds = new Set<string>();
+
+/** Keep a text-free fence even after cancellation: transports may emit late chunks. */
+export function hidePrivateSessionNotifications(sessionId: string): void {
+  privateSessionIds.add(sessionId);
+}
+
 let notificationHandler: AcpNotificationHandler | null = null;
 const sessionNotificationInterceptors =
   new Set<SessionNotificationInterceptor>();
@@ -101,6 +108,7 @@ function createClientCallbacks(
       };
       if (!isCurrent()) return cancelled;
       const request = toRendererSessionId(args);
+      if (privateSessionIds.has(request.sessionId)) return cancelled;
       if (permissionHandler) {
         // Cancel immediately on detachment even if a handler never settles.
         // The signal also retires this generation's pending confirmation UI.
@@ -142,6 +150,7 @@ function createClientCallbacks(
           return;
         }
       }
+      if (privateSessionIds.has(notification.sessionId)) return;
       if (notificationHandler) {
         await notificationHandler.handleSessionNotification(notification);
       }

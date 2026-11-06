@@ -191,39 +191,82 @@ export function runtimeRefreshableModelProviderIds(
   );
 }
 
-export async function applyRuntimeProviderConfig(
+let providerApplyGeneration = 0;
+let providerApplyTail: Promise<void> = Promise.resolve();
+let providerBackendSyncFailure:
+  | { generation: number; error: unknown }
+  | undefined;
+
+export function applyRuntimeProviderConfig(
   runtimeConfig: RuntimeConfig,
   options: {
     seedModelsFresh?: boolean;
     defaultModelInventoryMode?: RuntimeModelInventoryMode;
     byoKeyProvidersEnabled?: boolean;
+    /** Creation must fail rather than use a backend whose config did not apply. */
+    requireBackendSync?: boolean;
+    isCurrent?: () => boolean;
   } = {},
 ): Promise<void> {
-  const byoKeyProvidersEnabled =
-    options.byoKeyProvidersEnabled ?? getBuildFeatureState().byoKeyProviders;
-  const catalogStore = useProviderCatalogStore.getState();
-  // With bring-your-own-key off, the runtime config is the sole catalog source
-  // and wholesale-replaces the store (the pre-feature behavior). With it on,
-  // merge so the fields-bearing openai/anthropic setup-catalog entries survive
-  // every (re-)apply; the runtime config still wins for everything it defines.
-  catalogStore.setEntries(
-    byoKeyProvidersEnabled
-      ? mergeRuntimeProviderCatalog(catalogStore.entries, runtimeConfig)
-      : providerCatalogFromRuntimeConfig(runtimeConfig),
-  );
-  useProviderModelCacheStore
-    .getState()
-    .seedRuntimeModels(runtimeModelInventory(runtimeConfig), {
-      fresh: options.seedModelsFresh,
-      runtimeManagedProviderIds: runtimeManagedModelProviderIds(
-        runtimeConfig,
-        options.defaultModelInventoryMode,
-      ),
+  const generation = ++providerApplyGeneration;
+  const isCurrent = () =>
+    generation === providerApplyGeneration && options.isCurrent?.() !== false;
+  const pending = providerApplyTail
+    .catch(() => {})
+    .then(async () => {
+      if (!isCurrent()) return;
+      try {
+        await syncRuntimeCustomProviders(runtimeConfig, { isCurrent });
+        if (isCurrent()) providerBackendSyncFailure = undefined;
+      } catch (error) {
+        if (!isCurrent()) return;
+        providerBackendSyncFailure = { generation, error };
+        if (options.requireBackendSync) throw error;
+        console.warn("Failed to sync runtime custom providers:", error);
+      }
+      if (!isCurrent()) return;
+      const byoKeyProvidersEnabled =
+        options.byoKeyProvidersEnabled ??
+        getBuildFeatureState().byoKeyProviders;
+      const catalogStore = useProviderCatalogStore.getState();
+      // With bring-your-own-key off, the runtime config is the sole catalog source
+      // and wholesale-replaces the store (the pre-feature behavior). With it on,
+      // merge so the fields-bearing openai/anthropic setup-catalog entries survive
+      // every (re-)apply; the runtime config still wins for everything it defines.
+      catalogStore.setEntries(
+        byoKeyProvidersEnabled
+          ? mergeRuntimeProviderCatalog(catalogStore.entries, runtimeConfig)
+          : providerCatalogFromRuntimeConfig(runtimeConfig),
+      );
+      useProviderModelCacheStore
+        .getState()
+        .seedRuntimeModels(runtimeModelInventory(runtimeConfig), {
+          fresh: options.seedModelsFresh,
+          runtimeManagedProviderIds: runtimeManagedModelProviderIds(
+            runtimeConfig,
+            options.defaultModelInventoryMode,
+          ),
+        });
     });
-
-  try {
-    await syncRuntimeCustomProviders(runtimeConfig);
-  } catch (error) {
-    console.warn("Failed to sync runtime custom providers:", error);
-  }
+  providerApplyTail = pending;
+  return (async () => {
+    try {
+      await pending;
+    } catch (error) {
+      if (generation === providerApplyGeneration) throw error;
+    }
+    // Startup/settings may supersede this request while ACP is in flight.
+    // Every waiting creator must wait for the newest queued reconciliation.
+    while (generation !== providerApplyGeneration) {
+      const latest = providerApplyTail;
+      await latest;
+      if (latest === providerApplyTail) break;
+    }
+    if (
+      options.requireBackendSync &&
+      providerBackendSyncFailure?.generation === providerApplyGeneration
+    ) {
+      throw providerBackendSyncFailure.error;
+    }
+  })();
 }

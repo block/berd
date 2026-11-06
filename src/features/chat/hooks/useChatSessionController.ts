@@ -1,3 +1,9 @@
+import { refreshRuntimeConfigForNewChat } from "@/shared/runtime-config/newChatRuntimeConfig";
+import {
+  getSelectedAutoModeId,
+  getAutoModeExecutionTarget,
+  selectAutoMode,
+} from "../lib/autoModelSelection";
 import { projectEnvironment } from "@/features/projects/lib/projectEnvironment";
 import {
   useCallback,
@@ -1064,6 +1070,7 @@ export function useChatSessionController({
         ? useChatStore.getState().draftAttachmentsBySession[strandedSessionId]
         : undefined;
       const created = await store.createSession({
+        autoModeId: current?.autoModeId,
         title: current?.title,
         projectId: current?.projectId ?? undefined,
         personaId: current?.personaId,
@@ -1171,6 +1178,7 @@ export function useChatSessionController({
     handleModelChange,
     handlePickerOpen,
     effectiveModelSelection,
+    autoRouting,
   } = useResolvedAgentModelPicker({
     providers,
     selectedProvider,
@@ -1550,6 +1558,7 @@ export function useChatSessionController({
       const personaTarget = persona ? resolvePersonaTarget(persona) : undefined;
 
       if (personaTarget) {
+        selectAutoMode(sessionId, null);
         const harnessId = personaTarget.harnessId;
         if (!personaTarget.modelId) {
           if (!sessionId) {
@@ -2653,9 +2662,13 @@ export function useChatSessionController({
             : session?.executionTarget;
         return (async () => {
           try {
+            await refreshRuntimeConfigForNewChat();
+            const autoModeId = getSelectedAutoModeId(sessionId);
             await ensureRemoteHostConnected(remoteHost);
             const created = await useChatSessionStore.getState().createSession({
-              executionTarget: remoteExecutionTarget,
+              executionTarget:
+                getAutoModeExecutionTarget(autoModeId) ?? remoteExecutionTarget,
+              autoModeId,
               personaId:
                 payload.persona.kind === "persona"
                   ? payload.persona.id
@@ -3558,6 +3571,7 @@ export function useChatSessionController({
     selectedPersona,
     handlePersonaChange,
     handleCreatePersona,
+    autoRouting,
     pickerAgents,
     providersLoading,
     selectedProvider: selectedAgentId,

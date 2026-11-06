@@ -14,6 +14,9 @@ describe("modelRecommendations", () => {
     expect(normalizedGooseModelDisplayName("goose-gemini-3-5-flash")).toBe(
       "Gemini Flash 3.5",
     );
+    expect(normalizedGooseModelDisplayName("goose-gemini-4-argon")).toBe(
+      "Gemini 4 Argon",
+    );
     expect(normalizedGooseModelDisplayName("goose-gpt-6-astra")).toBe(
       "GPT-6 Astra",
     );
@@ -121,6 +124,31 @@ describe("modelRecommendations", () => {
         id: "data_workflow_tools.production.fraud_detection_model",
         name: "Fraud_detection_model",
         displayName: "Fraud_detection_model",
+      }),
+    );
+  });
+
+  it("offers discovered Gemini 4 Argon with its official name", () => {
+    const [googleModel] = providerModelOptionsFromIds("google", [
+      "gemini-4-argon",
+    ]);
+    expect(googleModel).toEqual(
+      expect.objectContaining({
+        id: "gemini-4-argon",
+        displayName: "Gemini 4 Argon",
+        recommended: true,
+      }),
+    );
+
+    const [gooseModel] = providerModelOptionsFromIds("databricks_v2", [
+      "goose-gemini-4-argon",
+    ]);
+    expect(gooseModel).toEqual(
+      expect.objectContaining({
+        id: "goose-gemini-4-argon",
+        displayName: "Gemini 4 Argon",
+        recommended: true,
+        featured: true,
       }),
     );
   });

@@ -118,7 +118,10 @@ pub(crate) fn build_logs_zip(
             let Some(filename) = file_name_str(&path) else {
                 continue;
             };
-            let raw = read_tail(&path, &mut budget)?;
+            // Older Auto builds logged opaque router bodies, including arbitrary
+            // multiline task content. Exclude the entire file: a tail may start
+            // inside that body, and response text can imitate a log header.
+            let raw = read_app_log_tail(&path, &mut budget)?;
             let sanitized = sanitize_app_log(&raw);
             let filtered = filter_by_recency(&sanitized, ParserKind::ShellBracketed, cutoff);
             if filtered.is_empty() {
@@ -329,23 +332,46 @@ fn is_hard_excluded(name: &str) -> bool {
 /// `budget`) from the END of the file, decrementing `budget` by what was read.
 /// When the read starts mid-file, the leading partial line is trimmed.
 fn read_tail(path: &Path, budget: &mut u64) -> Result<Vec<u8>, String> {
+    let file = std::fs::File::open(path)
+        .map_err(|error| format!("Failed to open log {}: {error}", path.display()))?;
+    let total = file
+        .metadata()
+        .map_err(|error| format!("Failed to stat log {}: {error}", path.display()))?
+        .len();
+    read_tail_snapshot(file, path, total, budget)
+}
+
+fn read_app_log_tail(path: &Path, budget: &mut u64) -> Result<Vec<u8>, String> {
     let mut file = std::fs::File::open(path)
         .map_err(|error| format!("Failed to open log {}: {error}", path.display()))?;
     let total = file
         .metadata()
         .map_err(|error| format!("Failed to stat log {}: {error}", path.display()))?
         .len();
+    if contains_legacy_router_response(&mut std::io::Read::by_ref(&mut file).take(total))
+        .map_err(|error| format!("Failed to inspect log {}: {error}", path.display()))?
+    {
+        return Ok(Vec::new());
+    }
+    // Use the scanned handle and length, even if rotation replaces the path or
+    // another app appends a legacy record before this read completes.
+    read_tail_snapshot(file, path, total, budget)
+}
 
+fn read_tail_snapshot(
+    mut file: std::fs::File,
+    path: &Path,
+    total: u64,
+    budget: &mut u64,
+) -> Result<Vec<u8>, String> {
     let read_len = total.min(PER_FILE_TAIL_BYTES).min(*budget);
     if read_len == 0 {
         return Ok(Vec::new());
     }
 
     let start = total - read_len;
-    if start > 0 {
-        file.seek(SeekFrom::Start(start))
-            .map_err(|error| format!("Failed to seek log {}: {error}", path.display()))?;
-    }
+    file.seek(SeekFrom::Start(start))
+        .map_err(|error| format!("Failed to seek log {}: {error}", path.display()))?;
 
     let mut buffer = Vec::with_capacity(read_len as usize);
     file.take(read_len)
@@ -362,6 +388,29 @@ fn read_tail(path: &Path, budget: &mut u64) -> Result<Vec<u8>, String> {
     }
 
     Ok(buffer)
+}
+
+/// Scan the whole file with bounded memory before tailing. The marker can sit
+/// outside the exported tail or span a read boundary.
+fn contains_legacy_router_response(reader: &mut impl Read) -> std::io::Result<bool> {
+    const MARKER: &[u8] = b"Router response for mode ";
+    let mut buffer = [0_u8; 8192];
+    let mut retained = 0;
+    loop {
+        let count = reader.read(&mut buffer[retained..])?;
+        if count == 0 {
+            return Ok(false);
+        }
+        let end = retained + count;
+        if buffer[..end]
+            .windows(MARKER.len())
+            .any(|bytes| bytes == MARKER)
+        {
+            return Ok(true);
+        }
+        retained = end.min(MARKER.len() - 1);
+        buffer.copy_within(end - retained..end, 0);
+    }
 }
 
 /// Apply [`sanitize_app_log_line`] to every line of a shell-log chunk, dropping
@@ -579,6 +628,73 @@ mod tests {
         assert!(!out.contains("user typed a secret message"));
         assert!(!out.contains("prompt text"));
         assert!(out.contains("[INFO] ready"));
+    }
+
+    #[test]
+    fn feedback_excludes_legacy_router_files_even_when_header_is_outside_tail() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_log_dir = temp.path().join("app");
+        let goose_state_logs_dir = temp.path().join("goose");
+        fs::create_dir_all(&app_log_dir).unwrap();
+        let unsafe_log = app_log_dir.join("berd.log");
+        let mut contents = "x".repeat(8180);
+        contents.push_str("Router response for mode auto: {\n");
+        contents.push_str(&" ".repeat(PER_FILE_TAIL_BYTES as usize));
+        contents.push_str("[2099-01-01][00:00:00][INFO] quoted task contents\n}\n");
+        fs::write(&unsafe_log, contents).unwrap();
+        let mut budget = MAX_TOTAL_RAW_BYTES;
+        let tail = read_tail(&unsafe_log, &mut budget).unwrap();
+        assert!(!String::from_utf8_lossy(&tail).contains("Router response for mode"));
+        assert!(read_app_log_tail(&unsafe_log, &mut budget)
+            .unwrap()
+            .is_empty());
+        fs::write(
+            app_log_dir.join("berd.1.log"),
+            "[2099-01-01][00:00:00][INFO] safe transport metadata\n",
+        )
+        .unwrap();
+        let zip = build_logs_zip(
+            Some(&LogDirs {
+                app_log_dir,
+                goose_state_logs_dir,
+            }),
+            None,
+        )
+        .unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip)).unwrap();
+        assert!(archive.by_name("app-shell/berd.log").is_err());
+        assert!(archive.by_name("app-shell/berd.1.log").is_ok());
+    }
+
+    #[test]
+    fn app_log_tail_uses_scanned_handle_and_length_across_append_and_rotation() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("berd.log");
+        let safe = b"[2099-01-01][00:00:00][INFO] safe metadata\n";
+        fs::write(&path, safe).unwrap();
+        let mut file = fs::File::open(&path).unwrap();
+        let length = file.metadata().unwrap().len();
+        assert!(!contains_legacy_router_response(
+            &mut std::io::Read::by_ref(&mut file).take(length)
+        )
+        .unwrap());
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"Router response for mode auto: private task\n")
+            .unwrap();
+        fs::rename(&path, temp.path().join("berd.1.log")).unwrap();
+        fs::write(
+            &path,
+            b"Router response for mode auto: another private task\n",
+        )
+        .unwrap();
+        let mut budget = MAX_TOTAL_RAW_BYTES;
+        assert_eq!(
+            read_tail_snapshot(file, &path, length, &mut budget).unwrap(),
+            safe
+        );
     }
 
     #[test]

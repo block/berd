@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { validateDisplayOptions } from "./SessionListCapability";
+import {
+  includeSessionListPlaceholderSessions,
+  validateDisplayOptions,
+} from "./SessionListCapability";
 
 const defaults = {
   pinnedShowChatIcons: true,
@@ -59,5 +62,31 @@ describe("validateDisplayOptions", () => {
       chatShowTimestamps: true,
     };
     expect(validateDisplayOptions(settings, defaults)).toEqual(settings);
+  });
+});
+
+describe("task session placeholders", () => {
+  it.each([
+    "delegate",
+    "sub_agent",
+  ])("never restores %s tasks through active, draft, or terminal placeholders", (sessionType) => {
+    const task = {
+      id: "task",
+      title: "Task",
+      messageCount: 0,
+      createdAt: "",
+      updatedAt: "",
+      sessionType,
+    };
+    const user = { ...task, id: "user", sessionType: "user" };
+    const result = includeSessionListPlaceholderSessions(
+      [],
+      [task, user],
+      new Set(["task", "user"]),
+      new Set(["task"]),
+      "task",
+    );
+    expect(result.sessions).toEqual([user]);
+    expect([...result.placeholderSessionIds]).toEqual(["user"]);
   });
 });

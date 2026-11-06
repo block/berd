@@ -58,6 +58,7 @@ export function sendPromptInBackground(
     onUserMessageCommitted,
     onPromptDispatched,
     prepare: validateExecutionTarget,
+    dispatchToken: sendOptions.sessionSelectionToken,
     background: true,
   }).catch((error) => {
     // Readiness changed at the final reversible boundary. The intent owner

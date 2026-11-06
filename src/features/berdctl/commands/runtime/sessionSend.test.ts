@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { routeAutoModel } from "@/shared/api/autoRouting";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 
 import {
   clearMessageTracking,
@@ -36,7 +38,13 @@ const mocks = vi.hoisted(() => ({
   listSkills: vi.fn(),
 }));
 
+vi.mock("@/shared/api/autoRouting", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/shared/api/autoRouting")>()),
+  routeAutoModel: vi.fn(),
+}));
+
 vi.mock("@/shared/api/acp", () => ({
+  acpGetPreparedWorkingDir: () => "/tmp/project",
   acpGetSessionInfo: (...args: unknown[]) => mocks.acpGetSessionInfo(...args),
   acpLoadSession: (...args: unknown[]) => mocks.acpLoadSession(...args),
   acpPrepareSession: (...args: unknown[]) => {
@@ -180,6 +188,60 @@ describe("sendPromptToExistingSessionInBackground", () => {
     mocks.loadWorkspaceInstructionFiles.mockResolvedValue([]);
     mocks.listSkills.mockResolvedValue([]);
   });
+
+  it("routes a berdctl Auto send under its own lease and releases it after dispatch", async () => {
+    useChatSessionStore
+      .getState()
+      .patchSession(SESSION_ID, { autoModeId: "auto" });
+    useRuntimeConfigStore.setState({
+      config: {
+        schemaVersion: 1,
+        goose: {
+          modelProviders: [],
+          autoRouting: {
+            url: "https://example.com/route",
+            modes: [
+              {
+                id: "auto",
+                displayName: "Auto",
+                modelProviderId: "databricks_v2",
+                fallback: { modelId: UPDATED_TARGET.modelId, effort: "high" },
+                models: [
+                  {
+                    modelId: UPDATED_TARGET.modelId,
+                    routerModel: "router-model",
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    });
+    vi.mocked(routeAutoModel).mockResolvedValue({
+      modeId: "auto",
+      source: "router",
+      modelProviderId: "databricks_v2",
+      modelId: UPDATED_TARGET.modelId,
+      effort: "high",
+    });
+    try {
+      await sendPromptToExistingSessionInBackground(SESSION_ID, "auto task");
+      expect(routeAutoModel).toHaveBeenCalledTimes(1);
+      expect(mocks.acpSendMessage).toHaveBeenCalledTimes(1);
+      expect(
+        useChatSessionStore.getState().getSession(SESSION_ID)
+          ?.autoRoutingDecision?.modelId,
+      ).toBe(UPDATED_TARGET.modelId);
+      const nextLease = acquireSessionDispatchTarget(SESSION_ID);
+      expect(nextLease.status).toBe("acquired");
+      if (nextLease.status === "acquired") nextLease.release();
+    } finally {
+      useRuntimeConfigStore.setState({
+        config: { schemaVersion: 1, goose: { modelProviders: [] } },
+      });
+    }
+  }, 1500);
 
   it("buffers a first-load ACP replay before appending a berd-monitor prompt", async () => {
     let sessionWasLoaded = false;

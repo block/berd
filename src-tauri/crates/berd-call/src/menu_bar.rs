@@ -5,6 +5,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::panic::{self, AssertUnwindSafe};
 use std::ptr::NonNull;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -23,11 +24,20 @@ use objc2_foundation::{NSObjectProtocol, NSString, NSTimer};
 use serde_json::Value;
 
 use berd_call::input::InputDuringTtsPolicy;
+use berd_call::StatusSoundMode;
 
 use crate::host_control::{self, ControlRequest};
 use crate::StartOptions;
 
 const RATES: [f32; 7] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+const STATUS_SOUNDS: [(StatusSoundMode, &str); 3] = [
+    (StatusSoundMode::Off, "Off"),
+    (StatusSoundMode::Working, "While Working"),
+    (
+        StatusSoundMode::WorkingAndWaiting,
+        "While Working and Waiting",
+    ),
+];
 const REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Runs the call on a worker thread while the main thread owns the menu bar.
@@ -39,22 +49,25 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
     let port = options.port;
     thread::Builder::new()
         .name("berd-call-session".into())
-        .spawn(move || {
-            let code = match crate::host_session::run(options) {
-                Ok(()) => 0,
-                Err(error) => {
-                    eprintln!("berd-call start failed: {error}");
-                    1
-                }
-            };
-            std::process::exit(code);
-        })
+        .spawn(move || std::process::exit(exit_code(|| crate::host_session::run(options))))
         .map_err(|error| format!("could not start the voice call: {error}"))?;
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
     let _menu_bar = MenuBar::install(mtm, port);
     app.run();
     Ok(())
+}
+
+/// The call's exit status, so that even a panic ends the process rather than leaving the menu bar without its call.
+fn exit_code(run: impl FnOnce() -> Result<(), String>) -> i32 {
+    match panic::catch_unwind(AssertUnwindSafe(run)) {
+        Ok(Ok(())) => 0,
+        Ok(Err(error)) => {
+            eprintln!("berd-call start failed: {error}");
+            1
+        }
+        Err(_) => 101,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -66,6 +79,8 @@ pub(crate) enum MenuAction {
     Rate(f32),
     Muted(bool),
     InputDuringTts(InputDuringTtsPolicy),
+    StatusSounds(StatusSoundMode),
+    DownloadVoice(VoiceChoice),
     Stop,
 }
 
@@ -95,11 +110,13 @@ fn item(title: impl Into<String>, action: Option<MenuAction>) -> MenuNode {
     }
 }
 
-#[derive(Clone, Debug)]
-struct VoiceChoice {
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct VoiceChoice {
     voice: String,
     language: Option<String>,
-    title: String,
+    name: String,
+    // A Siri voice that isn't installed yet, and its download size.
+    download_bytes: Option<u64>,
 }
 
 #[derive(Clone, Default)]
@@ -108,6 +125,10 @@ struct MenuState {
     voices: Vec<VoiceChoice>,
     action_error: Option<String>,
     catalog_error: Option<String>,
+    downloading: Option<VoiceChoice>,
+    download_error: Option<String>,
+    // A download finished, so the coordinator reloads which voices are installed.
+    reload_catalog: bool,
 }
 
 /// Builds the menu from server status and separately owned local menu state.
@@ -120,72 +141,161 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
         return vec![item("Berd Call is starting…", None), SEPARATOR, end_call];
     };
     let muted = status["muted"].as_bool().unwrap_or(false);
-    let suppressing = input_policy(status) == Some(InputDuringTtsPolicy::SuppressInput);
-    let rate = status["session"]["tts"]["rate"].as_f64().unwrap_or(1.0) as f32;
-    let rates = RATES
-        .iter()
-        .filter(|&&option| rate_range(status).contains(&option))
-        .map(|&option| MenuNode {
-            checked: (option - rate).abs() < 0.01,
-            ..item(rate_title(option), Some(MenuAction::Rate(option)))
-        })
-        .collect();
-    let voice = status["session"]["tts"]["voice"]
-        .as_str()
-        .unwrap_or("Unknown");
-    let language = status["session"]["tts"]["language"].as_str();
-    let voices = state
-        .voices
-        .iter()
-        .map(|entry| MenuNode {
-            checked: entry.voice == voice && entry.language.as_deref() == language,
-            ..item(
-                entry.title.clone(),
-                Some(MenuAction::Voice {
-                    voice: entry.voice.clone(),
-                    language: entry.language.clone(),
-                }),
-            )
-        })
-        .collect();
-    let mut nodes = vec![item(format!("Berd Call · {}", mode_name(status)), None)];
-    for error in [&state.action_error, &state.catalog_error]
-        .into_iter()
-        .flatten()
+    let input_policy = input_policy(status);
+    let tts = &status["session"]["tts"];
+    let mut nodes = vec![item("Berd Call", None)];
+    for error in [
+        &state.action_error,
+        &state.catalog_error,
+        &state.download_error,
+    ]
+    .into_iter()
+    .flatten()
     {
         nodes.push(item(format!("Control error: {error}"), None));
     }
+    if let Some(voice) = &state.downloading {
+        nodes.push(item(format!("Downloading {}…", voice.name), None));
+    }
     nodes.extend([
         SEPARATOR,
+        voice_menu(tts, &state.voices, state.downloading.as_ref(), |entry| {
+            MenuAction::Voice {
+                voice: entry.voice.clone(),
+                language: entry.language.clone(),
+            }
+        }),
+        rate_menu(tts, rate_range(status)),
         MenuNode {
-            children: voices,
-            ..item(format!("Voice: {voice}"), None)
+            title: "Mute Input During TTS".into(),
+            children: [
+                ("On", InputDuringTtsPolicy::SuppressInput),
+                ("Off", InputDuringTtsPolicy::AllowBargeIn),
+                ("Auto", InputDuringTtsPolicy::Auto),
+            ]
+            .into_iter()
+            .map(|(title, policy)| MenuNode {
+                checked: input_policy == Some(policy),
+                ..item(title, Some(MenuAction::InputDuringTts(policy)))
+            })
+            .collect(),
+            ..MenuNode::default()
         },
-        MenuNode {
-            children: rates,
-            ..item(format!("Speech Rate: {}", rate_title(rate)), None)
-        },
-        MenuNode {
-            checked: suppressing,
-            ..item(
-                "Mute Input During TTS",
-                Some(MenuAction::InputDuringTts(if suppressing {
-                    InputDuringTtsPolicy::AllowBargeIn
-                } else {
-                    InputDuringTtsPolicy::SuppressInput
-                })),
-            )
-        },
+        status_sounds_menu(status),
         SEPARATOR,
         MenuNode {
             checked: muted,
             key: "m",
             ..item("Mute Microphone", Some(MenuAction::Muted(!muted)))
         },
-        SEPARATOR,
-        end_call,
     ]);
+    nodes.extend([SEPARATOR, end_call]);
     nodes
+}
+
+/// A voice's choices, then the voices in its language that can be downloaded, one at a time.
+fn voice_menu(
+    tts: &Value,
+    voices: &[VoiceChoice],
+    downloading: Option<&VoiceChoice>,
+    choose: impl Fn(&VoiceChoice) -> MenuAction,
+) -> MenuNode {
+    let voice = tts["voice"].as_str().unwrap_or("Unknown");
+    let language = tts["language"].as_str();
+    let chosen =
+        |entry: &VoiceChoice| entry.voice == voice && entry.language.as_deref() == language;
+    let name = voices
+        .iter()
+        .find(|entry| chosen(entry))
+        .map_or(voice, |entry| &entry.name);
+    let (installed, uninstalled): (Vec<_>, Vec<_>) = voices
+        .iter()
+        .partition(|entry| entry.download_bytes.is_none());
+    let downloads: Vec<_> = uninstalled
+        .into_iter()
+        .filter(|entry| entry.language.as_deref() == language)
+        .map(|entry| match (downloading, entry.download_bytes) {
+            (Some(active), _) if active == entry => {
+                item(format!("Downloading {}…", entry.name), None)
+            }
+            (active, bytes) => item(
+                format!(
+                    "{} ({} MB)",
+                    entry.name,
+                    bytes.unwrap_or_default() / 1_000_000
+                ),
+                active
+                    .is_none()
+                    .then(|| MenuAction::DownloadVoice(entry.clone())),
+            ),
+        })
+        .collect();
+    let mut children: Vec<_> = installed
+        .into_iter()
+        .map(|entry| MenuNode {
+            checked: chosen(entry),
+            ..item(
+                match &entry.language {
+                    Some(language) => format!("{} ({language})", entry.name),
+                    None => entry.name.clone(),
+                },
+                Some(choose(entry)),
+            )
+        })
+        .collect();
+    if !downloads.is_empty() {
+        children.extend([
+            SEPARATOR,
+            MenuNode {
+                children: downloads,
+                ..item("Download", None)
+            },
+        ]);
+    }
+    MenuNode {
+        children,
+        ..item(format!("Voice: {name}"), None)
+    }
+}
+
+fn rate_menu(tts: &Value, range: std::ops::RangeInclusive<f32>) -> MenuNode {
+    let rate = tts["rate"].as_f64().unwrap_or(1.0) as f32;
+    MenuNode {
+        children: RATES
+            .iter()
+            .filter(|option| range.contains(option))
+            .map(|&option| MenuNode {
+                checked: (option - rate).abs() < 0.01,
+                ..item(rate_title(option), Some(MenuAction::Rate(option)))
+            })
+            .collect(),
+        ..item(format!("Speech Rate: {}", rate_title(rate)), None)
+    }
+}
+
+/// Whether the call plays Pop while the agent works, and Purr while it waits for you.
+fn status_sounds_menu(status: &Value) -> MenuNode {
+    let mode = serde_json::from_value(status["statusSounds"].clone()).unwrap_or_default();
+    MenuNode {
+        children: STATUS_SOUNDS
+            .iter()
+            .map(|&(option, title)| MenuNode {
+                checked: option == mode,
+                ..item(title, Some(MenuAction::StatusSounds(option)))
+            })
+            .collect(),
+        ..item(
+            format!(
+                "Status Sounds: {}",
+                STATUS_SOUNDS
+                    .iter()
+                    .find(|(option, _)| *option == mode)
+                    .unwrap()
+                    .1
+            ),
+            None,
+        )
+    }
 }
 
 /// Translates a menu action into the control request the CLI would send.
@@ -198,15 +308,17 @@ pub(crate) fn control_request(action: &MenuAction) -> ControlRequest {
         MenuAction::Rate(rate) => ControlRequest::Rate { rate: *rate },
         MenuAction::Muted(muted) => ControlRequest::Muted { muted: *muted },
         MenuAction::InputDuringTts(policy) => ControlRequest::InputDuringTts { policy: *policy },
+        MenuAction::StatusSounds(mode) => ControlRequest::StatusSounds {
+            mode: Some(*mode),
+            status: None,
+        },
+        MenuAction::DownloadVoice(_) => unreachable!("the menu downloads voices itself"),
         MenuAction::Stop => ControlRequest::Stop,
     }
 }
 
-/// The rates `berd-call` accepts for the call's TTS backend and mode.
+/// The rates `berd-call` accepts for the call's TTS backend.
 fn rate_range(status: &Value) -> std::ops::RangeInclusive<f32> {
-    if mode_name(status) == "Expert-Spokesperson" {
-        return 0.25..=1.5;
-    }
     match status["session"]["tts"]["backend"].as_str() {
         Some("siri") => 0.5..=2.0,
         _ => 0.75..=2.0,
@@ -215,20 +327,6 @@ fn rate_range(status: &Value) -> std::ops::RangeInclusive<f32> {
 
 fn input_policy(status: &Value) -> Option<InputDuringTtsPolicy> {
     serde_json::from_value(status["session"]["input_during_tts"]["policy"].clone()).ok()
-}
-
-fn mode_name(status: &Value) -> &'static str {
-    let arguments = status["sessionArguments"].as_array();
-    let expert = arguments.is_some_and(|arguments| {
-        arguments
-            .windows(2)
-            .any(|pair| pair[0] == "--mode" && pair[1] == "expert-spokesperson")
-    });
-    if expert {
-        "Expert-Spokesperson"
-    } else {
-        "Conventional"
-    }
 }
 
 fn rate_title(rate: f32) -> String {
@@ -303,6 +401,15 @@ define_class!(
             else {
                 return;
             };
+            if let MenuAction::DownloadVoice(choice) = action {
+                start_download(
+                    choice,
+                    self.ivars().state.clone(),
+                    self.ivars().commands.clone(),
+                    download_siri_voice,
+                );
+                return;
+            }
             let request = control_request(&action);
             if let Err(error) = self.ivars().commands.try_send(request) {
                 if let Ok(mut state) = self.ivars().state.lock() {
@@ -467,6 +574,12 @@ fn spawn_coordinator(port: u16, state: Arc<Mutex<MenuState>>) -> mpsc::SyncSende
                         .map(|(_, error)| error.clone());
                 }
             }
+            if state
+                .lock()
+                .is_ok_and(|mut state| std::mem::take(&mut state.reload_catalog))
+            {
+                catalog = None;
+            }
             let latest = host_control::request(port, ControlRequest::Status)
                 .ok()
                 .map(|latest| {
@@ -539,6 +652,7 @@ enum ActionDomain {
     Tts,
     Mute,
     InputDuringTts,
+    StatusSounds,
     Stop,
 }
 
@@ -549,6 +663,7 @@ fn action_domain(request: &ControlRequest) -> ActionDomain {
         | ControlRequest::Voice { .. } => ActionDomain::Tts,
         ControlRequest::Muted { .. } => ActionDomain::Mute,
         ControlRequest::InputDuringTts { .. } => ActionDomain::InputDuringTts,
+        ControlRequest::StatusSounds { .. } => ActionDomain::StatusSounds,
         ControlRequest::Stop => ActionDomain::Stop,
         _ => unreachable!("menu only sends supported actions"),
     }
@@ -579,12 +694,50 @@ fn begin_menu_action(
             });
         }
         Err(error) => {
+            // Nothing is listening, so nothing else can end this call.
+            if domain == ActionDomain::Stop {
+                eprintln!("berd-call: {error}; ending the call here");
+                std::process::exit(1);
+            }
             let _ = results.send((generation, domain, Err(error.clone())));
             if let Ok(mut state) = state.lock() {
                 state.action_error = Some(error);
             }
         }
     }
+}
+
+/// Downloads a Siri voice off the main thread, then switches the call to it.
+fn start_download(
+    choice: VoiceChoice,
+    state: Arc<Mutex<MenuState>>,
+    commands: mpsc::SyncSender<ControlRequest>,
+    download: impl FnOnce(&VoiceChoice) -> Result<(), String> + Send + 'static,
+) {
+    if let Ok(mut state) = state.lock() {
+        state.downloading = Some(choice.clone());
+        state.download_error = None;
+    }
+    thread::spawn(move || {
+        let result = download(&choice);
+        let Ok(mut state) = state.lock() else {
+            return;
+        };
+        state.downloading = None;
+        match result {
+            Ok(()) => {
+                state.reload_catalog = true;
+                let request = ControlRequest::Voice {
+                    voice: choice.voice,
+                    language: choice.language,
+                };
+                if let Err(error) = commands.try_send(request) {
+                    state.download_error = Some(error.to_string());
+                }
+            }
+            Err(error) => state.download_error = Some(error),
+        }
+    });
 }
 
 fn menu_action_error(result: Result<Value, String>) -> Option<String> {
@@ -605,11 +758,11 @@ fn available_voices(backend: &str) -> Result<Vec<VoiceChoice>, String> {
         "siri" => berd_call::siri::load_voice_catalog(None)?
             .voices
             .into_iter()
-            .filter(|voice| voice.installed)
             .map(|voice| VoiceChoice {
-                title: format!("{} ({})", voice.name, voice.language),
+                name: voice.display_name,
                 voice: voice.name,
                 language: Some(voice.language),
+                download_bytes: (!voice.installed).then_some(voice.size_bytes),
             })
             .collect(),
         "openai" => crate::openai_voices_report()
@@ -617,20 +770,32 @@ fn available_voices(backend: &str) -> Result<Vec<VoiceChoice>, String> {
             .iter()
             .map(|voice| VoiceChoice {
                 voice: voice.to_string(),
-                title: voice.to_string(),
+                name: voice.to_string(),
                 language: None,
+                download_bytes: None,
             })
             .collect(),
         "pocket" => berd_call::pocket_assets::voices()
             .iter()
             .map(|voice| VoiceChoice {
                 voice: voice.id.to_string(),
-                title: voice.name.to_string(),
+                name: voice.name.to_string(),
                 language: None,
+                download_bytes: None,
             })
             .collect(),
         _ => return Err("voice catalog unavailable for the active backend".into()),
     })
+}
+
+fn download_siri_voice(choice: &VoiceChoice) -> Result<(), String> {
+    let identity = berd_call::siri::SiriVoiceIdentity::new(
+        choice.voice.clone(),
+        choice.language.as_deref().unwrap_or_default(),
+    )?;
+    berd_call::siri::download_voice(&identity, Default::default())
+        .map(drop)
+        .map_err(|error| error.to_string())
 }
 
 fn apply_catalog_result(
@@ -653,6 +818,81 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// Runs `test` again in a child process with `BERD_CALL_MENU_CHILD` set, returning its exit status, or `None` if it was
+    /// still running after five seconds.
+    fn child_exit(test: &str) -> Option<i32> {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                &format!("menu_bar::tests::{test}"),
+                "--test-threads=1",
+            ])
+            .env("BERD_CALL_MENU_CHILD", "1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if let Some(status) = child.try_wait().unwrap() {
+                return status.code();
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        child.kill().unwrap();
+        child.wait().unwrap();
+        None
+    }
+
+    fn in_child() -> bool {
+        std::env::var_os("BERD_CALL_MENU_CHILD").is_some()
+    }
+
+    #[test]
+    fn a_call_that_panics_ends_its_process_with_a_failure() {
+        if in_child() {
+            // As in `run`: the call's worker ends the process while the main thread stays busy with the menu bar.
+            thread::spawn(|| std::process::exit(exit_code(|| panic!("session worker panicked"))));
+            loop {
+                thread::park();
+            }
+        }
+        assert_eq!(
+            child_exit("a_call_that_panics_ends_its_process_with_a_failure"),
+            Some(101)
+        );
+        assert_eq!(exit_code(|| Err("no microphone".into())), 1);
+        assert_eq!(exit_code(|| Ok(())), 0);
+    }
+
+    #[test]
+    fn end_call_ends_its_process_when_the_control_port_is_gone() {
+        if in_child() {
+            let port = std::net::TcpListener::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            let (results, _completed) = mpsc::channel();
+            let state = Mutex::new(MenuState::default());
+            begin_menu_action(
+                port,
+                ControlRequest::Stop,
+                1,
+                ActionDomain::Stop,
+                &results,
+                &state,
+            );
+            loop {
+                thread::park();
+            }
+        }
+        assert_eq!(
+            child_exit("end_call_ends_its_process_when_the_control_port_is_gone"),
+            Some(1)
+        );
+    }
+
     #[test]
     fn recovered_catalog_clears_its_error() {
         let mut catalog = None;
@@ -669,18 +909,15 @@ mod tests {
         assert_eq!(error, None);
     }
 
-    fn status(muted: bool, policy: &str, mode: Option<&str>) -> Value {
-        let mut arguments = vec!["--voice", "Aaron", "--language", "en-US"];
-        if let Some(mode) = mode {
-            arguments.extend(["--mode", mode]);
-        }
+    fn status(muted: bool, policy: &str) -> Value {
         json!({
             "muted": muted,
             "session": {
                 "input_during_tts": {"policy": policy, "revision": 1},
                 "tts": {"backend": "siri", "voice": "Aaron", "language": "en-US", "rate": 1.25, "revision": 3},
             },
-            "sessionArguments": arguments,
+            "sessionArguments": ["--voice", "Aaron", "--language", "en-US"],
+            "statusSounds": "working-and-waiting",
         })
     }
 
@@ -692,13 +929,36 @@ mod tests {
     }
 
     #[test]
+    fn menu_keeps_auto_selected() {
+        let nodes = menu_model(&MenuState {
+            status: Some(status(false, "auto")),
+            ..MenuState::default()
+        });
+        let choices = &find(&nodes, "Mute Input During TTS").children;
+        assert_eq!(
+            choices
+                .iter()
+                .filter(|node| node.checked)
+                .map(|node| node.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Auto"]
+        );
+        assert!(matches!(
+            control_request(find(choices, "Auto").action.as_ref().unwrap()),
+            ControlRequest::InputDuringTts {
+                policy: InputDuringTtsPolicy::Auto
+            }
+        ));
+    }
+
+    #[test]
     fn menu_reflects_live_call_state() {
-        let status = status(true, "suppress_input", Some("expert-spokesperson"));
+        let status = status(true, "suppress_input");
         let nodes = menu_model(&MenuState {
             status: Some(status.clone()),
             ..MenuState::default()
         });
-        find(&nodes, "Berd Call · Expert-Spokesperson");
+        find(&nodes, "Berd Call");
         let checked: Vec<_> = find(&nodes, "Speech Rate: 1.25×")
             .children
             .iter()
@@ -711,8 +971,11 @@ mod tests {
             .iter()
             .map(|node| node.title.as_str())
             .collect();
-        assert_eq!(offered, ["0.5×", "0.75×", "1×", "1.25×", "1.5×"]);
-        let mut openai = self::status(false, "allow_barge_in", None);
+        assert_eq!(
+            offered,
+            ["0.5×", "0.75×", "1×", "1.25×", "1.5×", "1.75×", "2×"]
+        );
+        let mut openai = self::status(false, "allow_barge_in");
         openai["session"]["tts"]["backend"] = json!("openai");
         assert_eq!(rate_range(&openai), 0.75..=2.0);
         assert!(matches!(
@@ -724,17 +987,65 @@ mod tests {
             }
         ));
         assert!(matches!(
-            find(&nodes, "Mute Input During TTS"),
+            find(&find(&nodes, "Mute Input During TTS").children, "On"),
             MenuNode {
                 checked: true,
                 action: Some(MenuAction::InputDuringTts(
-                    InputDuringTtsPolicy::AllowBargeIn
+                    InputDuringTtsPolicy::SuppressInput
                 )),
                 ..
             }
         ));
+        let sounds = find(&nodes, "Status Sounds: While Working and Waiting");
+        assert_eq!(
+            sounds
+                .children
+                .iter()
+                .map(|node| (node.title.as_str(), node.checked))
+                .collect::<Vec<_>>(),
+            [
+                ("Off", false),
+                ("While Working", false),
+                ("While Working and Waiting", true)
+            ]
+        );
+        assert_eq!(
+            serde_json::to_value(control_request(sounds.children[0].action.as_ref().unwrap()))
+                .unwrap(),
+            json!({"command": "status_sounds", "mode": "off", "status": null})
+        );
         assert_eq!(icon_symbol(Some(&status)), "mic.slash");
         find(&menu_model(&MenuState::default()), "End Call");
+    }
+
+    #[test]
+    fn the_menu_groups_voice_settings_above_the_microphone_and_end_call() {
+        let nodes = menu_model(&MenuState {
+            status: Some(status(false, "allow_barge_in")),
+            ..MenuState::default()
+        });
+        let sections: Vec<_> = nodes[1..]
+            .split(|node| node.title.is_empty())
+            .map(|section| {
+                section
+                    .iter()
+                    .map(|node| node.title.as_str())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert_eq!(
+            sections[1..],
+            [
+                vec![
+                    "Voice: Aaron",
+                    "Speech Rate: 1.25×",
+                    "Mute Input During TTS",
+                    "Status Sounds: While Working and Waiting"
+                ],
+                vec!["Mute Microphone"],
+                vec!["End Call"],
+            ]
+        );
     }
 
     #[test]
@@ -762,7 +1073,7 @@ mod tests {
 
     #[test]
     fn voice_menu_marks_the_selected_locale_and_uses_live_voice_requests() {
-        let mut status = status(false, "allow_barge_in", None);
+        let mut status = status(false, "allow_barge_in");
         status["session"]["tts"]["voice"] = json!("Aaron");
         status["session"]["tts"]["language"] = json!("en-US");
         let voices = ["en-US", "en-GB"]
@@ -770,7 +1081,8 @@ mod tests {
             .map(|language| VoiceChoice {
                 voice: "Aaron".into(),
                 language: Some(language.into()),
-                title: format!("Aaron ({language})"),
+                name: "Aaron".into(),
+                download_bytes: None,
             })
             .collect();
         let nodes = menu_model(&MenuState {
@@ -781,10 +1093,154 @@ mod tests {
         let menu = find(&nodes, "Voice: Aaron");
         assert!(menu.children[0].checked);
         assert!(!menu.children[1].checked);
+        assert_eq!(menu.children[1].title, "Aaron (en-GB)");
         assert!(
             matches!(control_request(menu.children[1].action.as_ref().unwrap()),
             ControlRequest::Voice { voice, language: Some(language) } if voice == "Aaron" && language == "en-GB")
         );
+    }
+
+    #[test]
+    fn voice_menu_shows_display_names_for_code_named_voices() {
+        let mut status = status(false, "allow_barge_in");
+        status["session"]["tts"]["voice"] = json!("en-US-F");
+        status["session"]["tts"]["language"] = json!("en-US");
+        let nodes = menu_model(&MenuState {
+            status: Some(status),
+            voices: vec![VoiceChoice {
+                voice: "en-US-F".into(),
+                language: Some("en-US".into()),
+                name: "Zack".into(),
+                download_bytes: None,
+            }],
+            ..MenuState::default()
+        });
+        let menu = find(&nodes, "Voice: Zack");
+        assert_eq!(menu.children[0].title, "Zack (en-US)");
+        assert!(menu.children[0].checked);
+    }
+
+    fn siri_voice(voice: &str, language: &str, download_bytes: Option<u64>) -> VoiceChoice {
+        VoiceChoice {
+            voice: voice.into(),
+            language: Some(language.into()),
+            name: voice.into(),
+            download_bytes,
+        }
+    }
+
+    fn downloadable_state() -> MenuState {
+        MenuState {
+            status: Some(status(false, "allow_barge_in")),
+            voices: vec![
+                siri_voice("Aaron", "en-US", None),
+                siri_voice("Damon", "en-US", Some(325_238_784)),
+                siri_voice("Quinn", "en-US", Some(310_472_704)),
+                siri_voice("Arthur", "en-GB", Some(257_454_080)),
+            ],
+            ..MenuState::default()
+        }
+    }
+
+    #[test]
+    fn voice_menu_offers_its_languages_uninstalled_voices_to_download() {
+        let nodes = menu_model(&downloadable_state());
+        let menu = find(&nodes, "Voice: Aaron");
+        let titles: Vec<_> = menu
+            .children
+            .iter()
+            .map(|node| node.title.as_str())
+            .collect();
+        assert_eq!(titles, ["Aaron (en-US)", "", "Download"]);
+        let downloads = &find(&menu.children, "Download").children;
+        assert_eq!(
+            downloads
+                .iter()
+                .map(|node| node.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Damon (325 MB)", "Quinn (310 MB)"]
+        );
+        assert_eq!(
+            downloads[0].action,
+            Some(MenuAction::DownloadVoice(siri_voice(
+                "Damon",
+                "en-US",
+                Some(325_238_784)
+            )))
+        );
+    }
+
+    #[test]
+    fn a_download_in_progress_shows_and_holds_off_another() {
+        let nodes = menu_model(&MenuState {
+            downloading: Some(siri_voice("Damon", "en-US", Some(325_238_784))),
+            ..downloadable_state()
+        });
+        find(&nodes, "Downloading Damon…");
+        let downloads = &find(&find(&nodes, "Voice: Aaron").children, "Download").children;
+        assert_eq!(downloads[0].title, "Downloading Damon…");
+        assert!(downloads.iter().all(|node| node.action.is_none()));
+    }
+
+    #[test]
+    fn a_finished_download_selects_its_voice_and_a_failed_one_shows_why() {
+        let damon = siri_voice("Damon", "en-US", Some(325_238_784));
+        let state = Arc::new(Mutex::new(downloadable_state()));
+        let (commands, requests) = mpsc::sync_channel(1);
+        start_download(damon.clone(), state.clone(), commands.clone(), |_| Ok(()));
+        let request = requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(
+            matches!(request, ControlRequest::Voice { voice, language: Some(language) } if voice == "Damon" && language == "en-US")
+        );
+        let finished = state.lock().unwrap().clone();
+        assert!(finished.downloading.is_none() && finished.reload_catalog);
+
+        start_download(damon, state.clone(), commands, |_| {
+            Err("not enough space".into())
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while state.lock().unwrap().downloading.is_some() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "download never finished"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(requests.try_recv().is_err());
+        find(
+            &menu_model(&state.lock().unwrap()),
+            "Control error: not enough space",
+        );
+    }
+
+    #[test]
+    fn coordinator_reloads_the_catalog_after_a_download() {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
+        let state = Arc::new(Mutex::new(MenuState {
+            reload_catalog: true,
+            ..MenuState::default()
+        }));
+        let commands = spawn_coordinator(port, state.clone());
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while state.lock().unwrap().reload_catalog {
+            assert!(std::time::Instant::now() < deadline, "catalog not reloaded");
+            if let Ok((mut stream, _)) = listener.accept() {
+                stream.set_nonblocking(false).unwrap();
+                let mut line = String::new();
+                BufReader::new(&stream).read_line(&mut line).unwrap();
+                writeln!(
+                    stream,
+                    "{}",
+                    json!({"ok": true, "value": {"session": {"tts": {"backend": "openai"}}}})
+                )
+                .unwrap();
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        drop(commands);
     }
 
     #[test]

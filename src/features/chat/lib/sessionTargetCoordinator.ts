@@ -35,6 +35,8 @@ export interface SessionTargetTransition {
   dispatchToken?: symbol;
   /** Ensure target-qualified reasoning metadata as part of this operation. */
   requireReasoningEffort?: boolean;
+  /** Reject inventory substitutions before changing the live backend target. */
+  requireExactTarget?: boolean;
 }
 
 export type SessionTargetOutcome =
@@ -284,6 +286,14 @@ async function execute(
     ) {
       resolveSuperseded(actor, operation);
       return;
+    }
+    if (
+      request.requireExactTarget &&
+      !sameSessionExecutionTarget(effective, request.target)
+    ) {
+      throw new Error(
+        "The requested model is unavailable from its configured provider.",
+      );
     }
     transition(actor, { type: "RESOLVED", operationId, effective });
     const sessionBeforePrepare = useChatSessionStore
@@ -727,6 +737,68 @@ export function getSessionDispatchTarget(
     return undefined;
   }
   return dispatch.target;
+}
+
+/** Change a not-yet-dispatched turn's target while retaining its queue lease. */
+export async function transitionSessionDispatchTarget(
+  request: SessionTargetTransition & { dispatchToken: symbol },
+): Promise<SessionTargetOutcome> {
+  const actor = actors.get(request.sessionId);
+  const dispatch = actor?.dispatch;
+  if (!actor || !dispatch || dispatch.token !== request.dispatchToken) {
+    return { status: "superseded", applied: false };
+  }
+  // An explicit picker choice waiting behind this turn must win. Let the
+  // caller release its lease and retry against the new selection.
+  if (
+    actor.deferredSelection ||
+    actor.deferredTargetMutation?.source === "ui"
+  ) {
+    return { status: "superseded", applied: false };
+  }
+  const previousTarget = dispatch.target;
+  const previousReasoning = dispatch.reasoningEffort;
+  const discardDeferredObservation = () => {
+    if (actor.deferredTargetMutation?.source === "acp") {
+      actor.deferredTargetMutation = undefined;
+    }
+  };
+  const publish = (target: SessionExecutionTarget) => {
+    dispatch.target = target;
+    restoringLeasedTarget = true;
+    try {
+      useChatSessionStore
+        .getState()
+        .replaceSessionExecutionTarget(request.sessionId, target);
+    } finally {
+      restoringLeasedTarget = false;
+    }
+  };
+  dispatch.reasoningEffort = undefined;
+  // ACP observations collected before this owned change describe the previous
+  // model. They must not restore it when the successful dispatch releases.
+  actor.deferredTargetMutation = undefined;
+  publish(request.target);
+  try {
+    const outcome = await transitionSessionTarget(request);
+    if (outcome.applied) {
+      // The owned acknowledgement supersedes observations of the previous
+      // model that arrived while preparation was in flight.
+      discardDeferredObservation();
+      dispatch.target = outcome.target;
+      dispatch.reasoningEffort = useChatSessionStore
+        .getState()
+        .getSession(request.sessionId)?.reasoningEffort;
+      return outcome;
+    }
+    publish(previousTarget);
+    dispatch.reasoningEffort = previousReasoning;
+    return outcome;
+  } catch (error) {
+    publish(previousTarget);
+    dispatch.reasoningEffort = previousReasoning;
+    throw error;
+  }
 }
 
 export async function transitionSessionTarget(

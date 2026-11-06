@@ -31,6 +31,12 @@ pub trait PcmAudioOutput {
     /// Returns whether all queued source frames have drained.
     fn is_drained(&self) -> bool;
 
+    /// Returns whether playback is deliberately held after a suspension acknowledgement.
+    /// Drain deadlines exclude this hold, while cancellation and health checks continue.
+    fn drain_timeout_paused(&self) -> bool {
+        false
+    }
+
     /// Checks for a playback failure that may occur after a successful write.
     fn check_health(&self) -> Result<(), String>;
 

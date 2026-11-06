@@ -140,6 +140,19 @@ release_provenance_name() {
   printf '%s_%s_%s.provenance.json' "$APP_BUNDLE_NAME" "$version" "$platform"
 }
 
+# Standalone `berd-call` for hosts, such as Buzz, that ship the CLI without Berd.app.
+release_call_archive_name() {
+  local version="$1"
+  local platform="$2"
+  validate_release_version "$version" || return 1
+  validate_release_platform "$platform" || return 1
+  [[ "$platform" == darwin-* ]] || {
+    release_error "no standalone berd-call archive for platform: $platform"
+    return 1
+  }
+  printf 'berd-call_%s_%s.tar.gz' "$version" "$platform"
+}
+
 release_installer_name() {
   local version="$1"
   local platform="$2"

@@ -7,6 +7,7 @@ import {
 } from "./sessionExecutionTarget";
 
 interface NewChatRequest {
+  autoModeId?: string | null;
   title: string;
   projectId?: string;
   executionTarget?: SessionExecutionTarget;
@@ -37,6 +38,7 @@ function isMatchingContext(
   request: Omit<NewChatRequest, "title">,
 ): boolean {
   return (
+    (session.autoModeId ?? null) === (request.autoModeId ?? null) &&
     session.projectId === request.projectId &&
     normalizeRemoteHost(session.remoteHost) ===
       normalizeRemoteHost(request.remoteHost) &&

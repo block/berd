@@ -1,3 +1,9 @@
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { refreshRuntimeConfigForNewChat } from "@/shared/runtime-config/newChatRuntimeConfig";
+import {
+  getSelectedAutoModeId,
+  getAutoModeExecutionTarget,
+} from "@/features/chat/lib/autoModelSelection";
 import { projectEnvironment } from "@/features/projects/lib/projectEnvironment";
 import {
   useCallback,
@@ -252,11 +258,6 @@ import {
 } from "@/features/voice-conversation/lib/voiceInputPreference";
 import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
 import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
-import { getVoiceConversationMode } from "@/features/voice-conversation/lib/voiceConversationModePreference";
-import {
-  requestOpenAiRealtimeConversationStart,
-  stopOpenAiRealtimeConversation,
-} from "@/features/voice-conversation/hooks/useOpenAiRealtimeConversation";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import {
@@ -319,6 +320,8 @@ type DraftSessionCreationReady = {
   >["configOptionsSnapshot"];
 };
 type ProjectChatDraftOptions = {
+  autoModeId?: string | null;
+  useDefaultAutoMode?: boolean;
   remoteHost?: string;
   remoteWorkingDir?: string;
   executionTarget?: SessionExecutionTarget;
@@ -789,12 +792,9 @@ export function AppShell({
       return;
     }
     // Voice resources can survive renderer navigation or be owned by another
-    // window, so an explicit on-to-off transition must stop both pipelines.
+    // window, so an explicit on-to-off transition must stop it.
     // Mounting with the experiment already off performs no voice cleanup.
-    void Promise.allSettled([
-      stopVoiceConversation(),
-      stopOpenAiRealtimeConversation(),
-    ]);
+    void stopVoiceConversation().catch(() => undefined);
   }, [capabilities.voiceConversation, stopVoiceConversation]);
   const sessions = useChatSessionStore(selectSessions);
   const activeSessionId = useChatSessionStore(selectActiveSessionId);
@@ -2272,6 +2272,8 @@ export function AppShell({
       options: {
         activate?: boolean;
         reuseExistingDraft?: boolean;
+        autoModeId?: string | null;
+        useDefaultAutoMode?: boolean;
         executionTarget?: SessionExecutionTarget;
         reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
         /** SSH host to run the session's backend on. */
@@ -2300,8 +2302,20 @@ export function AppShell({
       perfLog(
         `[perf:newtab] createNewTab start (project=${sessionProject?.id ?? "none"})`,
       );
-      const sessionExecutionTarget =
-        await resolveSessionCreationTarget(options);
+      await refreshRuntimeConfigForNewChat();
+      const autoModeId = options.useDefaultAutoMode
+        ? useRuntimeConfigStore.getState().config.goose.autoRouting
+            ?.defaultModeId
+        : options.autoModeId !== undefined
+          ? options.autoModeId
+          : options.executionTarget
+            ? null
+            : getSelectedAutoModeId();
+      const sessionExecutionTarget = await resolveSessionCreationTarget({
+        ...options,
+        executionTarget:
+          getAutoModeExecutionTarget(autoModeId) ?? options.executionTarget,
+      });
       if (!sessionExecutionTarget) return undefined;
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
@@ -2317,6 +2331,7 @@ export function AppShell({
           title,
           projectId: sessionProject?.id,
           executionTarget: sessionExecutionTarget,
+          autoModeId,
           reasoningEffortValue: options.reasoningEffort?.value,
           remoteHost,
         },
@@ -2358,6 +2373,7 @@ export function AppShell({
           title,
           projectId: sessionProject?.id,
           executionTarget: sessionExecutionTarget,
+          autoModeId,
           workingDir,
           remoteHost,
         });
@@ -2377,6 +2393,7 @@ export function AppShell({
         title,
         projectId: sessionProject?.id,
         executionTarget: sessionExecutionTarget,
+        autoModeId,
         workingDir: optimisticWorkingDir,
         remoteHost,
       });
@@ -2519,8 +2536,20 @@ export function AppShell({
       perfLog(
         `[perf:newtab] createNewProjectDraft start (project=${project.id})`,
       );
-      const sessionExecutionTarget =
-        await resolveSessionCreationTarget(options);
+      await refreshRuntimeConfigForNewChat();
+      const autoModeId = options.useDefaultAutoMode
+        ? useRuntimeConfigStore.getState().config.goose.autoRouting
+            ?.defaultModeId
+        : options.autoModeId !== undefined
+          ? options.autoModeId
+          : options.executionTarget
+            ? null
+            : getSelectedAutoModeId();
+      const sessionExecutionTarget = await resolveSessionCreationTarget({
+        ...options,
+        executionTarget:
+          getAutoModeExecutionTarget(autoModeId) ?? options.executionTarget,
+      });
       if (!sessionExecutionTarget) return undefined;
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
@@ -2539,6 +2568,7 @@ export function AppShell({
           title,
           projectId: project.id,
           executionTarget: sessionExecutionTarget,
+          autoModeId,
           reasoningEffortValue: options.reasoningEffort?.value,
         },
         allowDraftReuse: options.reuseExistingDraft !== false && !needsStartup,
@@ -2561,6 +2591,7 @@ export function AppShell({
         title,
         projectId: project.id,
         executionTarget: sessionExecutionTarget,
+        autoModeId,
         workingDir: getOptimisticSessionCwd(project),
         workspaceAttachments: needsStartup
           ? asIs?.workspaceAttachments.filter(
@@ -2603,6 +2634,8 @@ export function AppShell({
       title = DEFAULT_CHAT_TITLE,
       project?: ProjectInfo,
       options: {
+        autoModeId?: string | null;
+        useDefaultAutoMode?: boolean;
         executionTarget?: SessionExecutionTarget;
         reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
         remoteHost?: string;
@@ -2626,8 +2659,20 @@ export function AppShell({
       perfLog(
         `[perf:newtab] createBackgroundDraftChat start (project=${sessionProject?.id ?? "none"})`,
       );
-      const sessionExecutionTarget =
-        await resolveSessionCreationTarget(options);
+      await refreshRuntimeConfigForNewChat();
+      const autoModeId = options.useDefaultAutoMode
+        ? useRuntimeConfigStore.getState().config.goose.autoRouting
+            ?.defaultModeId
+        : options.autoModeId !== undefined
+          ? options.autoModeId
+          : options.executionTarget
+            ? null
+            : getSelectedAutoModeId();
+      const sessionExecutionTarget = await resolveSessionCreationTarget({
+        ...options,
+        executionTarget:
+          getAutoModeExecutionTarget(autoModeId) ?? options.executionTarget,
+      });
       if (!sessionExecutionTarget) return undefined;
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
@@ -2641,6 +2686,7 @@ export function AppShell({
           title,
           projectId: sessionProject?.id,
           executionTarget: sessionExecutionTarget,
+          autoModeId,
           reasoningEffortValue: options.reasoningEffort?.value,
           remoteHost,
         },
@@ -2669,6 +2715,7 @@ export function AppShell({
         title,
         projectId: sessionProject?.id,
         executionTarget: sessionExecutionTarget,
+        autoModeId,
         workingDir: optimisticWorkingDir,
         remoteHost,
       });
@@ -3078,6 +3125,8 @@ export function AppShell({
       }
 
       const chatOptions = {
+        autoModeId: options?.autoModeId,
+        useDefaultAutoMode: options?.useDefaultAutoMode,
         executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
         remoteHost: options?.remoteHost,
@@ -3319,6 +3368,8 @@ export function AppShell({
         ? projects.find((candidate) => candidate.id === options.projectId)
         : undefined;
       const chatOptions = {
+        autoModeId: options?.autoModeId,
+        useDefaultAutoMode: options?.useDefaultAutoMode,
         executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
         remoteHost: options?.remoteHost,
@@ -3407,8 +3458,7 @@ export function AppShell({
   const handleGlobalVoiceConversationStart = useCallback(
     (payload: GlobalComposerExpandPayload): Promise<boolean> => {
       if (!capabilities.voiceConversation) return Promise.resolve(false);
-      const realtimeMode = getVoiceConversationMode() === "openai-realtime";
-      if (!realtimeMode && !globalVoiceReady) {
+      if (!globalVoiceReady) {
         return new Promise<boolean>((resolve) => {
           guardAppNavigation(
             () => {
@@ -3426,12 +3476,10 @@ export function AppShell({
         ? projects.find((candidate) => candidate.id === options.projectId)
         : undefined;
       const chatOptions = {
-        // Realtime voice belongs to the chat the user is about to see. Use
-        // the ordinary optimistic chat lifecycle so the mounted transcript
-        // owns the same ACP notification stream as a normal Berd session.
-        // The realtime runtime follows the draft id through promotion.
-        activate: realtimeMode,
+        activate: false,
         reuseExistingDraft: false,
+        autoModeId: options?.autoModeId,
+        useDefaultAutoMode: options?.useDefaultAutoMode,
         executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
         remoteHost: options?.remoteHost,
@@ -3439,9 +3487,6 @@ export function AppShell({
       };
 
       const createAndStart = async () => {
-        if (realtimeMode) {
-          await stopOpenAiRealtimeConversation();
-        }
         const voice = useVoiceConversationStore.getState();
         if (
           voice.status.lifecycle === "starting" ||
@@ -3484,8 +3529,7 @@ export function AppShell({
         chatState.setDraft(sessionId, payload.text);
         chatState.setSkillDrafts(sessionId, payload.selectedSkills);
         chatState.setDraftAttachments(sessionId, options?.attachments ?? []);
-        if (realtimeMode) requestOpenAiRealtimeConversationStart(session.id);
-        else requestVoiceConversationStart(sessionId);
+        requestVoiceConversationStart(sessionId);
         handleNavigateToSession(sessionId);
         resetGlobalComposerTransition();
         return true;

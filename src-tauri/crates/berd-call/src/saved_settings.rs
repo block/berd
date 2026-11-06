@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use berd_call::{input::InputDuringTtsPolicy, TtsSettings};
+use berd_call::{input::InputDuringTtsPolicy, StatusSoundMode, TtsSettings};
 use serde::{Deserialize, Serialize};
 
 /// Call preferences only. Agent identity, transcript routing and credentials
@@ -12,7 +12,15 @@ pub(crate) struct SavedSettings {
     pub arguments: Vec<String>,
     pub tts: Option<TtsSettings>,
     pub input_policy: Option<InputDuringTtsPolicy>,
+    // Left out until chosen, so a file without one still opens in older berd-call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_sounds: Option<StatusSoundMode>,
+    // Read preferences written by the optional debug-sound build without saving its setting.
+    #[serde(default, rename = "vad_debug_sounds", skip_serializing)]
+    pub _legacy_debug_sounds: Option<serde::de::IgnoredAny>,
 }
+
+const REMOVED_FLAGS: [&str; 3] = ["--mode", "--spokesperson-voice", "--spokesperson-rate"];
 
 pub(crate) fn path() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("BERD_CALL_SETTINGS_FILE") {
@@ -40,8 +48,27 @@ pub(crate) fn load(path: &Path) -> Result<SavedSettings, String> {
     if bytes.len() > 65536 {
         return Err("saved call settings exceed 64 KiB".into());
     }
-    let settings: SavedSettings = serde_json::from_slice(&bytes)
+    let mut settings: SavedSettings = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid saved call settings: {error}"))?;
+    // Spokesperson calls without agent speech saved the Realtime model and its
+    // speed, which can be slower than speech allows, as their speech settings.
+    let realtime = matches!(&settings.tts, Some(TtsSettings::OpenAi { model, .. }) if model.to_ascii_lowercase().contains("realtime"));
+    if realtime {
+        settings.tts = None;
+    }
+    // Calls once chose a mode and a Spokesperson voice. Those options, and a
+    // Realtime speed, fall back to the defaults, and the next save overwrites them.
+    if settings.arguments.len().is_multiple_of(2) {
+        settings.arguments = settings
+            .arguments
+            .chunks_exact(2)
+            .filter(|pair| {
+                !REMOVED_FLAGS.contains(&pair[0].as_str()) && !(realtime && pair[0] == "--rate")
+            })
+            .flatten()
+            .cloned()
+            .collect();
+    }
     validate_arguments(&settings.arguments)?;
     Ok(settings)
 }
@@ -93,7 +120,6 @@ fn validate_arguments(arguments: &[String]) -> Result<(), String> {
                 pair[0].as_str(),
                 "--tts-backend"
                     | "--stt-backend"
-                    | "--mode"
                     | "--voice"
                     | "--language"
                     | "--rate"
@@ -128,12 +154,7 @@ pub(crate) fn merge_arguments(saved: &[String], explicit: &[String]) -> Vec<Stri
 pub(crate) fn persistable_arguments(arguments: &[String]) -> Vec<String> {
     arguments
         .chunks_exact(2)
-        .filter(|pair| {
-            !matches!(
-                pair[0].as_str(),
-                "--realtime-url" | "--stt-url" | "--tts-url"
-            )
-        })
+        .filter(|pair| !matches!(pair[0].as_str(), "--stt-url" | "--tts-url" | "--stt-hint"))
         .flatten()
         .cloned()
         .collect()
@@ -156,6 +177,59 @@ pub(crate) fn without_tts(arguments: &[String]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_preferences_are_ignored_without_losing_other_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let settings = SavedSettings {
+            arguments: vec!["--rate".into(), "1.5".into()],
+            tts: Some(TtsSettings::Siri {
+                voice: "Aaron".into(),
+                language: "en-GB".into(),
+                rate: 1.5,
+            }),
+            input_policy: Some(InputDuringTtsPolicy::SuppressInput),
+            status_sounds: Some(StatusSoundMode::WorkingAndWaiting),
+            ..Default::default()
+        };
+        let expected = serde_json::to_value(&settings).unwrap();
+        let mut legacy = expected.clone();
+        legacy["vad_debug_sounds"] = serde_json::json!(true);
+        std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let restored = load(&path).unwrap();
+        assert_eq!(serde_json::to_value(&restored).unwrap(), expected);
+        save(&path, &restored).unwrap();
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(written.get("vad_debug_sounds").is_none());
+        assert_eq!(written, expected);
+        assert_eq!(
+            serde_json::to_value(load(&path).unwrap()).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn auto_and_explicit_input_preferences_survive_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        for policy in [
+            InputDuringTtsPolicy::Auto,
+            InputDuringTtsPolicy::AllowBargeIn,
+            InputDuringTtsPolicy::SuppressInput,
+        ] {
+            save(
+                &path,
+                &SavedSettings {
+                    input_policy: Some(policy),
+                    ..SavedSettings::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(load(&path).unwrap().input_policy, Some(policy));
+        }
+    }
 
     #[test]
     fn saved_settings_survive_reopen_and_explicit_backend_clears_dependent_flags() {
@@ -207,8 +281,6 @@ mod tests {
     #[test]
     fn removing_tts_preferences_preserves_other_call_preferences() {
         let arguments = [
-            "--mode",
-            "chained",
             "--stt-backend",
             "macos",
             "--tts-backend",
@@ -222,9 +294,101 @@ mod tests {
         ]
         .map(str::to_string);
 
+        assert_eq!(without_tts(&arguments), ["--stt-backend", "macos"]);
+    }
+
+    #[test]
+    fn removed_mode_and_spokesperson_options_fall_back_to_defaults_and_are_overwritten() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "arguments": [
+                    "--mode", "expert-spokesperson",
+                    "--voice", "Aaron",
+                    "--spokesperson-voice", "cedar",
+                    "--spokesperson-rate", "1"
+                ],
+                "tts": null,
+                "input_policy": "suppress_input",
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let restored = load(&path).unwrap();
+        assert_eq!(restored.arguments, ["--voice", "Aaron"]);
         assert_eq!(
-            without_tts(&arguments),
-            ["--mode", "chained", "--stt-backend", "macos"]
+            restored.input_policy,
+            Some(InputDuringTtsPolicy::SuppressInput)
         );
+        update(&path, |latest| {
+            latest.status_sounds = Some(StatusSoundMode::Off)
+        })
+        .unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        for removed in ["--mode", "expert-spokesperson", "spokesperson"] {
+            assert!(
+                !written.contains(removed),
+                "{removed} survived in {written}"
+            );
+        }
+        assert_eq!(load(&path).unwrap().arguments, ["--voice", "Aaron"]);
+    }
+
+    fn saved_with_tts(model: &str, rate: f32) -> serde_json::Value {
+        serde_json::json!({
+            "arguments": ["--mode", "expert-spokesperson", "--tts-backend", "openai", "--rate", rate.to_string()],
+            "tts": {"backend": "openai", "model": model, "voice": "cedar", "rate": rate},
+        })
+    }
+
+    #[test]
+    fn a_realtime_model_saved_as_speech_settings_falls_back_and_is_overwritten() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        std::fs::write(&path, saved_with_tts("gpt-realtime-2.1", 0.5).to_string()).unwrap();
+        let restored = load(&path).unwrap();
+        assert_eq!(restored.tts, None);
+        assert_eq!(restored.arguments, ["--tts-backend", "openai"]);
+        update(&path, |latest| {
+            latest.status_sounds = Some(StatusSoundMode::Off)
+        })
+        .unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("realtime"), "survived in {written}");
+        assert_eq!(load(&path).unwrap().tts, None);
+    }
+
+    #[test]
+    fn speech_settings_for_a_speech_model_survive_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        std::fs::write(&path, saved_with_tts("gpt-4o-mini-tts", 1.2).to_string()).unwrap();
+        assert_eq!(
+            load(&path).unwrap().tts,
+            Some(TtsSettings::OpenAi {
+                model: "gpt-4o-mini-tts".into(),
+                voice: "cedar".into(),
+                rate: 1.2,
+            })
+        );
+    }
+}
+
+#[cfg(test)]
+mod speech_hint_tests {
+    #[test]
+    fn conversation_hints_are_not_saved_for_other_calls() {
+        let args = [
+            "--voice",
+            "Aaron",
+            "--stt-hint",
+            "Nora",
+            "--stt-hint",
+            "Zack",
+        ]
+        .map(String::from);
+        assert_eq!(super::persistable_arguments(&args), ["--voice", "Aaron"]);
     }
 }

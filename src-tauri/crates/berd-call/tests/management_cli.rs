@@ -34,7 +34,7 @@ fn management_usage_errors_are_exit_two_and_do_not_emit_json() {
         assert!(
             String::from_utf8(output.stderr)
                 .expect("UTF-8 stderr")
-                .contains("usage:"),
+                .contains("Usage:"),
             "{args:?}"
         );
     }

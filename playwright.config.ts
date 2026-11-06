@@ -18,6 +18,28 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   projects: [
+    ...(process.env.GOOSE_BIN &&
+    process.env.GOOSE_SOURCE_DIR &&
+    process.env.GOOSE_EXPECTED_COMMIT &&
+    process.env.GOOSE_EXPECTED_SHA256
+      ? [
+          {
+            name: "capacity-errors",
+            testMatch: ["**/capacity-errors.spec.ts"],
+            use: { ...devices["Desktop Chrome"], screenshot: "off" as const },
+          },
+        ]
+      : []),
+    {
+      name: "monitor-status",
+      testMatch: ["**/monitor-status.spec.ts"],
+      use: {
+        ...devices["Desktop Chrome"],
+        screenshot: "off",
+        video: "off",
+        trace: "off",
+      },
+    },
     {
       name: "smoke",
       testMatch: ["**/smoke.spec.ts"],
@@ -83,7 +105,7 @@ export default defineConfig({
     },
     {
       name: "notifications",
-      testMatch: ["**/notifications.spec.ts"],
+      testMatch: ["**/notifications.spec.ts", "**/fixtures/tauri-mock.spec.ts"],
       use: {
         ...devices["Desktop Chrome"],
       },
@@ -92,6 +114,7 @@ export default defineConfig({
       name: "voice-conversation",
       testMatch: [
         "**/voice-conversation.spec.ts",
+        "**/voice-markdown-boundary.spec.ts",
         "**/voice-endpoints.spec.ts",
         "**/voice-settings-visual.spec.ts",
       ],

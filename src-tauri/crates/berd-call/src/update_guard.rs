@@ -1,4 +1,4 @@
-//! Coordinates a running standalone call with installation of a Berd app update.
+//! Coordinates a running standalone call with installation of a Berd app or standalone CLI update.
 
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -214,6 +215,32 @@ impl TtsConfiguration {
         }
     }
 
+    /// This configuration in another of its backend's voices.
+    fn with_voice(mut self, name: &str, locale: Option<&str>) -> Result<Self, String> {
+        match &mut self {
+            Self::Siri {
+                voice, language, ..
+            } => {
+                *voice = name.into();
+                if let Some(locale) = locale {
+                    *language = locale.into();
+                }
+            }
+            Self::OpenAi { voice, .. } | Self::Pocket { voice, .. } => {
+                if locale.is_some() {
+                    return Err("only Siri voices take a language".into());
+                }
+                *voice = name.into();
+            }
+        }
+        if let Self::OpenAi { voice, .. } = &self {
+            if !crate::openai::OPENAI_VOICE_IDS.contains(&voice.as_str()) {
+                return Err(format!("OpenAI has no voice named {voice}"));
+            }
+        }
+        Ok(self)
+    }
+
     fn build(&self) -> Result<Arc<dyn TtsBackend>, String> {
         validate_settings(&self.settings())?;
         match self {
@@ -291,6 +318,8 @@ struct ConfiguredTtsState {
     configuration: TtsConfiguration,
     backend: Arc<dyn TtsBackend>,
     snapshot: TtsConfigurationSnapshot,
+    /// Backends for other voices, built for single utterances at this revision.
+    voices: HashMap<(String, Option<String>), TtsConfigurationLease>,
 }
 
 pub struct ConfiguredTtsSlot {
@@ -364,6 +393,7 @@ impl ConfiguredTtsSlot {
                     revision: 1,
                     settings,
                 },
+                voices: HashMap::new(),
             }),
         }
     }
@@ -384,6 +414,46 @@ impl ConfiguredTtsSlot {
             backend: Arc::clone(&state.backend),
             snapshot: state.snapshot.clone(),
         })
+    }
+
+    /// Whether `lease_voice` already has this voice built.
+    pub fn has_voice(&self, voice: &str, language: Option<&str>) -> bool {
+        self.inner.lock().is_ok_and(|state| {
+            state
+                .voices
+                .contains_key(&(voice.to_string(), language.map(str::to_string)))
+        })
+    }
+
+    /// The configured backend speaking one utterance in another of its voices,
+    /// keeping the other settings. Building it doesn't hold the slot lock.
+    pub fn lease_voice(
+        &self,
+        voice: &str,
+        language: Option<&str>,
+    ) -> Result<TtsConfigurationLease, String> {
+        let key = (voice.to_string(), language.map(str::to_string));
+        let poisoned = || "configured TTS lock was poisoned".to_string();
+        let (configuration, revision) = {
+            let state = self.inner.lock().map_err(|_| poisoned())?;
+            if let Some(lease) = state.voices.get(&key) {
+                return Ok(lease.clone());
+            }
+            (state.configuration.clone(), state.snapshot.revision)
+        };
+        let configuration = configuration.with_voice(voice, language)?;
+        let lease = TtsConfigurationLease {
+            backend: configuration.build()?,
+            snapshot: TtsConfigurationSnapshot {
+                revision,
+                settings: configuration.settings(),
+            },
+        };
+        let mut state = self.inner.lock().map_err(|_| poisoned())?;
+        if state.snapshot.revision == revision {
+            state.voices.insert(key, lease.clone());
+        }
+        Ok(lease)
     }
 
     /// Builds and validates a replacement without holding the slot lock.
@@ -475,6 +545,7 @@ impl ConfiguredTtsSlot {
                 })?;
         state.configuration = replacement.configuration;
         state.backend = replacement.backend;
+        state.voices.clear();
         state.snapshot = TtsConfigurationSnapshot {
             revision,
             settings: replacement.settings,
@@ -552,6 +623,38 @@ mod tests {
                 settings,
             })
         }
+    }
+
+    #[test]
+    fn one_utterance_can_use_another_voice_without_changing_the_slot() {
+        let settings = |voice: &str| TtsSettings::OpenAi {
+            model: "gpt-4o-mini-tts".into(),
+            voice: voice.into(),
+            rate: 1.25,
+        };
+        let slot = ConfiguredTtsSlot::new_for_test(settings("marin"));
+        let cedar = slot.lease_voice("cedar", None).unwrap();
+        assert_eq!(cedar.snapshot().settings, settings("cedar"));
+        assert!(Arc::ptr_eq(
+            cedar.backend(),
+            slot.lease_voice("cedar", None).unwrap().backend()
+        ));
+        assert_eq!(slot.snapshot().unwrap().settings, settings("marin"));
+        assert!(slot
+            .lease_voice("nobody", None)
+            .err()
+            .unwrap()
+            .contains("no voice named nobody"));
+        assert!(slot
+            .lease_voice("cedar", Some("en-US"))
+            .err()
+            .unwrap()
+            .contains("language"));
+        slot.replace_for_test(1, settings("ash")).unwrap();
+        assert!(!Arc::ptr_eq(
+            cedar.backend(),
+            slot.lease_voice("cedar", None).unwrap().backend()
+        ));
     }
 
     #[test]

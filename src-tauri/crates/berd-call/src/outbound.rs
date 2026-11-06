@@ -453,16 +453,21 @@ impl<'a> OutboundPlayback<'a> {
         on_poll: &mut dyn FnMut(&DeliveryProgress) -> Result<(), String>,
     ) -> Result<OutboundOutcome, OutboundFailure> {
         self.ensure_live()?;
-        let started_at = Instant::now();
+        let mut last_poll = Instant::now();
+        let mut elapsed = Duration::ZERO;
+        let mut timeout_paused = self.output.drain_timeout_paused();
         let mut forced_complete = false;
         while !self.output.is_drained() {
+            let now = Instant::now();
+            if !timeout_paused {
+                elapsed += now.duration_since(last_poll);
+            }
+            last_poll = now;
+            timeout_paused = self.output.drain_timeout_paused();
             if !self.active.load(Ordering::SeqCst) {
                 return self.interrupt();
             }
-            if policy
-                .timeout
-                .is_some_and(|timeout| started_at.elapsed() >= timeout)
-            {
+            if policy.timeout.is_some_and(|timeout| elapsed >= timeout) {
                 if policy.timeout_outcome == DrainTimeoutOutcome::Complete {
                     self.remember_delivery_and_cancel()?;
                     forced_complete = true;
@@ -756,6 +761,7 @@ mod tests {
         drain_after: AtomicUsize,
         cancelled: AtomicBool,
         fail_health: AtomicBool,
+        suspended: AtomicBool,
     }
 
     impl FakeOutput {
@@ -767,6 +773,7 @@ mod tests {
                 drain_after: AtomicUsize::new(drain_after),
                 cancelled: AtomicBool::new(false),
                 fail_health: AtomicBool::new(false),
+                suspended: AtomicBool::new(false),
             }
         }
     }
@@ -783,6 +790,9 @@ mod tests {
         fn is_drained(&self) -> bool {
             self.drain_polls.fetch_add(1, Ordering::SeqCst)
                 >= self.drain_after.load(Ordering::SeqCst)
+        }
+        fn drain_timeout_paused(&self) -> bool {
+            self.suspended.load(Ordering::SeqCst)
         }
         fn check_health(&self) -> Result<(), String> {
             if self.fail_health.load(Ordering::SeqCst) {
@@ -1112,6 +1122,82 @@ mod tests {
                 &mut |_| Ok(()),
             )
             .is_err());
+    }
+
+    #[test]
+    fn acknowledged_suspension_does_not_exhaust_the_drain_deadline() {
+        let active = AtomicBool::new(true);
+        let output = FakeOutput::new(3);
+        output.suspended.store(true, Ordering::SeqCst);
+        let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
+        let mut resumed = false;
+        let outcome = playback
+            .finish(
+                DrainPolicy {
+                    poll_interval: Duration::from_millis(1),
+                    timeout: Some(Duration::from_millis(40)),
+                    ..DrainPolicy::default()
+                },
+                &mut |_| {
+                    if !resumed {
+                        std::thread::sleep(Duration::from_millis(100));
+                        output.suspended.store(false, Ordering::SeqCst);
+                        resumed = true;
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(outcome, OutboundOutcome::Completed);
+        assert!(resumed);
+        assert!(!output.cancelled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn suspended_drain_still_observes_cancellation_and_health_failure() {
+        for fail in [false, true] {
+            let active = AtomicBool::new(true);
+            let output = FakeOutput::new(usize::MAX);
+            output.suspended.store(true, Ordering::SeqCst);
+            let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
+            let outcome = playback.finish(DrainPolicy::default(), &mut |_| {
+                if fail {
+                    output.fail_health.store(true, Ordering::SeqCst);
+                } else {
+                    active.store(false, Ordering::SeqCst);
+                }
+                Ok(())
+            });
+            if fail {
+                assert_eq!(outcome.unwrap_err().message, "fake output failed");
+            } else {
+                assert_eq!(outcome.unwrap(), OutboundOutcome::Interrupted);
+            }
+            assert!(output.cancelled.load(Ordering::SeqCst));
+        }
+    }
+
+    #[test]
+    fn resumed_drain_still_has_a_bounded_failure() {
+        let active = AtomicBool::new(true);
+        let output = FakeOutput::new(usize::MAX);
+        output.suspended.store(true, Ordering::SeqCst);
+        let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
+        let failure = playback
+            .finish(
+                DrainPolicy {
+                    poll_interval: Duration::from_millis(1),
+                    timeout: Some(Duration::from_millis(40)),
+                    ..DrainPolicy::default()
+                },
+                &mut |_| {
+                    output.suspended.store(false, Ordering::SeqCst);
+                    Ok(())
+                },
+            )
+            .unwrap_err();
+        assert!(failure.message.contains("deadline"));
+        assert!(output.cancelled.load(Ordering::SeqCst));
     }
 
     #[test]

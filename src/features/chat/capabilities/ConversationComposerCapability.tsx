@@ -15,6 +15,10 @@ import {
   useSessionAddressedComposerAdmission,
   type SessionAddressedComposerAdmission,
 } from "@/features/chat/hooks/useSessionAddressedComposerAdmission";
+import {
+  MonitorStatus,
+  useRunningMonitors,
+} from "@/features/monitors/MonitorStatus";
 
 export type ConversationComposerTarget =
   | {
@@ -143,7 +147,6 @@ interface ConversationComposerCapabilityProps {
   onRecallLastUserMessage?: () => string | null;
   attachmentDropTargetRef?: RefObject<HTMLDivElement | null>;
   onAttachmentDragOverChange?: (isDragOver: boolean) => void;
-  onUserTextCommitted?: (text: string) => void;
 }
 
 export function ConversationComposerCapability({
@@ -153,7 +156,6 @@ export function ConversationComposerCapability({
   onRecallLastUserMessage,
   attachmentDropTargetRef,
   onAttachmentDragOverChange,
-  onUserTextCommitted,
 }: ConversationComposerCapabilityProps) {
   const { t } = useTranslation("chat");
   const {
@@ -181,19 +183,6 @@ export function ConversationComposerCapability({
       : undefined;
   const isReadOnly = Boolean(readOnlyReason);
   const lifecycle = renderingPolicy.lifecycleConstraints;
-  const sendWithCommitNotification = useCallback(
-    (...args: Parameters<typeof onSend>) => {
-      const [text, personaId, attachments, options] = args;
-      return onSend(text, personaId, attachments, {
-        ...options,
-        onUserMessageCommitted: () => {
-          options?.onUserMessageCommitted?.();
-          onUserTextCommitted?.(text);
-        },
-      });
-    },
-    [onSend, onUserTextCommitted],
-  );
   const securityConfirmationPending =
     target.kind === "existingSession" &&
     target.admission.securityConfirmationPending;
@@ -217,6 +206,34 @@ export function ConversationComposerCapability({
   const deferredWorkspaceStartup = summarizeProjectWorkspaceStartup(
     workspaceSetup?.desired ?? [],
   );
+  const monitorSessionId =
+    !isPendingConversation && !controller.selectedRemoteHost
+      ? target.sessionId
+      : null;
+  const { data: runningMonitors = [] } = useRunningMonitors(monitorSessionId);
+  const showMonitorStatus = runningMonitors.length > 0;
+  const workspaceAccessory = controller.unresolvedDeferredSend ? (
+    <p className="text-xs text-destructive" role="alert">
+      {controller.deferredWorkspaceError}
+    </p>
+  ) : !isPendingConversation &&
+    !isReadOnly &&
+    deferredWorkspaceStartup.worktreeCount > 0 &&
+    (workspaceSetup?.status === "choice" ||
+      workspaceSetup?.status === "naming" ||
+      workspaceSetup?.status === "creating") ? (
+    <WorkspaceSetupChoice
+      state={workspaceSetup.status}
+      worktreeCount={deferredWorkspaceStartup.worktreeCount}
+      branchCount={deferredWorkspaceStartup.branchCount}
+      exactCounts={deferredWorkspaceStartup.exact}
+      error={workspaceSetup.error}
+      onCancelName={controller.cancelDeferredWorkspaceName}
+      onCreate={controller.createDeferredWorkspace}
+      onSubmitName={controller.submitDeferredWorkspaceName}
+      onSkip={controller.skipDeferredWorkspace}
+    />
+  ) : null;
   const policyControls = renderingPolicy.allowedInteractions?.controls;
   const controls: ChatInputControls | undefined = isReadOnly
     ? {
@@ -242,27 +259,17 @@ export function ConversationComposerCapability({
       innerBareSurface={renderingPolicy.presentation.innerBareSurface}
       controls={controls}
       queuedMessageAccessory={
-        controller.unresolvedDeferredSend ? (
-          <p className="text-xs text-destructive" role="alert">
-            {controller.deferredWorkspaceError}
-          </p>
-        ) : !isPendingConversation &&
-          !isReadOnly &&
-          deferredWorkspaceStartup.worktreeCount > 0 &&
-          (workspaceSetup?.status === "choice" ||
-            workspaceSetup?.status === "naming" ||
-            workspaceSetup?.status === "creating") ? (
-          <WorkspaceSetupChoice
-            state={workspaceSetup.status}
-            worktreeCount={deferredWorkspaceStartup.worktreeCount}
-            branchCount={deferredWorkspaceStartup.branchCount}
-            exactCounts={deferredWorkspaceStartup.exact}
-            error={workspaceSetup.error}
-            onCancelName={controller.cancelDeferredWorkspaceName}
-            onCreate={controller.createDeferredWorkspace}
-            onSubmitName={controller.submitDeferredWorkspaceName}
-            onSkip={controller.skipDeferredWorkspace}
-          />
+        workspaceAccessory || showMonitorStatus ? (
+          <>
+            {workspaceAccessory}
+            {showMonitorStatus ? (
+              <MonitorStatus
+                sessionId={monitorSessionId}
+                variant="composer"
+                className="px-3 py-2"
+              />
+            ) : null}
+          </>
         ) : null
       }
       skillProjectDirs={
@@ -275,7 +282,7 @@ export function ConversationComposerCapability({
         isPendingConversation ? undefined : controller.selectedProvider
       }
       composerActions={{
-        onSend: onUserTextCommitted ? sendWithCommitNotification : onSend,
+        onSend,
         onSteerMessage:
           isPendingConversation || admissionBlocked
             ? undefined
@@ -284,15 +291,7 @@ export function ConversationComposerCapability({
                   text,
                   personaId ?? undefined,
                   attachments,
-                  onUserTextCommitted
-                    ? {
-                        ...options,
-                        onUserMessageCommitted: () => {
-                          options?.onUserMessageCommitted?.();
-                          onUserTextCommitted(text);
-                        },
-                      }
-                    : options,
+                  options,
                 ),
         canSteerMessage:
           isPendingConversation || admissionBlocked
@@ -375,6 +374,7 @@ export function ConversationComposerCapability({
         onPersonaChange: controller.handlePersonaChange,
       }}
       agentModelPicker={{
+        autoRouting: controller.autoRouting,
         providers: controller.pickerAgents,
         providersLoading: controller.providersLoading,
         selectedProvider: controller.selectedProvider,

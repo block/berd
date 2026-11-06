@@ -1,4 +1,5 @@
 import { PreCommitSendRejectedError } from "@/features/chat/lib/preCommitSendRejection";
+import { prepareAutoRoutedPrompt } from "./autoRoutingDispatch";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import {
   appendAttachmentPaths,
@@ -17,9 +18,8 @@ import {
   clearLiveSubtitleUpdate,
   flushBufferedStreamingUpdatesForSession,
 } from "@/features/chat/acp/liveStreamingUpdates";
-import { acpExportSession, acpSendMessage } from "@/shared/api/acp";
+import { acpSendMessage } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
-import { messagesFromKgooseSessionExport } from "@/shared/api/kgooseMessages";
 import {
   formatAttachmentsTooLargeMessage,
   MAX_PROMPT_ATTACHMENT_BYTES,
@@ -36,14 +36,7 @@ import { perfLog } from "@/shared/lib/perfLog";
 import { completeAssistantMessage } from "@/features/chat/lib/messageCompletion";
 import { isVoiceConversationEmptyResponse } from "@/features/chat/lib/voiceConversationNoop";
 import {
-  completeActiveRealtimeMasterTurn,
-  hasActiveRealtimeEmissary,
-  hasLocalActiveRealtimeEmissary,
-} from "@/features/voice-conversation/lib/realtimeEmissaryBridge";
-import { getVoiceConversationMode } from "@/features/voice-conversation/lib/voiceConversationModePreference";
-import {
   type ChatAttachmentDraft,
-  type Message,
   type MessageMetadata,
   type MessageChip,
   createSystemNotificationMessage,
@@ -90,6 +83,8 @@ export interface SendCoreOptions {
    */
   prepare?: () => void | Promise<void>;
   signal?: AbortSignal;
+  /** Queue lease retained while auto routing chooses this turn's model. */
+  dispatchToken?: symbol;
   /** Fires immediately before the user message is committed to local stores. */
   beforeUserMessageCommitted?: () => void;
   /**
@@ -107,112 +102,6 @@ function throwIfAborted(signal?: AbortSignal): void {
   }
 
   throw new DOMException("The operation was aborted.", "AbortError");
-}
-
-function finalMasterTextSince(
-  sessionId: string,
-  existingAssistantTextById: ReadonlyMap<string, string>,
-): string | undefined {
-  const messages = useChatStore.getState().messagesBySession[sessionId] ?? [];
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (
-      !message ||
-      message.role !== "assistant" ||
-      message.metadata?.origin === "voice_conversation" ||
-      message.metadata?.agentVisible === false
-    ) {
-      continue;
-    }
-    const text = message.content
-      .flatMap((content) => (content.type === "text" ? [content.text] : []))
-      .join("\n")
-      .trim();
-    if (isVoiceConversationEmptyResponse(text)) continue;
-    if (text && existingAssistantTextById.get(message.id) !== text) return text;
-  }
-  return undefined;
-}
-
-function assistantTextSnapshot(sessionId: string): ReadonlyMap<string, string> {
-  const messages = useChatStore.getState().messagesBySession[sessionId] ?? [];
-  return new Map(
-    messages
-      .filter(
-        (message) =>
-          message.role === "assistant" &&
-          message.metadata?.origin !== "voice_conversation" &&
-          message.metadata?.agentVisible !== false,
-      )
-      .map((message) => [
-        message.id,
-        message.content
-          .flatMap((content) => (content.type === "text" ? [content.text] : []))
-          .join("\n")
-          .trim(),
-      ]),
-  );
-}
-
-function realtimeHandoffReminderIds(
-  metadata: Record<string, unknown> | undefined,
-): string[] {
-  const value = metadata?.realtimeHandoffReminderIds;
-  return Array.isArray(value)
-    ? value.filter(
-        (handoffId): handoffId is string =>
-          typeof handoffId === "string" && handoffId.length > 0,
-      )
-    : [];
-}
-
-function messageText(message: Message): string {
-  return message.content
-    .flatMap((content) => (content.type === "text" ? [content.text] : []))
-    .join("\n");
-}
-
-async function recoverMissingMasterTranscript(
-  sessionId: string,
-  prompt: string,
-): Promise<void> {
-  try {
-    const exportedMessages = messagesFromKgooseSessionExport(
-      await acpExportSession(sessionId),
-    );
-    const promptBoundary = exportedMessages.findLastIndex(
-      (message) =>
-        message.role === "user" && messageText(message).includes(prompt),
-    );
-    if (promptBoundary < 0) return;
-
-    const recovered = exportedMessages
-      .slice(promptBoundary + 1)
-      .filter((message) => message.role === "assistant");
-    if (!recovered.length) return;
-
-    const current = useChatStore.getState().messagesBySession[sessionId] ?? [];
-    const recoveredById = new Map(
-      recovered.map((message) => [message.id, message]),
-    );
-    const merged = current
-      .map((message) => recoveredById.get(message.id) ?? message)
-      .concat(
-        recovered.filter(
-          (message) => !current.some((existing) => existing.id === message.id),
-        ),
-      )
-      .map((message, index) => ({ message, index }))
-      .sort((left, right) =>
-        left.message.created === right.message.created
-          ? left.index - right.index
-          : left.message.created - right.message.created,
-      )
-      .map(({ message }) => message);
-    useChatStore.getState().setMessages(sessionId, merged);
-  } catch (error) {
-    console.warn("Failed to recover completed Master transcript", error);
-  }
 }
 
 async function settlePromptTranscriptDelivery(
@@ -378,16 +267,9 @@ export async function dispatchPrompt(
   }
 
   const promptOwner = claimSessionPrompt(sessionId);
-  const shouldCoordinateRealtime =
-    hasLocalActiveRealtimeEmissary(sessionId) ||
-    getVoiceConversationMode() === "openai-realtime";
-  const assistantTextBeforeTurn = shouldCoordinateRealtime
-    ? assistantTextSnapshot(sessionId)
-    : undefined;
   const isCurrent = () => ownsSessionPrompt(sessionId, promptOwner);
   let userMessageCommitted = false;
   let preCommitRejected = false;
-  let dispatchedPrompt = text;
 
   const { addMessage, setChatState, setError, setPendingAssistantProvider } =
     useChatStore.getState();
@@ -426,28 +308,6 @@ export async function dispatchPrompt(
     finishPromptSuccessfully();
   };
 
-  const completeRealtimeTurnIfActive = async (prompt: string) => {
-    const shouldCoordinateAtCompletion =
-      shouldCoordinateRealtime ||
-      hasLocalActiveRealtimeEmissary(sessionId) ||
-      getVoiceConversationMode() === "openai-realtime";
-    if (
-      !shouldCoordinateAtCompletion ||
-      !(await hasActiveRealtimeEmissary(sessionId))
-    ) {
-      return;
-    }
-    if (
-      assistantTextBeforeTurn &&
-      !finalMasterTextSince(sessionId, assistantTextBeforeTurn)
-    ) {
-      await recoverMissingMasterTranscript(sessionId, prompt);
-    }
-    await completeActiveRealtimeMasterTurn(sessionId, {
-      reminderHandoffIds: realtimeHandoffReminderIds(acpGooseMetadata),
-    });
-  };
-
   try {
     // Preparation can be superseded or aborted. Complete it before committing
     // local transcript state so a retained queued record can retry without
@@ -459,6 +319,17 @@ export async function dispatchPrompt(
     await restoreArchivedSessionBeforeSend(sessionId);
     throwIfAborted(signal);
     useChatSessionStore.getState().assertSessionActive(sessionId);
+
+    if (useChatSessionStore.getState().getSession(sessionId)?.autoModeId) {
+      await prepareAutoRoutedPrompt(sessionId, {
+        text,
+        assistantPrompt,
+        attachments: dispatchAttachments,
+        dispatchToken: opts.dispatchToken,
+        signal,
+      });
+      throwIfAborted(signal);
+    }
 
     const commitUserMessage = () => {
       throwIfAborted(signal);
@@ -537,7 +408,6 @@ export async function dispatchPrompt(
     );
     const acpPrompt =
       promptWithPaths || (images?.length ? " " : promptWithPaths);
-    dispatchedPrompt = acpPrompt;
     const tAcp = performance.now();
     if (!background) {
       perfLog(
@@ -569,11 +439,6 @@ export async function dispatchPrompt(
     }
 
     await finishPromptAfterTranscriptSettles();
-    try {
-      await completeRealtimeTurnIfActive(acpPrompt);
-    } catch (error) {
-      console.warn("Could not complete the Realtime Expert turn", error);
-    }
   } catch (err) {
     const isVoiceConversationNoop =
       userMessageCommitted &&
@@ -581,11 +446,6 @@ export async function dispatchPrompt(
       isVoiceConversationEmptyResponse(formatAcpErrorMessage(err));
     if (isVoiceConversationNoop) {
       await finishPromptAfterTranscriptSettles();
-      try {
-        await completeRealtimeTurnIfActive(dispatchedPrompt);
-      } catch (error) {
-        console.warn("Could not complete the Realtime Expert turn", error);
-      }
       if (isCurrent()) {
         setError(sessionId, null);
         setPendingAssistantProvider(sessionId, null);

@@ -239,9 +239,11 @@ jobs:
           app_zip_name="Berd_${VERSION}_${PLATFORM}.app.zip"
           dmg_name="Berd_${VERSION}_${PLATFORM}.dmg"
           ARCHIVE_NAME="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$PLATFORM")"
+          CALL_ARCHIVE_NAME="$(source scripts/release/lib.sh; release_call_archive_name "$VERSION" "$PLATFORM")"
           just release-write-provenance "$SOURCE_SHA" "$VERSION" "$PLATFORM" "$asset_dir" \
             "$ARCHIVE_NAME" "$ARCHIVE_NAME.sig" "$ARCHIVE_NAME.sha256" \
-            "$app_zip_name" "$dmg_name"
+            "$app_zip_name" "$dmg_name" \
+            "$CALL_ARCHIVE_NAME" "$CALL_ARCHIVE_NAME.sha256"
 
       - name: Attest staged macOS payload
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -254,9 +256,12 @@ jobs:
         run: |
           set -euo pipefail
           ARCHIVE_NAME="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$PLATFORM")"
+          CALL_ARCHIVE_NAME="$(source scripts/release/lib.sh; release_call_archive_name "$VERSION" "$PLATFORM")"
           scripts/release/github/upload-immutable-assets.sh "$REPOSITORY" "$TAG" \
             "$asset_dir/$app_zip_name" \
             "$asset_dir/$dmg_name" \
+            "$asset_dir/$CALL_ARCHIVE_NAME" \
+            "$asset_dir/$CALL_ARCHIVE_NAME.sha256" \
             "$asset_dir/$ARCHIVE_NAME" \
             "$asset_dir/$ARCHIVE_NAME.sig" \
             "$asset_dir/$ARCHIVE_NAME.sha256" \

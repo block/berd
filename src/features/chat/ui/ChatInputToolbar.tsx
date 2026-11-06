@@ -120,6 +120,7 @@ export function ChatInputToolbar({
     onModelChange,
     onPickerOpen,
     providerColumnMode,
+    autoRouting,
     enabled: agentModelPickerEnabled = true,
   } = agentModelPicker;
   const {
@@ -351,6 +352,7 @@ export function ChatInputToolbar({
         {agentModelPickerEnabled &&
           (agentProviders.length > 0 || providersLoading) && (
             <AgentModelPicker
+              autoRouting={autoRouting}
               agents={agentProviders}
               selectedAgentId={selectedProvider}
               onAgentChange={(providerId) => onProviderChange?.(providerId)}

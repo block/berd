@@ -58,12 +58,12 @@ initial policy; a host-specific `auto` mode must be resolved before the request.
 {"type":"hello","id":1,"input_during_tts":"allow_barge_in","status_sound_output_device":"MacBook Pro Speakers"}
 ```
 
-The response uses `protocol:5` as the exact session message-set version. The
+The response uses `protocol:6` as the exact session message-set version. The
 parent must reject a version it does not support; the JSON version is independent
 of the fixed binary framing marker described below:
 
 ```json
-{"type":"ready","id":1,"protocol":5,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
+{"type":"ready","id":1,"protocol":6,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
 ```
 
 The `session.tts` object is the authoritative, sanitized TTS configuration.
@@ -72,6 +72,8 @@ OpenAI snapshots contain `model`, `voice`, and `rate`; Siri contains `voice`,
 and `rate`. Credentials, endpoints, and bundle paths never appear on stdout.
 Detailed backend errors are diagnostics on stderr only; protocol rejection and
 fatal messages are sanitized at the stdout boundary.
+`session.tts` describes the voice that speaks replies, and `set_tts_settings`
+changes it.
 `session.input_during_tts` is the authoritative effective assistant-input
 policy and has its own revision. Status-sound settings are per-update parameters,
 not session snapshot configuration. The runtime owns cue cadence and playback; it
@@ -197,7 +199,7 @@ it never admits a replacement while old host audio may still be active.
 {"type":"set_tts_settings","id":u64,"expected_revision":u64,"settings":TtsSettings}
 {"type":"set_input_during_tts","id":u64,"expected_revision":u64,"policy":"allow_barge_in"|"suppress_input"}
 {"type":"reset_input","id":u64}
-{"type":"prepare_speak","id":u64,"acknowledgement":u64|null,"text":string}
+{"type":"prepare_speak","id":u64,"acknowledgement":u64|null,"text":string,"voice":string?,"language":string?}
 {"type":"output_ready","id":u64,"speech_id":u64}
 audio acknowledgements listed above
 {"type":"query_state","id":u64,"after":u64}
@@ -207,6 +209,9 @@ audio acknowledgements listed above
 ```
 
 Unknown fields are rejected. IDs are positive. Speak text is at most 16 KiB.
+`prepare_speak.voice` speaks that one utterance in another voice of the reply
+backend, keeping its other settings; `language` changes a Siri voice's locale
+too. A voice the backend doesn't offer is `not_admitted(invalid_voice)`.
 The parent cannot author speaking state or finalized input; those are derived
 only from PCM by the child runtime.
 
@@ -271,15 +276,41 @@ The child emits:
 ```text
 {"type":"input_speaking","active":bool}
 {"type":"recognition_pending","active":bool}
-{"type":"live_event","token":u64,"text":string,"origin"?:"user"|"spokesperson"|"handoff"}
+{"type":"live_event","token":u64,"text":string}
 ```
+
+On macOS, `recognition_pending.active` reports the agent speech admission hold, not
+the count of unresolved native recognitions. After local speech ends the hold
+expires after five seconds without a final, or, while Apple's latest result is
+interim words that no final has followed, after up to ten more seconds. Noise with no
+interim words keeps the five seconds. Empty finals settle their audio and resolve
+their turns without emitting a `live_event`. Expiry emits
+`recognition_pending.active:false` without cancelling recognition, clearing audio,
+or changing the recognizer generation, so a late final is still forwarded as a
+`live_event`. New speech reasserts the hold. Native finals carry no utterance
+identity, so each final carries the end of its audio and resolves the ended speech
+turns that audio covers, oldest first, which may include expired ones. A final for
+an earlier phrase of a turn still being spoken resolves nothing, and a final with no
+end resolves the oldest turn. Credit accounting is capped at 1024; at the cap attribution stays ambiguous
+until the recognizer resets, and finals still forward but only the timeout
+releases the hold.
 
 For every final live-side event, the child allocates a strictly increasing token,
 stores it in `SessionCore`, acknowledges the runtime storage receipt, and emits
-`live_event`. Conventional sessions omit `origin`, which means `user`.
-Expert-Spokesperson sessions use `origin` to distinguish user transcripts,
-Spokesperson transcripts, and handoffs. User finals interrupt reserved or playing
+`live_event`. User finals interrupt reserved or playing
 assistant output only after storage and emission. Final text is at most 64 KiB.
+
+Sessions on macOS also emit the user's words while they are still
+being transcribed:
+
+```text
+{"type":"user_interim","token":u64,"text":string}
+```
+
+Each `user_interim` replaces the previous one, and empty text clears it.
+`token` is the token the next user final will take, so a reply composed against
+interim words is still current once they finalize. The message is never stored,
+never allocates a token, and never interrupts output.
 
 ## Confirmation and admission
 
@@ -313,7 +344,7 @@ ID and speech ID when it is ready to accept output:
 Before emitting `accepted`, the child installs the admitted speech's leased
 assistant-activity guard. `suppress_input` stops PCM admission so user input
 cannot interrupt the speech; `allow_barge_in` continues PCM admission with the
-assistant-sensitive VAD threshold. `accepted` transfers output authority. The
+same VAD threshold. `accepted` transfers output authority. The
 child then writes Begin and waits for `audio_begin_accepted` before delivering
 PCM. Readiness is bounded to two seconds; expiry emits `speech_failed` with zero output. With `allow_barge_in`, speaking or recognition pending provisionally suspends started output. If both clear without a final, the same speech and player resume. A final, targeted cancellation, host mute/reset while provisionally suspended, pause, or shutdown discards the hold and interrupts exactly once.
 Accepted output owns exactly one assistant-activity guard. The child removes
@@ -324,7 +355,7 @@ cancellation and shutdown terminals.
 
 ```text
 {"type":"pending","id":u64,"utterances":[{"token":u64,"text":string}]}
-{"type":"not_admitted","id":u64,"reason":"paused"|"in_progress"|"cancelled"|"empty_text"}
+{"type":"not_admitted","id":u64,"reason":"paused"|"in_progress"|"cancelled"|"empty_text"|"invalid_voice"}
 {"type":"state","id":u64,"confirmed_token":u64,"utterances_after":[{"token":u64,"text":string}]}
 {"type":"cancel_result","id":u64,"outcome":"cancelled"|"stale","speech_id":u64|null}
 {"type":"speech_started","id":u64,"speech_id":u64}
@@ -339,8 +370,7 @@ always correlates a result with its parent request; `cancel` uses the originatin
 `prepare_speak.id` as that request ID. `cancel_result` is emitted first. A
 live held target then emits `not_admitted(cancelled)`; a live admitted target
 then emits `speech_interrupted`. `spoken_through_utf8` is the runtime's conservative UTF-8 byte boundary through the last fully played word; hosts may use it to distinguish the estimated spoken prefix from the unspoken suffix without recreating delivery policy. Repeated or unknown cancellation is stale.
-`cancel_speech.speech_id` targets active output directly, including autonomous
-Spokesperson output that has no originating `prepare_speak`. Its correlated
+`cancel_speech.speech_id` targets active output directly. Its correlated
 `cancel_result.id` echoes the `cancel_speech.id`, while `cancel_result.speech_id`
 names the targeted speech. The result is emitted before the runtime requests
 the host's quiescent `audio_cancelled` barrier.
