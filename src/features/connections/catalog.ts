@@ -5,7 +5,6 @@ import {
   BlockDataIcon,
   BlockUidIcon,
   DatadogIcon,
-  DoceboIcon,
   FigmaIcon,
   GitHubIcon,
   GleanIcon,
@@ -144,13 +143,6 @@ export const OAUTH_PROVIDERS: OAuthProviderEntry[] = [
     displayName: "Todoist",
     description: "Manage your Todoist tasks and projects",
     Icon: TodoistIcon,
-  },
-  {
-    provider: "docebo",
-    displayName: "Block Academy",
-    description:
-      "Search and use your Block Academy courses and learning content",
-    Icon: DoceboIcon,
   },
   {
     provider: "query-expert",
