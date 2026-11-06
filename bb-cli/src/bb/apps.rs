@@ -56,6 +56,7 @@ const CONTROL_PLANE_REQUEST_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 const CONTROL_PLANE_RESPONSE_MAX_BYTES: usize = 2 * 1024 * 1024;
 const TRUSTED_CONTROL_PLANE_HOSTS: &[&str] = &[
     "compose-ctrl.test.blockstaging.build",
+    "compose-ctrl.block.builderlabstaging.xyz",
     "compose-ctrl.app.builderlab.xyz",
 ];
 
@@ -3889,8 +3890,10 @@ mod tests {
 
         for trusted in [
             "https://compose-ctrl.test.blockstaging.build",
+            "https://compose-ctrl.block.builderlabstaging.xyz",
             "https://compose-ctrl.app.builderlab.xyz",
             "https://compose-ctrl.test.blockstaging.build:443",
+            "https://compose-ctrl.block.builderlabstaging.xyz:443",
         ] {
             assert!(
                 ControlPlaneClient::new(trusted, "1.0.0", style).is_ok(),
@@ -3905,6 +3908,9 @@ mod tests {
             "https://app.builderlab.xyz",
             "https://compose-ctrl.test.blockstaging.build.attacker.example",
             "https://compose-ctrl.test.blockstaging.build:444",
+            "http://compose-ctrl.block.builderlabstaging.xyz",
+            "https://compose-ctrl.block.builderlabstaging.xyz.attacker.example",
+            "https://compose-ctrl.block.builderlabstaging.xyz:444",
             "https://compose-ctrl.app.builderlab.xyz.attacker.example",
             "https://compose-ctrl.app.builderlab.xyz:444",
             "https://user@compose-ctrl.test.blockstaging.build",
