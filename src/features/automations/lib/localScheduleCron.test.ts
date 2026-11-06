@@ -11,6 +11,9 @@ describe("validateLocalScheduleCron", () => {
     "0 0 0 */1 * *",
     "*/10 * * * * *",
     "0 0 9 * * MON",
+    "0 9 * * MON-FRI",
+    "0 9 * * MON,WED,FRI",
+    "0 9 * * MON-FRI/2",
     "  0   9 * * 1-5  ",
   ])("accepts supported cron expression %s", (cron) => {
     expect(validateLocalScheduleCron(cron)).toBeNull();
@@ -19,6 +22,18 @@ describe("validateLocalScheduleCron", () => {
   it.each([
     "",
     "@daily",
+    "0 9 * * JAN",
+    "0 MON * * *",
+    "JAN 9 * * *",
+    "0 0 9 * * DEC",
+    "MON 0 9 * * *",
+    "0 0 MON * * *",
+    "0 0 9 MON * *",
+    "0 9 * * */MON",
+    "0 9 * * MON-FRI/TUE",
+    "0 9 * * MON/WED",
+    "0 9 * * JAN-MAR",
+    "0 9 * * 1/JAN",
     "0 0 9 * * * 2028",
     "60 * * * *",
     "0 24 * * *",

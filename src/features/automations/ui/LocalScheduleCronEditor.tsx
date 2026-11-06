@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  isCancelledError,
   useIsMutating,
   useMutation,
   useQuery,
@@ -36,6 +37,9 @@ export function LocalScheduleCronEditor({
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(schedule.cron);
   const [baselineCron, setBaselineCron] = useState(schedule.cron);
+  const [failedSubmittedCron, setFailedSubmittedCron] = useState<string | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isReconciling, setIsReconciling] = useState(false);
@@ -83,6 +87,7 @@ export function LocalScheduleCronEditor({
       setIsEditing(false);
     },
     onError: async (mutationError, variables) => {
+      setFailedSubmittedCron(variables.cron);
       setError(
         formatAcpErrorMessage(mutationError, t("localSchedules.updateError")),
       );
@@ -107,7 +112,8 @@ export function LocalScheduleCronEditor({
           queryFn: listLocalSchedules,
           staleTime: 0,
         });
-      } catch {
+      } catch (refreshError) {
+        if (isCancelledError(refreshError)) return;
         setError((current) =>
           current
             ? `${current} ${t("localSchedules.refreshAfterUpdateError")}`
@@ -121,23 +127,23 @@ export function LocalScheduleCronEditor({
 
   const scheduleChangedElsewhere =
     isEditing &&
-    !updateMutation.isError &&
-    !error &&
-    schedule.cron !== baselineCron;
+    !isSaving &&
+    !isReconciling &&
+    schedule.cron !== baselineCron &&
+    // The rejected update may have persisted its submitted cron before failing.
+    // Only that expected value can waive the original baseline mismatch.
+    schedule.cron !== failedSubmittedCron;
 
-  const displayedError =
-    error && errorCoversCurrentDraft
+  const displayedError = scheduleChangedElsewhere
+    ? t("localSchedules.changedElsewhere")
+    : error && errorCoversCurrentDraft
       ? error
-      : scheduleChangedElsewhere
-        ? t("localSchedules.changedElsewhere")
-        : validationError && !hasKnownCron
-          ? t(`localSchedules.validation.${validationError}`)
-          : isReconciling
-            ? null
-            : (error ??
-              (sameAsFailedCron
-                ? t("localSchedules.failedUpdateRetry")
-                : null));
+      : validationError && !hasKnownCron
+        ? t(`localSchedules.validation.${validationError}`)
+        : isReconciling
+          ? null
+          : (error ??
+            (sameAsFailedCron ? t("localSchedules.failedUpdateRetry") : null));
   const helpId = `local-schedule-cron-help-${schedule.id}`;
   const errorId = `local-schedule-cron-error-${schedule.id}`;
   const uncertaintyWarning =
@@ -177,6 +183,7 @@ export function LocalScheduleCronEditor({
     restoreFocusAfterEditRef.current = true;
     setBaselineCron(schedule.cron);
     setDraft(schedule.cron);
+    setFailedSubmittedCron(null);
     setError(null);
     setIsEditing(true);
   }

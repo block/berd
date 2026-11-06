@@ -32,15 +32,6 @@ const WEEKDAY_NAMES: Record<string, number> = {
   SAT: 6,
 };
 
-const MONTH_ALIASES = new RegExp(
-  `\\b(${Object.keys(MONTH_NAMES).join("|")})\\b`,
-  "g",
-);
-const WEEKDAY_ALIASES = new RegExp(
-  `\\b(${Object.keys(WEEKDAY_NAMES).join("|")})\\b`,
-  "g",
-);
-
 function resolveValue(value: string, fieldIndex: number): number | null {
   const upperValue = value.toUpperCase();
   const resolved =
@@ -73,8 +64,13 @@ function isValidCronField(field: string, fieldIndex: number): boolean {
     if (steppedParts.length > 2) return false;
     const [base, stepText] = steppedParts;
     if (stepText !== undefined) {
-      const step = resolveValue(stepText, fieldIndex);
-      if (step === null || step < 1 || step > maximum - minimum + 1) {
+      if (!/^\d+$/.test(stepText)) return false;
+      const step = Number(stepText);
+      if (
+        !Number.isSafeInteger(step) ||
+        step < 1 ||
+        step > maximum - minimum + 1
+      ) {
         return false;
       }
     }
@@ -121,13 +117,9 @@ export function validateLocalScheduleCron(cron: string): string | null {
     return "fieldCount";
   }
 
-  const normalized = fields.join(" ").toUpperCase();
-  const canonical = normalized
-    .replace(MONTH_ALIASES, (name) => String(MONTH_NAMES[name]))
-    .replace(WEEKDAY_ALIASES, (name) => String(WEEKDAY_NAMES[name]));
-  const canonicalFields = canonical.split(" ");
-  const fieldsWithSeconds =
-    canonicalFields.length === 5 ? ["0", ...canonicalFields] : canonicalFields;
+  // Names are interpreted only by their owning field, never across the
+  // expression; validate the same text that will be sent to Goose.
+  const fieldsWithSeconds = fields.length === 5 ? ["0", ...fields] : fields;
 
   if (
     !fieldsWithSeconds.every((field, index) => isValidCronField(field, index))
