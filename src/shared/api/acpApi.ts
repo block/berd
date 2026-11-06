@@ -19,6 +19,7 @@ import {
   getBackendClient,
   getClient,
   interceptSessionNotifications,
+  revealSessionNotifications,
 } from "./acpConnection";
 import {
   getClientForSession,
@@ -250,7 +251,9 @@ export async function importSession(json: string): Promise<AcpSessionInfo> {
     input: json,
     source: "json",
   });
-  return result as unknown as AcpSessionInfo;
+  const session = result as unknown as AcpSessionInfo;
+  revealSessionNotifications(session.sessionId);
+  return session;
 }
 
 export interface AcpForkSessionOptions {
@@ -282,6 +285,7 @@ export async function forkSession(
   // composite of that backend and the returned wire id.
   const forkedSessionId = compositeSessionId(backendId, response.sessionId);
   registerSessionBackend(forkedSessionId, backendId, response.sessionId);
+  revealSessionNotifications(forkedSessionId);
   return {
     sessionId: forkedSessionId,
     title: null,
@@ -567,6 +571,7 @@ export async function newSession(
   // the wire id for outbound translation.
   const sessionId = compositeSessionId(backendId, response.sessionId);
   registerSessionBackend(sessionId, backendId, response.sessionId);
+  revealSessionNotifications(sessionId);
   const sid = sessionId.slice(0, 8);
   perfLog(
     `[perf:api] ${sid} newSession getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,
@@ -583,6 +588,8 @@ export async function loadSession(
   const tClient = performance.now();
   const client = await getClientForSession(sessionId);
   assertActive?.();
+  // Another client can create a session with a deleted private session's id.
+  revealSessionNotifications(sessionId);
   const tCall = performance.now();
   const response = await client.loadSession({
     sessionId: getWireSessionId(sessionId),

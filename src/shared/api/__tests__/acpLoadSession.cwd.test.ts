@@ -13,6 +13,7 @@ vi.mock("../acpConnection", () => ({
   getClient: mocks.getBackendClient,
   getBackendClient: mocks.getBackendClient,
   invalidateBackendConnection: mocks.invalidateBackendConnection,
+  revealSessionNotifications: () => {},
   captureBackendConnectionGeneration: (backendId: string) => {
     const generation = mocks.generations.get(backendId) ?? 0;
     return {

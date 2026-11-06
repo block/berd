@@ -29,6 +29,9 @@ const mocks = vi.hoisted(() => ({
   initialize: vi.fn(),
   sessionInfo: vi.fn(),
   loadSession: vi.fn(),
+  newSession: vi.fn(),
+  forkSession: vi.fn(),
+  importSession: vi.fn(),
   setSessionConfigOption: vi.fn(),
   updateWorkingDir: vi.fn(),
   clientCallbackFactories: [] as Array<() => Client>,
@@ -60,8 +63,11 @@ vi.mock("@aaif/goose-sdk", () => ({
     goose = {
       GooseUnstableSessionInfo: mocks.sessionInfo,
       GooseUnstableSessionWorkingDirUpdate: mocks.updateWorkingDir,
+      GooseUnstableSessionImport: mocks.importSession,
     };
     loadSession = mocks.loadSession;
+    newSession = mocks.newSession;
+    unstable_forkSession = mocks.forkSession;
     setSessionConfigOption = mocks.setSessionConfigOption;
     closed: Promise<void>;
     resolveClosed!: () => void;
@@ -947,6 +953,36 @@ describe("inbound session id translation", () => {
     expect(permissions).not.toHaveBeenCalled();
     await callbacks.sessionUpdate?.(sessionUpdatePayload("ordinary"));
     expect(received).toHaveBeenCalledOnce();
+  });
+
+  type Api = typeof import("../acpApi");
+  it.each([
+    ["creates", (api: Api) => api.newSession("/tmp")],
+    ["forks", (api: Api) => api.forkSession("source", "/tmp")],
+    ["imports", (api: Api) => api.importSession("{}")],
+    ["loads", (api: Api) => api.loadSession("session-1", "/tmp")],
+  ])("lifts the private fence when it %s a session with a deleted private id", async (_, allocate) => {
+    const conn = await importConnection();
+    const api = await import("../acpApi");
+    const received = vi.fn();
+    const permissions = vi.fn().mockResolvedValue(approval);
+    conn.setNotificationHandler({ handleSessionNotification: received });
+    conn.setPermissionHandler(permissions);
+    await conn.getBackendConnection(LOCAL_BACKEND_ID).getClient();
+    const callbacks = await latestCallbacks();
+    conn.hidePrivateSessionNotifications("session-1");
+    // Goose allocates ids from the highest remaining one, so deleting the
+    // private session lets the next session take its id.
+    for (const m of [mocks.newSession, mocks.forkSession, mocks.importSession])
+      m.mockResolvedValue({ sessionId: "session-1" });
+    await allocate(api);
+
+    await callbacks.sessionUpdate?.(sessionUpdatePayload("session-1"));
+    expect(received).toHaveBeenCalledOnce();
+    await expect(
+      callbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(approval);
+    expect(permissions).toHaveBeenCalledOnce();
   });
 
   it("rewrites remote notification session ids to composite ids", async () => {

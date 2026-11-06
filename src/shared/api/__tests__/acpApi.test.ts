@@ -62,6 +62,7 @@ vi.mock("../acpConnection", () => ({
   getBackendClient: (...args: unknown[]) => mocks.getClient(...args),
   interceptSessionNotifications: (...args: unknown[]) =>
     mocks.interceptSessionNotifications(...args),
+  revealSessionNotifications: () => {},
 }));
 
 describe("promptForText", () => {

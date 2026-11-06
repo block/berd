@@ -33,6 +33,11 @@ export function hidePrivateSessionNotifications(sessionId: string): void {
   privateSessionIds.add(sessionId);
 }
 
+/** Goose can give a deleted private session's id to a new session. */
+export function revealSessionNotifications(sessionId: string): void {
+  privateSessionIds.delete(sessionId);
+}
+
 let notificationHandler: AcpNotificationHandler | null = null;
 const sessionNotificationInterceptors =
   new Set<SessionNotificationInterceptor>();

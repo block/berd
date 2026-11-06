@@ -4,9 +4,13 @@ import {
   promptForText,
   setModel,
   setSessionConfigOption,
+  setSessionMode,
   setSessionSystemPrompt,
 } from "@/shared/api/acpApi";
-import { getClient } from "@/shared/api/acpConnection";
+import {
+  getClient,
+  hidePrivateSessionNotifications,
+} from "@/shared/api/acpConnection";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { logRendererEvent } from "@/shared/api/rendererTelemetry";
 
@@ -72,6 +76,9 @@ async function runInference(
     hidden: true,
     providerId: provider.providerId,
   });
+  // Nobody can see this session, so its updates stay out of the chat store
+  // and any permission request it raises is cancelled instead of shown.
+  hidePrivateSessionNotifications(session.sessionId);
 
   try {
     if (provider.modelId) {
@@ -97,6 +104,10 @@ async function runInference(
     // instructions rather than user-supplied content. This establishes the
     // security boundary: the model knows the command is untrusted input.
     await setSessionSystemPrompt(session.sessionId, EXPLANATION_SYSTEM_PROMPT);
+
+    // Goose still offers tools it injects itself, such as load_skill. Chat mode
+    // skips every tool call, so this must succeed before the prompt.
+    await setSessionMode(session.sessionId, "chat");
 
     return await promptForText(
       session.sessionId,
