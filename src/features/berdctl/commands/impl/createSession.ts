@@ -111,7 +111,6 @@ Result:
   execute: async (args, ctx): Promise<CreateSessionResult> => {
     const [
       { refreshRuntimeConfigForNewChat },
-      { getAutoModeExecutionTarget },
       { useRuntimeConfigStore },
       { acceptFirstSend },
       { useChatSessionStore },
@@ -130,7 +129,6 @@ Result:
       { findReadyHarnessOrThrow, gooseModelOptions, harnessModelOptions },
     ] = await Promise.all([
       import("@/shared/runtime-config/newChatRuntimeConfig"),
-      import("@/features/chat/lib/autoModelSelection"),
       import("@/shared/runtime-config/runtimeConfigStore"),
       import("@/features/chat/lib/firstWorkspaceSend"),
       import("@/features/chat/stores/chatSessionStore"),
@@ -179,6 +177,19 @@ Result:
       (args.harness_id || args.model_id || args.agent_id
         ? null
         : autoRouting?.defaultModeId);
+    const selectedMode = autoRouting?.modes.find(
+      (mode) => mode.id === autoModeId,
+    );
+    // Derive the fallback from the same snapshot that validated the mode;
+    // never consult the live store again to silently select another target.
+    const autoExecutionTarget = selectedMode
+      ? {
+          harnessId: "goose",
+          modelProviderId: selectedMode.modelProviderId,
+          modelId: selectedMode.fallback.modelId,
+          modelName: selectedMode.fallback.modelId,
+        }
+      : undefined;
     // Bind the selected mode to this config snapshot: a concurrent refresh
     // may replace the routing while the later validations below run, which
     // would otherwise persist a stale mode over a different live target.
@@ -233,8 +244,7 @@ Result:
           modelId: args.model_id,
           modelName: args.model_id,
         })
-      : (getAutoModeExecutionTarget(autoModeId) ??
-        normalizeSessionExecutionTarget({ harnessId }));
+      : (autoExecutionTarget ?? normalizeSessionExecutionTarget({ harnessId }));
     const requiresStartupName = Boolean(
       project && projectRequiresStartupWorkspaceName(project),
     );
@@ -268,15 +278,19 @@ Result:
       if (selectedAutoRouting) {
         const current = useRuntimeConfigStore.getState();
         if (
-          (current.result.status === "ready"
-            ? current.result.autoRoutingRevision
-            : undefined) !== selectedAutoRouting.revision ||
+          !current.loaded ||
+          current.result.status !== "ready" ||
+          current.result.source === "appDefault" ||
+          current.result.autoRoutingRevision !== selectedAutoRouting.revision ||
           JSON.stringify(current.config.goose.autoRouting) !==
             selectedAutoRouting.routing
         ) {
           throw new CommandError(
             "selection_superseded",
-            "The Auto mode selection changed while the chat was being prepared; no session was created. Retry with a currently configured --auto-mode-id.",
+            "The Auto configuration changed while the chat was being prepared; no session was created. " +
+              (args.auto_mode_id !== undefined
+                ? "Retry with a currently configured --auto-mode-id."
+                : "Retry the command."),
           );
         }
       }

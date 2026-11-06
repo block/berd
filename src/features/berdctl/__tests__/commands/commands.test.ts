@@ -909,6 +909,298 @@ describe("sessions.create", () => {
     expect(useChatSessionStore.getState().sessions).toHaveLength(0);
   });
 
+  it.each([
+    false,
+    true,
+  ])("keeps superseded recovery faithful to explicit selection %s", async (explicit) => {
+    configureAutoModes();
+    let releaseCwd!: () => void;
+    mocks.resolveSessionCwd.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        releaseCwd = resolve;
+      });
+      return "/resolved/cwd";
+    });
+    const pending = dispatchCommand(
+      "sessions",
+      {
+        action: "create",
+        prompt: "Investigate",
+        ...(explicit ? { auto_mode_id: "balanced" } : {}),
+      },
+      ctx,
+    );
+    await vi.waitFor(() =>
+      expect(mocks.resolveSessionCwd).toHaveBeenCalledOnce(),
+    );
+    const { result } = useRuntimeConfigStore.getState();
+    if (result.status !== "ready")
+      throw new Error("Expected authoritative fixture");
+    useRuntimeConfigStore
+      .getState()
+      .setResult({ ...result, autoRoutingRevision: "b".repeat(64) });
+    releaseCwd();
+    const error = await expectCommandError(pending, "selection_superseded");
+    expect(error.message).toMatch(/retry/i);
+    if (explicit) expect(error.message).toContain("--auto-mode-id");
+    else expect(error.message).not.toContain("--auto-mode-id");
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(useChatSessionStore.getState().sessions).toHaveLength(0);
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-new"],
+    ).toBeUndefined();
+  });
+
+  it.each([
+    "revision",
+    "routing",
+    "unavailable",
+    "appDefault",
+    "unloaded",
+  ] as const)("rejects a superseded %s snapshot while persona validation is pending", async (change) => {
+    configureAutoModes();
+    // Absence of a native revision still requires the readiness/source and
+    // full routing snapshot guards, not just revision equality.
+    const { result } = useRuntimeConfigStore.getState();
+    if (result.status !== "ready")
+      throw new Error("Expected authoritative fixture");
+    useRuntimeConfigStore
+      .getState()
+      .setResult({ ...result, autoRoutingRevision: undefined });
+    let releasePersona!: (value: unknown[]) => void;
+    mocks.listPersonas.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releasePersona = resolve;
+        }),
+    );
+    const pending = dispatchCommand(
+      "sessions",
+      {
+        action: "create",
+        prompt: "Investigate",
+        auto_mode_id: "balanced",
+        agent_id: "reviewer",
+      },
+      ctx,
+    );
+    await vi.waitFor(() => expect(mocks.listPersonas).toHaveBeenCalledOnce());
+    const before = useRuntimeConfigStore.getState();
+    if (before.result.status !== "ready")
+      throw new Error("Expected authoritative fixture");
+    if (change === "revision") {
+      useRuntimeConfigStore
+        .getState()
+        .setResult({ ...before.result, autoRoutingRevision: "f".repeat(64) });
+    } else if (change === "routing") {
+      const config = structuredClone(before.config);
+      config.goose.autoRouting!.modes[0].fallback.modelId = "replacement-model";
+      useRuntimeConfigStore.getState().setResult({ ...before.result, config });
+    } else if (change === "unavailable") {
+      useRuntimeConfigStore.setState({
+        result: {
+          status: "unavailable",
+          source: "endpoint",
+          reason: "endpointUnavailable",
+          message: "offline",
+        },
+      });
+    } else if (change === "appDefault") {
+      useRuntimeConfigStore.setState({
+        result: { ...before.result, source: "appDefault" },
+      });
+    } else {
+      useRuntimeConfigStore.setState({ loaded: false });
+    }
+    releasePersona([
+      {
+        id: "reviewer",
+        displayName: "Reviewer",
+        systemPrompt: "Review carefully.",
+        isBuiltin: false,
+        writable: true,
+      },
+    ]);
+    await expectCommandError(pending, "selection_superseded");
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(useChatSessionStore.getState().sessions).toHaveLength(0);
+  });
+
+  it.each([
+    false,
+    true,
+  ])("binds fallback to the validated snapshot across an A-B-A refresh (explicit=%s)", async (explicit) => {
+    configureAutoModes();
+    const original = useRuntimeConfigStore.getState().result;
+    if (original.status !== "ready")
+      throw new Error("Expected authoritative fixture");
+    let releaseValidation!: () => void;
+    let releaseCwd!: () => void;
+    mocks.listProjects.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        releaseValidation = resolve;
+      });
+      return [makeProject({ id: "p-1" })];
+    });
+    mocks.resolveSessionCwd.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        releaseCwd = resolve;
+      });
+      return "/resolved/cwd";
+    });
+    const pending = dispatchCommand(
+      "sessions",
+      {
+        action: "create",
+        prompt: "Investigate",
+        project_id: "p-1",
+        ...(explicit ? { auto_mode_id: "balanced" } : {}),
+      },
+      ctx,
+    );
+    await vi.waitFor(() => expect(mocks.listProjects).toHaveBeenCalledOnce());
+    const replacement = structuredClone(original.config);
+    replacement.goose.autoRouting!.modes[0].fallback.modelId =
+      "temporary-fallback";
+    useRuntimeConfigStore.getState().setResult({
+      ...original,
+      config: replacement,
+      autoRoutingRevision: "b".repeat(64),
+    });
+    releaseValidation();
+    await vi.waitFor(() =>
+      expect(mocks.resolveSessionCwd).toHaveBeenCalledOnce(),
+    );
+    useRuntimeConfigStore.getState().setResult(original);
+    releaseCwd();
+    await expect(pending).resolves.toMatchObject({ auto_mode_id: "balanced" });
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "openai",
+      "/resolved/cwd",
+      expect.objectContaining({ modelId: "balanced-fallback" }),
+    );
+    expect(
+      useChatSessionStore.getState().getSession("session-new")?.executionTarget
+        ?.modelId,
+    ).toBe("balanced-fallback");
+  });
+
+  it("rolls back a prepared workspace when the Auto revision changes", async () => {
+    configureAutoModes();
+    mocks.listProjects.mockResolvedValue([makeProject({ id: "p-1" })]);
+    mocks.projectRequiresStartupWorkspaceName.mockReturnValue(true);
+    const plan = { workingDir: "/worktrees/task", workspaceAttachments: [] };
+    let releasePlan!: () => void;
+    mocks.planProjectChatWorkspaces.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        releasePlan = resolve;
+      });
+      return plan;
+    });
+    const pending = dispatchCommand(
+      "sessions",
+      {
+        action: "create",
+        prompt: "Investigate",
+        project_id: "p-1",
+        startup_name: "task",
+        auto_mode_id: "balanced",
+      },
+      ctx,
+    );
+    await vi.waitFor(() =>
+      expect(mocks.planProjectChatWorkspaces).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "p-1" }),
+        "task",
+      ),
+    );
+    const { result } = useRuntimeConfigStore.getState();
+    if (result.status !== "ready")
+      throw new Error("Expected authoritative fixture");
+    useRuntimeConfigStore
+      .getState()
+      .setResult({ ...result, autoRoutingRevision: "c".repeat(64) });
+    releasePlan();
+    await expectCommandError(pending, "selection_superseded");
+    expect(mocks.rollbackProjectChatWorkspacePlan).toHaveBeenCalledWith(plan);
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("allows an equivalent authoritative refresh while keeping the requested fallback", async () => {
+    configureAutoModes();
+    mocks.resolveSessionCwd.mockImplementationOnce(async () => {
+      const { result } = useRuntimeConfigStore.getState();
+      useRuntimeConfigStore.getState().setResult(structuredClone(result));
+      return "/resolved/cwd";
+    });
+    const result = await dispatchCommand(
+      "sessions",
+      { action: "create", prompt: "Investigate", auto_mode_id: "balanced" },
+      ctx,
+    );
+    expect(result).toMatchObject({ auto_mode_id: "balanced" });
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "openai",
+      "/resolved/cwd",
+      expect.objectContaining({ modelId: "balanced-fallback" }),
+    );
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-new"]?.[0],
+    ).toMatchObject({ payload: { text: "Investigate" } });
+  });
+
+  it.each([
+    "unloaded",
+    "appDefault",
+    "unavailable",
+  ] as const)("never treats %s configuration as proof an explicit mode is unknown", async (state) => {
+    if (state === "appDefault")
+      useRuntimeConfigStore.setState({ loaded: true });
+    if (state === "unavailable")
+      useRuntimeConfigStore.getState().setResult({
+        status: "unavailable",
+        source: "endpoint",
+        reason: "endpointUnavailable",
+        message: "offline",
+      });
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "create",
+          prompt: "Investigate",
+          auto_mode_id: "balanced",
+          project_id: "p-1",
+          startup_name: "task",
+        },
+        ctx,
+      ),
+      "config_unavailable",
+    );
+    expect(mocks.planProjectChatWorkspaces).not.toHaveBeenCalled();
+    expect(mocks.planProjectChatWorkspacesAsIs).not.toHaveBeenCalled();
+    expect(mocks.resolveSessionCwd).not.toHaveBeenCalled();
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    const discovery = await dispatchCommand(
+      "info",
+      { action: "list_models", harness_id: "goose" },
+      ctx,
+    );
+    expect(discovery).toMatchObject({
+      harnesses: [
+        {
+          harness_id: "goose",
+          auto_modes: [],
+          warning: expect.stringContaining("unavailable"),
+        },
+      ],
+    });
+  });
+
   it("keeps explicit persona instructions while Auto owns model selection", async () => {
     configureAutoModes();
     mocks.listPersonas.mockResolvedValue([
@@ -1091,6 +1383,13 @@ describe("sessions.create", () => {
             },
           },
         },
+      });
+      const config = useRuntimeConfigStore.getState().config;
+      useRuntimeConfigStore.getState().setResult({
+        status: "ready",
+        source: "endpoint",
+        config,
+        autoRoutingRevision: "a".repeat(64),
       });
     });
     const pending = dispatchCommand(
