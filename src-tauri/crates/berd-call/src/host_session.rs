@@ -79,6 +79,7 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
             &non_blocking,
             &stop_requested,
             &status_sounds,
+            options.client,
         ) {
             Ok(None) => break Ok(()),
             // A stop recorded while the old session was shutting down wins
@@ -218,6 +219,7 @@ fn run_session(
     non_blocking: &Arc<AtomicBool>,
     stop_requested: &Arc<AtomicBool>,
     status_sounds: &Arc<Mutex<StatusSounds>>,
+    client: crate::telemetry::Client,
 ) -> Result<Option<SessionStart>, String> {
     let SessionStart {
         saved,
@@ -269,7 +271,7 @@ fn run_session(
         .lock()
         .map(|session| session.tts.settings.clone())
     {
-        crate::telemetry::start(&control.session_arguments, &tts);
+        crate::telemetry::start(&control.session_arguments, &tts, client);
     }
     let control: Arc<dyn HostControl> = control;
     while running.load(Ordering::SeqCst) {

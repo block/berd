@@ -17,7 +17,7 @@ use berd_call::telemetry_store as store;
 use berd_call::TtsSettings;
 use serde_json::{json, Value};
 
-const SCHEMA_VERSION: &str = "berd-call-otlp-logs-v1";
+const SCHEMA_VERSION: &str = "berd-call-otlp-logs-v3";
 const ENFORCED: bool = cfg!(feature = "telemetry-enforced");
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -92,9 +92,34 @@ fn command_in(dir: &Path, args: &[&str]) -> Result<Value, String> {
     Ok(json!({"enabled": consented(dir), "enforced": ENFORCED}))
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Client {
+    #[default]
+    Terminal,
+    BuzzPlugin,
+}
+
+impl Client {
+    pub(crate) fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "terminal" => Ok(Self::Terminal),
+            "buzz-plugin" => Ok(Self::BuzzPlugin),
+            _ => Err("--client must be terminal or buzz-plugin".into()),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Terminal => "terminal",
+            Self::BuzzPlugin => "buzz-plugin",
+        }
+    }
+}
+
 /// The call's audio setup, as Berd's voice events report it.
 #[derive(Clone, Debug, PartialEq)]
 struct Context {
+    client: Client,
     input: &'static str,
     output: &'static str,
     rate: Option<String>,
@@ -105,6 +130,7 @@ impl Context {
     /// Reports the selected voice only from its backend's own catalog, and any
     /// other voice as "custom", so free-form names never leave the machine.
     fn new(
+        client: Client,
         session_arguments: &[String],
         tts: &TtsSettings,
         siri_voices: impl FnOnce() -> Vec<String>,
@@ -128,6 +154,7 @@ impl Context {
         };
         let (rate, voice) = (tts.rate(), tts.voice());
         Some(Self {
+            client,
             input: ["macos", "parakeet", "openai"]
                 .into_iter()
                 .find(|known| *known == input)?,
@@ -142,6 +169,7 @@ impl Context {
             ("input_backend", self.input.to_string()),
             ("output_backend", self.output.to_string()),
             ("voice_mode", "chained".to_string()),
+            ("client", self.client.as_str().to_string()),
         ];
         attributes.extend(self.rate.clone().map(|rate| ("tts_rate", rate)));
         attributes.extend(self.voice.clone().map(|voice| ("tts_voice", voice)));
@@ -174,7 +202,7 @@ pub(crate) fn user_stopped() {
 }
 
 /// Reports the call's start once, when its first session is ready.
-pub(crate) fn start(session_arguments: &[String], tts: &TtsSettings) {
+pub(crate) fn start(session_arguments: &[String], tts: &TtsSettings, call_client: Client) {
     let (Some(build), Some(dir)) = (build(), berd_dir()) else {
         return;
     };
@@ -182,7 +210,7 @@ pub(crate) fn start(session_arguments: &[String], tts: &TtsSettings) {
     if call.is_some() || !consented(&dir) {
         return;
     }
-    let Some(context) = Context::new(session_arguments, tts, || {
+    let Some(context) = Context::new(call_client, session_arguments, tts, || {
         berd_call::siri::load_voice_catalog(None)
             .map(|catalog| catalog.voices.into_iter().map(|voice| voice.name).collect())
             .unwrap_or_default()
@@ -383,7 +411,9 @@ mod tests {
     }
 
     fn context(values: &[&str], tts: &TtsSettings) -> Option<Context> {
-        Context::new(&arguments(values), tts, || vec!["Samantha".into()])
+        Context::new(Client::Terminal, &arguments(values), tts, || {
+            vec!["Samantha".into()]
+        })
     }
 
     fn arguments(values: &[&str]) -> Vec<String> {
@@ -392,6 +422,32 @@ mod tests {
 
     fn at(seconds: u64) -> SystemTime {
         UNIX_EPOCH + Duration::from_secs(seconds)
+    }
+
+    #[test]
+    fn both_lifecycle_records_retain_the_starting_client() {
+        for client in [Client::Terminal, Client::BuzzPlugin] {
+            let context = Context {
+                client,
+                ..context(&["session"], &pocket(1.0)).unwrap()
+            };
+            let started = record(
+                "berd_voice_conversation_started",
+                at(1),
+                &context.attributes(),
+            );
+            let ended = record(
+                "berd_voice_conversation_ended",
+                at(2),
+                &ended_attributes(&context, Duration::from_secs(1), 0, 0, "user"),
+            );
+            for event in [started, ended] {
+                assert!(event["attributes"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!({"key":"client", "value":{"stringValue":client.as_str()}})));
+            }
+        }
     }
 
     #[test]
@@ -413,6 +469,7 @@ mod tests {
                 ("input_backend", "parakeet".to_string()),
                 ("output_backend", "pocket".to_string()),
                 ("voice_mode", "chained".to_string()),
+                ("client", "terminal".to_string()),
                 ("tts_rate", "1.25".to_string()),
                 ("tts_voice", "anna".to_string()),
             ]
@@ -486,6 +543,7 @@ mod tests {
                 {"key": "input_backend", "value": {"stringValue": "parakeet"}},
                 {"key": "output_backend", "value": {"stringValue": "pocket"}},
                 {"key": "voice_mode", "value": {"stringValue": "chained"}},
+                {"key": "client", "value": {"stringValue": "terminal"}},
                 {"key": "tts_rate", "value": {"stringValue": "1.25"}},
                 {"key": "tts_voice", "value": {"stringValue": "anna"}},
             ]);
@@ -690,7 +748,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(header("authorization"), ["Bearer token-1"]);
-        assert_eq!(header("x-berd-schema-version"), ["berd-call-otlp-logs-v1"]);
+        assert_eq!(header("x-berd-schema-version"), ["berd-call-otlp-logs-v3"]);
         assert_eq!(header("content-type"), ["application/json"]);
         let resource = &requests[1].body["resourceLogs"][0]["resource"]["attributes"];
         assert_eq!(
@@ -725,7 +783,7 @@ mod tests {
             "clean-shutdown",
         );
         assert_eq!(
-            &attributes[4..],
+            &attributes[5..],
             [
                 ("duration_ms", "1500".to_string()),
                 ("user_utterance_count", "0".to_string()),
