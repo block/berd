@@ -35,7 +35,7 @@ const START_HELP: &str = r#"Run a local voice call backed by the shared session 
 
 Usage:
   berd-call start [--port PORT] [--stream | --codex] [--non-blocking]
-    [--no-menu-bar]
+    [--no-menu-bar] [--client terminal|buzz-plugin]
     --voice NAME --language BCP47 [session options]
 
 The foreground process owns the default microphone and audio output. Session
@@ -50,7 +50,8 @@ Microphone mute is temporary; each new call starts unmuted. Explicit startup
 options override saved defaults. Preferences are stored in
 $XDG_CONFIG_HOME/berd-call/settings.json or
 $HOME/.config/berd-call/settings.json. BERD_CALL_SETTINGS_FILE selects an
-alternate file. Agent identity and transcript routing are never saved."#;
+alternate file. `--client` labels usage telemetry for this call only and defaults
+to `terminal`; the Buzz plugin passes `buzz-plugin`. It is never saved. Agent identity and transcript routing are never saved."#;
 
 const SPEAK_HELP: &str = r#"Speak through the active local voice call.
 
