@@ -5,7 +5,7 @@ describe("Spanish local schedule copy", () => {
   it.each([
     [
       "loadErrorDescription",
-      "El programador local no está disponible o Goose no está conectado.",
+      "Puede que el programador local no esté disponible o que Goose no esté conectado.",
     ],
     [
       "refreshError",
