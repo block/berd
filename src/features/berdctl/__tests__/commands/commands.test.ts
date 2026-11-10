@@ -1036,6 +1036,18 @@ describe("sessions.create", () => {
     const original = useRuntimeConfigStore.getState().result;
     if (original.status !== "ready")
       throw new Error("Expected authoritative fixture");
+    const autoModelSelection = await import(
+      "@/features/chat/lib/autoModelSelection"
+    );
+    const snapshot = { autoRouting: original.config.goose.autoRouting };
+    const expectedTarget = autoModelSelection.getAutoModeExecutionTarget(
+      "balanced",
+      snapshot,
+    );
+    const deriveTarget = vi.spyOn(
+      autoModelSelection,
+      "getAutoModeExecutionTarget",
+    );
     let releaseValidation!: () => void;
     let releaseCwd!: () => void;
     mocks.listProjects.mockImplementationOnce(async () => {
@@ -1081,10 +1093,14 @@ describe("sessions.create", () => {
       "/resolved/cwd",
       expect.objectContaining({ modelId: "balanced-fallback" }),
     );
+    expect(deriveTarget).toHaveBeenCalledExactlyOnceWith("balanced", snapshot);
+    expect(deriveTarget.mock.calls[0][1]?.autoRouting).toBe(
+      snapshot.autoRouting,
+    );
+    expect(deriveTarget).toHaveReturnedWith(expectedTarget);
     expect(
-      useChatSessionStore.getState().getSession("session-new")?.executionTarget
-        ?.modelId,
-    ).toBe("balanced-fallback");
+      useChatSessionStore.getState().getSession("session-new")?.executionTarget,
+    ).toEqual(expectedTarget);
   });
 
   it("rolls back a prepared workspace when the Auto revision changes", async () => {

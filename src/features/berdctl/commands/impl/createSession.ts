@@ -112,6 +112,7 @@ Result:
     const [
       { refreshRuntimeConfigForNewChat },
       { useRuntimeConfigStore },
+      { getAutoModeExecutionTarget },
       { acceptFirstSend },
       { useChatSessionStore },
       { resolveSessionCwd },
@@ -130,6 +131,7 @@ Result:
     ] = await Promise.all([
       import("@/shared/runtime-config/newChatRuntimeConfig"),
       import("@/shared/runtime-config/runtimeConfigStore"),
+      import("@/features/chat/lib/autoModelSelection"),
       import("@/features/chat/lib/firstWorkspaceSend"),
       import("@/features/chat/stores/chatSessionStore"),
       import("@/features/projects/lib/sessionCwdSelection"),
@@ -177,19 +179,11 @@ Result:
       (args.harness_id || args.model_id || args.agent_id
         ? null
         : autoRouting?.defaultModeId);
-    const selectedMode = autoRouting?.modes.find(
-      (mode) => mode.id === autoModeId,
-    );
     // Derive the fallback from the same snapshot that validated the mode;
     // never consult the live store again to silently select another target.
-    const autoExecutionTarget = selectedMode
-      ? {
-          harnessId: "goose",
-          modelProviderId: selectedMode.modelProviderId,
-          modelId: selectedMode.fallback.modelId,
-          modelName: selectedMode.fallback.modelId,
-        }
-      : undefined;
+    const autoExecutionTarget = getAutoModeExecutionTarget(autoModeId, {
+      autoRouting,
+    });
     // Bind the selected mode to this config snapshot: a concurrent refresh
     // may replace the routing while the later validations below run, which
     // would otherwise persist a stale mode over a different live target.
