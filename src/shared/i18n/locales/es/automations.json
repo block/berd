@@ -40,7 +40,7 @@
     "hubLocalOnlyDescription": "Consulta las programaciones configuradas en tu instancia local de Goose.",
     "loading": "Cargando programaciones de Goose",
     "loadErrorTitle": "No se pudieron cargar las programaciones de Goose",
-    "loadErrorDescription": "El programador local no está disponible o Goose no está conectado.",
+    "loadErrorDescription": "Puede que el programador local no esté disponible o que Goose no esté conectado.",
     "refreshError": "No se pudieron actualizar las programaciones: {{error}}. Se muestra la última lista cargada.",
     "emptyTitle": "Aún no hay programaciones locales",
     "emptyBody": "Las programaciones que crees en Goose aparecerán aquí. Usa la CLI de Goose u otro cliente de Goose para programar y configurar recetas.",

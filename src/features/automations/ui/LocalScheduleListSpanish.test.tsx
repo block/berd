@@ -43,7 +43,7 @@ describe("Spanish local schedule list", () => {
   it.each([
     [
       "loadErrorDescription",
-      "El programador local no está disponible o Goose no está conectado.",
+      "Puede que el programador local no esté disponible o que Goose no esté conectado.",
     ],
     [
       "refreshError",
@@ -64,7 +64,7 @@ describe("Spanish local schedule list", () => {
     vi.mocked(listLocalSchedules).mockRejectedValue({});
     renderPanel();
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "El programador local no está disponible o Goose no está conectado.",
+      "Puede que el programador local no esté disponible o que Goose no esté conectado.",
     );
   });
 
