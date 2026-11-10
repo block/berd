@@ -6,6 +6,10 @@ const listSchedules = vi.hoisted(() => vi.fn());
 const updateSchedule = vi.hoisted(() => vi.fn());
 
 vi.mock("@/shared/api/acpConnection", () => ({
+  captureBackendConnectionGeneration: vi.fn(() => ({
+    isCurrent: () => true,
+    invalidate: vi.fn().mockResolvedValue(undefined),
+  })),
   getClient: vi.fn(async () => ({
     goose: {
       GooseUnstableSchedulesList: listSchedules,

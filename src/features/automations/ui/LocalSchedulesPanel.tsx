@@ -8,6 +8,7 @@ import {
   listLocalSchedules,
 } from "@/features/automations/api/localSchedules";
 import { LocalScheduleCronEditor } from "@/features/automations/ui/LocalScheduleCronEditor";
+import { LocalScheduleRequestError } from "@/features/automations/lib/localScheduleErrors";
 import { EmptyState } from "@/features/automations/ui/RunOutput";
 import { useLocaleFormatting } from "@/shared/i18n";
 import { Alert, AlertTitle, AlertDescription } from "@/shared/ui/alert";
@@ -39,8 +40,14 @@ export function LocalSchedulesPanel() {
     queryKey: LOCAL_SCHEDULES_QUERY_KEY,
     queryFn: listLocalSchedules,
     refetchInterval: LOCAL_SCHEDULES_REFETCH_INTERVAL_MS,
+    retry: false,
   });
   const schedules = schedulesQuery.data ?? [];
+  const queryError = schedulesQuery.error;
+  const errorMessage =
+    queryError instanceof LocalScheduleRequestError
+      ? t(`localSchedules.${queryError.code}`)
+      : localErrorMessage(queryError, t("localSchedules.loadErrorDescription"));
 
   return (
     <section aria-labelledby="local-schedules-heading" className="space-y-3">
@@ -75,22 +82,14 @@ export function LocalSchedulesPanel() {
         <Alert variant="destructive">
           <IconAlertTriangle aria-hidden="true" />
           <AlertTitle wrap>{t("localSchedules.loadErrorTitle")}</AlertTitle>
-          <AlertDescription>
-            {localErrorMessage(
-              schedulesQuery.error,
-              t("localSchedules.loadErrorDescription"),
-            )}
-          </AlertDescription>
+          <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
       ) : (
         <>
           {schedulesQuery.error ? (
             <div role="status" className="text-xs text-destructive">
               {t("localSchedules.refreshError", {
-                error: localErrorMessage(
-                  schedulesQuery.error,
-                  t("localSchedules.loadErrorDescription"),
-                ),
+                error: errorMessage,
               })}
             </div>
           ) : null}

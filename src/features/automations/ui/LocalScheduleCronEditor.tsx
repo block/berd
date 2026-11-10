@@ -19,6 +19,7 @@ import {
   listLocalSchedules,
   updateLocalScheduleCron,
 } from "@/features/automations/api/localSchedules";
+import { LocalScheduleRequestError } from "@/features/automations/lib/localScheduleErrors";
 import { validateLocalScheduleCron } from "@/features/automations/lib/localScheduleCron";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
@@ -75,8 +76,11 @@ export function LocalScheduleCronEditor({
       setIsSaving(true);
       await queryClient.cancelQueries({ queryKey: LOCAL_SCHEDULES_QUERY_KEY });
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
+    onSuccess: () => {
+      // A confirmed update establishes the new timer. Readback is independently
+      // bounded in the API; its query status is visible in LocalSchedulesPanel.
+      // Never retain the per-schedule mutation lock waiting for a list response.
+      void queryClient.invalidateQueries({
         queryKey: LOCAL_SCHEDULES_QUERY_KEY,
       });
       setError(null);
@@ -89,7 +93,12 @@ export function LocalScheduleCronEditor({
     onError: async (mutationError, variables) => {
       setFailedSubmittedCron(variables.cron);
       setError(
-        formatAcpErrorMessage(mutationError, t("localSchedules.updateError")),
+        mutationError instanceof LocalScheduleRequestError
+          ? t(`localSchedules.${mutationError.code}`)
+          : formatAcpErrorMessage(
+              mutationError,
+              t("localSchedules.updateError"),
+            ),
       );
       queryClient.setQueryData<string[]>(failureQueryKey, (previous = []) => [
         ...new Set([...previous, variables.cron]),
@@ -99,6 +108,16 @@ export function LocalScheduleCronEditor({
       restoreFocusAfterEditRef.current =
         editorRef.current?.contains(document.activeElement) === true ||
         document.activeElement === document.body;
+
+      if (mutationError instanceof LocalScheduleRequestError) {
+        // This generation is retired or replaced. Release the shared save lock
+        // now; even a stalled readback must not extend the mutation deadline.
+        setIsReconciling(false);
+        void queryClient.invalidateQueries({
+          queryKey: LOCAL_SCHEDULES_QUERY_KEY,
+        });
+        return;
+      }
 
       try {
         await queryClient.cancelQueries({

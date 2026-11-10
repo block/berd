@@ -26,6 +26,18 @@ describe("Spanish local schedule copy", () => {
     ["reconcilingSchedule", "Comprobando el estado actual de la programación…"],
     ["updateError", "No se pudo actualizar la programación de Goose."],
     [
+      "updateTimeout",
+      "La actualización de la programación agotó el tiempo de espera. Se cerró su conexión y se desconoce el estado del temporizador. Verifica la programación en Goose antes de recuperarla con otra expresión.",
+    ],
+    [
+      "listTimeout",
+      "La actualización de la lista agotó el tiempo de espera. Actualiza para reintentar; ver una programación en la lista no verifica su temporizador.",
+    ],
+    [
+      "connectionChanged",
+      "La conexión de Goose cambió antes de confirmar la solicitud de programación. Actualiza y verifica la programación antes de reintentar.",
+    ],
+    [
       "updateFailureCaution",
       "Es posible que el programador haya quitado el temporizador anterior si la actualización falló inesperadamente. Verifica la programación en Goose antes de depender de ella.",
     ],
