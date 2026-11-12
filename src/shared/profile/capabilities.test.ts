@@ -23,6 +23,7 @@ const enabledBuildFeatures: Record<BuildFeature, boolean> = {
   authGate: false,
   agentTools: true,
   automations: true,
+  localSchedules: true,
   builderbot: true,
   byoKeyProviders: false,
   feedback: true,
@@ -72,6 +73,20 @@ describe("profile capabilities", () => {
       telemetry: false,
       updates: false,
     });
+  });
+
+  it("keeps local schedules available in public builds independently of Block automation services", () => {
+    expect(
+      resolve({
+        buildFeatures: {
+          ...enabledBuildFeatures,
+          automations: false,
+          localSchedules: true,
+        },
+        kgooseConfigured: false,
+        kgooseConfigLoaded: true,
+      }),
+    ).toMatchObject({ automations: false, localSchedules: true });
   });
 
   it("enables builderbot only when runtime config, build feature, and experiment are enabled", () => {

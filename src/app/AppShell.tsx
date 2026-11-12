@@ -740,6 +740,8 @@ export function AppShell({
   const capabilities = useProfileCapabilities();
   useRemoteSessionExperimentReconciliation();
   const isAutomationsFeatureEnabled = capabilities.automations;
+  const isAutomationsSurfaceEnabled =
+    capabilities.automations || capabilities.localSchedules;
   const isBuilderbotSurfaceEnabled = capabilities.builderbot;
   const isFeedbackEnabled = capabilities.feedback;
   const sessionWindowSupport = useSessionWindowSupport();
@@ -1401,10 +1403,22 @@ export function AppShell({
     if (activeView === "builderbot" && !isBuilderbotSurfaceEnabled) {
       setActiveView("home");
     }
-    if (activeView === "automations" && !isAutomationsFeatureEnabled) {
+    if (activeView === "automations" && !isAutomationsSurfaceEnabled) {
       setActiveView("home");
     }
-  }, [activeView, isAutomationsFeatureEnabled, isBuilderbotSurfaceEnabled]);
+    if (
+      !isAutomationsFeatureEnabled &&
+      automationsRoute.surface !== "overview"
+    ) {
+      setAutomationsRoute({ surface: "overview" });
+    }
+  }, [
+    activeView,
+    automationsRoute.surface,
+    isAutomationsFeatureEnabled,
+    isAutomationsSurfaceEnabled,
+    isBuilderbotSurfaceEnabled,
+  ]);
 
   useEffect(() => {
     const enabledSection = resolveEnabledSettingsSection(
@@ -4444,7 +4458,7 @@ export function AppShell({
     (view: AppView) => {
       guardAppNavigation(() => {
         resetGlobalComposerTransition();
-        if (view === "automations" && !isAutomationsFeatureEnabled) {
+        if (view === "automations" && !isAutomationsSurfaceEnabled) {
           setActiveView("home");
           return;
         }
@@ -4485,7 +4499,7 @@ export function AppShell({
       guardAppNavigation,
       resetGlobalComposerTransition,
       setActiveSession,
-      isAutomationsFeatureEnabled,
+      isAutomationsSurfaceEnabled,
       isBuilderbotSurfaceEnabled,
     ],
   );
@@ -4566,7 +4580,7 @@ export function AppShell({
       route: AutomationNavigationRoute,
       options?: AppNavigationUpdateOptions,
     ) => {
-      if (!isAutomationsFeatureEnabled) {
+      if (!isAutomationsSurfaceEnabled) {
         return;
       }
       guardAppNavigation(() => {
@@ -4577,7 +4591,7 @@ export function AppShell({
         setActiveView("automations");
       });
     },
-    [guardAppNavigation, isAutomationsFeatureEnabled, setActiveSession],
+    [guardAppNavigation, isAutomationsSurfaceEnabled, setActiveSession],
   );
 
   const navigateBuilderbot = useCallback(
@@ -4643,7 +4657,7 @@ export function AppShell({
       }
 
       if (location.view === "automations") {
-        if (!isAutomationsFeatureEnabled) {
+        if (!isAutomationsSurfaceEnabled) {
           setActiveSession(null);
           setActiveView("home");
           return;
@@ -4691,7 +4705,7 @@ export function AppShell({
     },
     [
       expandSidebar,
-      isAutomationsFeatureEnabled,
+      isAutomationsSurfaceEnabled,
       isBuilderbotSurfaceEnabled,
       setActiveSession,
       setChatActiveSession,
@@ -5621,7 +5635,8 @@ export function AppShell({
               onDesignSystemSectionChange={selectDesignSystemSection}
               authStatus={authStatus}
               isPreparingContent={isPreparingContent}
-              automationsEnabled={isAutomationsFeatureEnabled}
+              automationsEnabled={isAutomationsSurfaceEnabled}
+              companyAutomationsEnabled={isAutomationsFeatureEnabled}
               builderbotEnabled={isBuilderbotSurfaceEnabled}
               renderedSession={renderedSession}
               homeSessionId={homeSessionId}
