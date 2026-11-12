@@ -258,12 +258,26 @@ static BOOL BerdTestVoiceDownloadIdentity(NSError **error) {
     }
     NSDictionary *assets = BerdUAFVoiceAssets(root);
     [files removeItemAtPath:root error:nil];
-    if (![assets[BerdUAFVoiceAssetName(@"en-US", @"Damon")] hasSuffix:@"/a/AssetData"] ||
-        ![assets[BerdUAFVoiceAssetName(@"en-US", @"en-US-F")] hasSuffix:@"/b/AssetData"] ||
-        assets[BerdUAFVoiceAssetName(@"en-US", @"Quinn")] ||
-        assets[BerdUAFVoiceAssetName(@"en-US", @"Simone")] ||
-        assets[BerdUAFVoiceAssetName(@"en-GB", @"Damon")]) {
+    if (![assets[BerdUAFVoiceAssetName(@"en-US", @"Damon", @"natural")] hasSuffix:@"/a/AssetData"] ||
+        ![assets[BerdUAFVoiceAssetName(@"en-US", @"en-US-F", @"natural")] hasSuffix:@"/b/AssetData"] ||
+        assets[BerdUAFVoiceAssetName(@"en-US", @"Quinn", @"natural")] ||
+        ![assets[BerdUAFVoiceAssetName(@"en-US", @"Quinn", @"neural")] hasSuffix:@"/c/AssetData"] ||
+        assets[BerdUAFVoiceAssetName(@"en-US", @"Simone", @"natural")] ||
+        assets[BerdUAFVoiceAssetName(@"en-GB", @"Damon", @"natural")]) {
         if (error) *error = BerdError(108, @"Siri voice assets on disk were matched wrongly.");
+        return NO;
+    }
+    return YES;
+}
+
+static BOOL BerdTestSiriVoiceFamily(NSError **error) {
+    NSDictionary *neural = @{ @"identifier" : @"com.apple.ttsbundle.gryphon-neural_Nora_en-US_premium" };
+    NSDictionary *natural = @{ @"identifier" : @"com.apple.siri.natural.en-US.Nora" };
+    if (![BerdSiriVoiceFamily(@[ neural, natural ]) isEqualToString:@"natural"] ||
+        ![BerdSiriVoiceFamily(@[ neural ]) isEqualToString:@"neural"] ||
+        ![neural[@"identifier"] hasPrefix:BerdSiriVoicePrefix(@"neural")] ||
+        [@"com.apple.ttsbundle.gryphon-neuralAX_Nora_en-US_premium" hasPrefix:BerdSiriVoicePrefix(@"neural")]) {
+        if (error) *error = BerdError(109, @"Siri voices were listed from the wrong family.");
         return NO;
     }
     return YES;
@@ -278,6 +292,10 @@ int main(void) {
         }
         if (!BerdTestVoiceDownloadIdentity(&error)) {
             fprintf(stderr, "voice download identity: %s\n", error.localizedDescription.UTF8String);
+            return 1;
+        }
+        if (!BerdTestSiriVoiceFamily(&error)) {
+            fprintf(stderr, "Siri voice family: %s\n", error.localizedDescription.UTF8String);
             return 1;
         }
         if (!BerdTestPCMNormalization(&error)) {

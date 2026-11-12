@@ -1026,10 +1026,28 @@ static NSArray<NSString *> *BerdAssetBuildPaths(NSString *content) {
     return @[];
 }
 
-// The name a voice's natural premium UAF asset carries as its CFBundleName.
-static NSString *BerdUAFVoiceAssetName(NSString *language, NSString *voiceName) {
-    return [[NSString stringWithFormat:@"com.apple.siri.tts.voice.%@.%@.natural.premium",
-        [language stringByReplacingOccurrencesOfString:@"-" withString:@"_"], voiceName]
+// The catalog identifier prefix of a Siri voice family.
+static NSString *BerdSiriVoicePrefix(NSString *family) {
+    return [family isEqualToString:@"natural"]
+        ? @"com.apple.siri.natural."
+        : @"com.apple.ttsbundle.gryphon-neural_";
+}
+
+// macOS 27 lists natural Siri voices, and Berd uses only those where they exist.
+// macOS 26 has only neural ones.
+static NSString *BerdSiriVoiceFamily(NSArray *resources) {
+    for (id resource in resources ?: @[]) {
+        if ([[resource valueForKey:@"identifier"] hasPrefix:BerdSiriVoicePrefix(@"natural")]) {
+            return @"natural";
+        }
+    }
+    return @"neural";
+}
+
+// The name a voice's premium UAF asset in a family carries as its CFBundleName.
+static NSString *BerdUAFVoiceAssetName(NSString *language, NSString *voiceName, NSString *family) {
+    return [[NSString stringWithFormat:@"com.apple.siri.tts.voice.%@.%@.%@.premium",
+        [language stringByReplacingOccurrencesOfString:@"-" withString:@"_"], voiceName, family]
         lowercaseString];
 }
 
@@ -1079,6 +1097,8 @@ static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
         return nil;
     }
     NSArray *resources = ((SendObject)objc_msgSend)(manager, voicesSelector, nil);
+    NSString *family = BerdSiriVoiceFamily(resources);
+    NSString *prefix = BerdSiriVoicePrefix(family);
     NSString *normalizedFilter =
         [[languageFilter stringByReplacingOccurrencesOfString:@"_" withString:@"-"] lowercaseString];
     NSDictionary<NSString *, NSString *> *diskAssets = BerdUAFVoiceAssets(
@@ -1087,7 +1107,7 @@ static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
         [NSMutableDictionary dictionary];
     for (id resource in resources ?: @[]) {
         NSString *identifier = [resource valueForKey:@"identifier"];
-        if (![identifier hasPrefix:@"com.apple.siri.natural."]) continue;
+        if (![identifier hasPrefix:prefix]) continue;
         NSString *language = [resource valueForKey:@"language"] ?: @"";
         NSString *normalizedLanguage =
             [[language stringByReplacingOccurrencesOfString:@"_" withString:@"-"] lowercaseString];
@@ -1101,7 +1121,7 @@ static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
         // on disk.
         NSString *content = [resource valueForKey:@"contentPath"];
         if (!content.length || ![NSFileManager.defaultManager fileExistsAtPath:content]) {
-            content = diskAssets[BerdUAFVoiceAssetName(language, name)];
+            content = diskAssets[BerdUAFVoiceAssetName(language, name, family)];
         }
         // Newer voices have a code as their name (en-US-F); macOS shows its localized name.
         NSString *localizedName = [resource respondsToSelector:@selector(localizedName)]
