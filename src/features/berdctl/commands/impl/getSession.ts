@@ -28,6 +28,7 @@ interface SessionMetadataResult {
   harness_id: string;
   model_id: string | null;
   agent_id: string | null;
+  auto_mode_id: string | null;
   project_id: string | null;
   working_dir: string | null;
   created_at: string;
@@ -63,7 +64,7 @@ export const getSessionCommand = defineCommand({
 
 Result:
   {"session_id": "...", "title": "...", "harness_id": "...",
-   "model_id": "..."|null, "agent_id": "..."|null,
+   "model_id": "..."|null, "agent_id": "..."|null, "auto_mode_id": "..."|null,
    "project_id": "..."|null, "working_dir": "..."|null,
    "created_at": "...", "updated_at": "...", "archived": false,
    "is_running": false, "is_open_in_window": false,

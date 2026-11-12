@@ -23,6 +23,15 @@ const createSessionSchema = z
       .string()
       .optional()
       .describe("Id of the model to use (from `berdctl info models`)."),
+    auto_mode_id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Configured Goose Auto mode id (from `berdctl info models --harness-id goose`). " +
+          "Routes each fresh prompt; cannot combine with --model-id or a non-Goose harness. " +
+          "With --agent-id, keeps persona instructions while Auto selects the model.",
+      ),
     agent_id: z
       .string()
       .optional()
@@ -62,6 +71,7 @@ interface CreateSessionResult {
   session_id: string;
   title: string;
   harness_id: string;
+  auto_mode_id: string | null;
   send_status: "dispatched";
 }
 
@@ -77,6 +87,8 @@ export const createSessionCommand = defineCommand({
     "background without changing what the user sees; the user can open it themselves. " +
     "Use --from to give the delegating session or tool a concise visible label on " +
     "the initial message. " +
+    "Use --auto-mode-id to select a configured Goose Auto mode explicitly; no parent " +
+    "or active UI session selection is inferred. " +
     'Only check on it later (action "get") if the user asks.',
   helpFooter: `Examples:
   berdctl session create --prompt "Triage the failing nightly build" \\
@@ -84,9 +96,12 @@ export const createSessionCommand = defineCommand({
   berdctl session create --prompt "Implement the fix" \\
     --project-id <project-id> --startup-name my-feature
 
+  berdctl session create --prompt "Investigate" \\
+    --harness-id goose --auto-mode-id <configured-mode-id> --json
+
 Result:
   {"session_id": "...", "title": "...", "harness_id": "...",
-   "send_status": "dispatched"}
+   "auto_mode_id": "..."|null, "send_status": "dispatched"}
   The session runs in the background; the user's view does not change. Check
   progress later with \`berdctl session get --session-id <session_id>\`.`,
   schema: createSessionSchema,
@@ -96,8 +111,8 @@ Result:
   execute: async (args, ctx): Promise<CreateSessionResult> => {
     const [
       { refreshRuntimeConfigForNewChat },
-      { getAutoModeExecutionTarget },
       { useRuntimeConfigStore },
+      { getAutoModeExecutionTarget },
       { acceptFirstSend },
       { useChatSessionStore },
       { resolveSessionCwd },
@@ -115,8 +130,8 @@ Result:
       { findReadyHarnessOrThrow, gooseModelOptions, harnessModelOptions },
     ] = await Promise.all([
       import("@/shared/runtime-config/newChatRuntimeConfig"),
-      import("@/features/chat/lib/autoModelSelection"),
       import("@/shared/runtime-config/runtimeConfigStore"),
+      import("@/features/chat/lib/autoModelSelection"),
       import("@/features/chat/lib/firstWorkspaceSend"),
       import("@/features/chat/stores/chatSessionStore"),
       import("@/features/projects/lib/sessionCwdSelection"),
@@ -129,12 +144,59 @@ Result:
       import("../runtime/providers"),
     ]);
     await refreshRuntimeConfigForNewChat();
-    const autoModeId =
-      args.harness_id || args.model_id || args.agent_id
-        ? null
-        : useRuntimeConfigStore.getState().config.goose.autoRouting
-            ?.defaultModeId;
     const harnessId = args.harness_id ?? GOOSE_PROVIDER_ID;
+    const runtimeState = useRuntimeConfigStore.getState();
+    const autoRouting = runtimeState.config.goose.autoRouting;
+    if (args.auto_mode_id !== undefined) {
+      if (args.model_id !== undefined || harnessId !== GOOSE_PROVIDER_ID) {
+        throw new CommandError(
+          "invalid_args",
+          "--auto-mode-id requires Goose and cannot be combined with --model-id; omit --model-id and use --harness-id goose (or omit --harness-id).",
+        );
+      }
+      // Startup, failed, and app-default loads expose defaults without proving
+      // a configured mode was removed (same rule as Auto dispatch). Report the
+      // uncertainty as retryable instead of claiming the mode is unknown.
+      if (
+        !runtimeState.loaded ||
+        runtimeState.result.status !== "ready" ||
+        runtimeState.result.source === "appDefault"
+      ) {
+        throw new CommandError(
+          "config_unavailable",
+          "Auto mode configuration is not available right now; retry, then list configured modes with `berdctl info models --harness-id goose`.",
+        );
+      }
+      if (!autoRouting?.modes.some((mode) => mode.id === args.auto_mode_id)) {
+        throw new CommandError(
+          "invalid_args",
+          `Unknown Auto mode "${args.auto_mode_id}"; list configured modes with \`berdctl info models --harness-id goose\` and pass an auto_modes id as --auto-mode-id.`,
+        );
+      }
+    }
+    const autoModeId =
+      args.auto_mode_id ??
+      (args.harness_id || args.model_id || args.agent_id
+        ? null
+        : autoRouting?.defaultModeId);
+    // Derive the fallback from the same snapshot that validated the mode;
+    // never consult the live store again to silently select another target.
+    const autoExecutionTarget = getAutoModeExecutionTarget(autoModeId, {
+      autoRouting,
+    });
+    // Bind the selected mode to this config snapshot: a concurrent refresh
+    // may replace the routing while the later validations below run, which
+    // would otherwise persist a stale mode over a different live target.
+    // Re-verified immediately before the session is created.
+    const selectedAutoRouting = autoModeId
+      ? {
+          revision:
+            runtimeState.result.status === "ready"
+              ? runtimeState.result.autoRoutingRevision
+              : undefined,
+          routing: JSON.stringify(autoRouting),
+        }
+      : null;
     // The validation legs are independent I/O; overlap them.
     const [project, , models, persona] = await Promise.all([
       args.project_id ? findProjectOrThrow(args.project_id) : null,
@@ -176,8 +238,7 @@ Result:
           modelId: args.model_id,
           modelName: args.model_id,
         })
-      : (getAutoModeExecutionTarget(autoModeId) ??
-        normalizeSessionExecutionTarget({ harnessId }));
+      : (autoExecutionTarget ?? normalizeSessionExecutionTarget({ harnessId }));
     const requiresStartupName = Boolean(
       project && projectRequiresStartupWorkspaceName(project),
     );
@@ -205,6 +266,28 @@ Result:
       : await resolveSessionCwd(project);
     let session: ChatSession;
     try {
+      // A concurrent refresh replaced the routing snapshot the selection was
+      // validated against; fall back would silently discard the caller's
+      // requested mode, so reject with no session instead.
+      if (selectedAutoRouting) {
+        const current = useRuntimeConfigStore.getState();
+        if (
+          !current.loaded ||
+          current.result.status !== "ready" ||
+          current.result.source === "appDefault" ||
+          current.result.autoRoutingRevision !== selectedAutoRouting.revision ||
+          JSON.stringify(current.config.goose.autoRouting) !==
+            selectedAutoRouting.routing
+        ) {
+          throw new CommandError(
+            "selection_superseded",
+            "The Auto configuration changed while the chat was being prepared; no session was created. " +
+              (args.auto_mode_id !== undefined
+                ? "Retry with a currently configured --auto-mode-id."
+                : "Retry the command."),
+          );
+        }
+      }
       // Past the broker deadline the agent was already told this call failed;
       // do not create a session it cannot see. The workspace plan may already
       // have created a branch/worktree, so the catch below rolls it back.
@@ -253,6 +336,7 @@ Result:
       session_id: session.id,
       title: session.title,
       harness_id: harnessId,
+      auto_mode_id: session.autoModeId ?? null,
       send_status: "dispatched" as const,
     };
   },

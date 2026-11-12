@@ -1,6 +1,7 @@
 import type { ModelExecutionTarget } from "./sessionExecutionTarget";
 import { create } from "zustand";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import type { RuntimeGooseConfig } from "@/shared/runtime-config/schema";
 import { useChatSessionStore } from "../stores/chatSessionStore";
 
 export const usePendingAutoModeStore = create<{
@@ -33,10 +34,12 @@ export function selectAutoMode(
 
 export function getAutoModeExecutionTarget(
   modeId: string | null | undefined,
+  {
+    autoRouting,
+  }: Pick<RuntimeGooseConfig, "autoRouting"> = useRuntimeConfigStore.getState()
+    .config.goose,
 ): ModelExecutionTarget | undefined {
-  const mode = useRuntimeConfigStore
-    .getState()
-    .config.goose.autoRouting?.modes.find((mode) => mode.id === modeId);
+  const mode = autoRouting?.modes.find((mode) => mode.id === modeId);
   if (!mode) return undefined;
   return {
     harnessId: "goose",
