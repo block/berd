@@ -48,7 +48,28 @@
     "unknownLastRun": "Desconocida",
     "paused": "En pausa",
     "running": "En ejecución",
-    "lastRun": "Última ejecución: {{time}}"
+    "lastRun": "Última ejecución: {{time}}",
+    "editCron": "Editar la expresión cron de {{id}}",
+    "uncertainTitle": "Es necesario verificar el temporizador",
+    "recoverCron": "Recuperar la programación de {{id}}",
+    "recoverAction": "Recuperar programación",
+    "cronLabel": "Expresión cron de {{id}}",
+    "cronHelp": "Usa cinco campos (minuto hora día-del-mes mes día-de-la-semana) o seis campos con segundos al inicio. Goose usa la zona horaria de este equipo; si especificas día-del-mes y día-de-la-semana, ambos deben coincidir. Este editor admite comodines numéricos, listas, rangos, pasos y nombres de días. Las ediciones personalizadas deben repetirse cada mes o más frecuentemente. Usa un comodín para el mes y para día-del-mes o día-de-la-semana. Goose podría quitar el temporizador anterior si una actualización falla inesperadamente; verifica la programación después de un error al guardar.",
+    "saving": "Guardando…",
+    "reconcilingSchedule": "Comprobando el estado actual de la programación…",
+    "updateTimeout": "La actualización de la programación agotó el tiempo de espera. Se cerró su conexión y se desconoce el estado del temporizador. Verifica la programación en Goose antes de recuperarla con otra expresión.",
+    "listTimeout": "La actualización de la lista agotó el tiempo de espera. Actualiza para reintentar; ver una programación en la lista no verifica su temporizador.",
+    "connectionChanged": "La conexión de Goose cambió antes de confirmar la solicitud de programación. Actualiza y verifica la programación antes de reintentar.",
+    "updateError": "No se pudo actualizar la programación de Goose.",
+    "updateFailureCaution": "Es posible que el programador haya quitado el temporizador anterior si la actualización falló inesperadamente. Verifica la programación en Goose antes de depender de ella.",
+    "refreshAfterUpdateError": "La actualización de la lista también falló, así que se desconoce el estado actual de la programación.",
+    "failedUpdateRetry": "Esta misma expresión ya falló. No la reintentes: es posible que Goose haya quitado el temporizador anterior. Verifica la programación o prueba otra expresión válida.",
+    "changedElsewhere": "Esta programación cambió mientras la editabas. Cancela y vuelve a abrirla para revisar el valor más reciente.",
+    "validation": {
+      "fieldCount": "Ingresa una expresión cron de cinco o seis campos.",
+      "unsupported": "La expresión no es válida o usa una sintaxis que este editor no puede actualizar de forma segura. La programación existente no cambió.",
+      "safeWindow": "Usa un comodín para el mes y un comodín en día-del-mes o día-de-la-semana. Goose exige que ambos campos de día coincidan si ninguno es comodín y los combina con AND."
+    }
   },
   "builder": {
     "blockedBody": "La última respuesta no fue una automatización válida. Intenta reformular lo que quieres.",
