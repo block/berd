@@ -59,13 +59,11 @@ Result:
                  "message_count": 12}, ...]}
   Most recent first; archived sessions are excluded.`,
   schema: listSessionsSchema,
-  execute: async (args): Promise<ListSessionsResult> => {
+  execute: async (args, ctx): Promise<ListSessionsResult> => {
     const [
-      { useChatSessionStore },
       { findProjectOrThrow },
-      { loadAllSessionsForBerdctl, sessionMetadata },
+      { listSessionsForBerdctl, sessionMetadata },
     ] = await Promise.all([
-      import("@/features/chat/stores/chatSessionStore"),
       import("../runtime/projects"),
       import("../runtime/sessions"),
     ]);
@@ -74,19 +72,17 @@ Result:
     if (args.project_id) {
       await findProjectOrThrow(args.project_id);
     }
-    await loadAllSessionsForBerdctl();
     const query = args.query?.toLowerCase();
-    const sessions = useChatSessionStore
-      .getState()
-      .sessions.filter((session) => !session.archivedAt)
-      .filter((session) =>
-        args.project_id ? session.projectId === args.project_id : true,
-      )
-      .filter((session) =>
-        query ? session.title.toLowerCase().includes(query) : true,
-      )
-      .slice(0, args.limit)
-      .map((session) => {
+    const sessions = await listSessionsForBerdctl({
+      matches: (session) =>
+        !session.archivedAt &&
+        (args.project_id ? session.projectId === args.project_id : true) &&
+        (query ? session.title.toLowerCase().includes(query) : true),
+      limit: args.limit,
+      deadlineMs: ctx.deadlineMs,
+    });
+    return {
+      sessions: sessions.map((session) => {
         const metadata = sessionMetadata(session);
         return {
           session_id: session.id,
@@ -97,7 +93,7 @@ Result:
           chat_state: metadata.chat_state,
           message_count: session.messageCount,
         };
-      });
-    return { sessions };
+      }),
+    };
   },
 });

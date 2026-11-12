@@ -51,7 +51,7 @@ Result:
      {"group_id": "...", "name": "Launch", "session_ids": ["..."]}
    ]}`,
   schema: getProjectSchema,
-  execute: async (args): Promise<GetProjectResult> => {
+  execute: async (args, ctx): Promise<GetProjectResult> => {
     const [
       { useChatSessionStore },
       { findProjectOrThrow },
@@ -61,10 +61,10 @@ Result:
       import("../runtime/projects"),
       import("../runtime/sessions"),
     ]);
-    const [project] = await Promise.all([
-      findProjectOrThrow(args.project_id),
-      loadAllSessionsForBerdctl(),
-    ]);
+    // Resolve the project first so an unknown id does not leave a full
+    // session scan running after the command has failed.
+    const project = await findProjectOrThrow(args.project_id);
+    await loadAllSessionsForBerdctl({ deadlineMs: ctx.deadlineMs });
     const sessions = useChatSessionStore.getState().sessions;
     const sessionCount = sessions.filter(
       (session) => session.projectId === project.id && !session.archivedAt,
