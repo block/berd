@@ -1,6 +1,7 @@
 import { CircleAlert } from "lucide-react";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
+import { useUpdaterContext } from "@/features/updates/hooks/useUpdater";
 import { getPlatform } from "@/shared/lib/platform";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
@@ -169,6 +170,8 @@ export function VoiceSettings() {
   const siriSetup = useSiriVoiceSetup(output.backend === "siri");
   const siriSupported = getPlatform() === "mac";
   const microphonePermission = useMicrophonePermission(siriSupported);
+  const { runtime, relaunch } = useUpdaterContext();
+  const hasInstalledUpdate = runtime.pendingInstall?.installed === true;
   const inputHeadingId = useId();
   const inputDescriptionId = useId();
   const outputHeadingId = useId();
@@ -270,18 +273,38 @@ export function VoiceSettings() {
         {microphonePermission.status === "denied" ? (
           <Alert variant="destructive">
             <CircleAlert />
-            <AlertTitle>{t("voice.microphonePermissionTitle")}</AlertTitle>
+            <AlertTitle>
+              {t(
+                hasInstalledUpdate
+                  ? "voice.microphoneRestartTitle"
+                  : "voice.microphonePermissionTitle",
+              )}
+            </AlertTitle>
             <AlertDescription>
-              <p>{t("voice.microphonePermissionDenied")}</p>
+              <p>
+                {t(
+                  hasInstalledUpdate
+                    ? "voice.microphoneRestartDescription"
+                    : "voice.microphonePermissionDenied",
+                )}
+              </p>
               <Button
                 type="button"
                 variant="alert"
                 size="sm"
-                onClick={() => void microphonePermission.openSettings()}
+                onClick={() =>
+                  void (hasInstalledUpdate
+                    ? relaunch()
+                    : microphonePermission.openSettings())
+                }
               >
-                {t("voice.openMicrophoneSettings")}
+                {t(
+                  hasInstalledUpdate
+                    ? "voice.restartBerd"
+                    : "voice.openMicrophoneSettings",
+                )}
               </Button>
-              {microphonePermission.openSettingsError ? (
+              {!hasInstalledUpdate && microphonePermission.openSettingsError ? (
                 <p>{t("voice.openMicrophoneSettingsError")}</p>
               ) : null}
             </AlertDescription>

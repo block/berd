@@ -74,6 +74,16 @@ const microphonePermissionState = vi.hoisted(() => ({
   openSettingsError: false,
   openSettings: vi.fn(),
 }));
+const updaterState = vi.hoisted(() => ({
+  pendingInstall: null as { installed: boolean } | null,
+  relaunch: vi.fn(),
+}));
+vi.mock("@/features/updates/hooks/useUpdater", () => ({
+  useUpdaterContext: () => ({
+    runtime: { pendingInstall: updaterState.pendingInstall },
+    relaunch: updaterState.relaunch,
+  }),
+}));
 const openAiStatusState = vi.hoisted(() => ({
   enabled: null as boolean | null,
   loaded: true,
@@ -308,6 +318,8 @@ describe("VoiceSettings", () => {
     microphonePermissionState.status = "authorized";
     microphonePermissionState.openSettingsError = false;
     microphonePermissionState.openSettings.mockReset();
+    updaterState.pendingInstall = null;
+    updaterState.relaunch.mockReset().mockResolvedValue(undefined);
     inputState.backend = "parakeet";
     outputState.backend = "pocket";
     platformState.current = "mac";
@@ -899,6 +911,49 @@ describe("VoiceSettings", () => {
     );
 
     expect(microphonePermissionState.openSettings).toHaveBeenCalledOnce();
+  });
+
+  it("offers the installed update's restart when microphone permission is denied", async () => {
+    microphonePermissionState.status = "denied";
+    updaterState.pendingInstall = { installed: true };
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByText(
+        "Berd has installed an update. Restart Berd, then try the microphone again.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Microphone access is turned off for Berd/),
+    ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Restart Berd" }));
+    expect(updaterState.relaunch).toHaveBeenCalledOnce();
+    expect(microphonePermissionState.openSettings).not.toHaveBeenCalled();
+  });
+
+  it("keeps permission settings available until an update is installed", () => {
+    microphonePermissionState.status = "denied";
+    updaterState.pendingInstall = { installed: false };
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByRole("button", { name: "Open Microphone Settings" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Restart Berd" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not interrupt authorized microphone access for an installed update", () => {
+    updaterState.pendingInstall = { installed: true };
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.queryByRole("button", { name: "Restart Berd" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows localized guidance when microphone settings cannot open", () => {
