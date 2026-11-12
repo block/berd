@@ -769,6 +769,7 @@ enum TranscriptDestination {
 }
 
 struct StartOptions {
+    client: telemetry::Client,
     saved: Option<(PathBuf, saved_settings::SavedSettings)>,
     port: u16,
     transcript: TranscriptDestination,
@@ -796,6 +797,7 @@ fn validate_session_arguments(arguments: &[String]) -> Result<(), String> {
 fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
     let mut port = 5222_u16;
     let mut port_seen = false;
+    let mut client = None;
     let mut transcript = TranscriptDestination::None;
     let mut menu_bar = true;
     let mut non_blocking = false;
@@ -815,6 +817,12 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
                     TranscriptDestination::Stdout
                 };
             }
+            "--client" if client.is_none() => {
+                let value = args.get(index + 1).ok_or("--client requires a value")?;
+                client = Some(telemetry::Client::parse(value)?);
+                index += 2;
+            }
+            "--client" => return Err("--client may be provided only once".into()),
             "--no-menu-bar" if menu_bar => {
                 menu_bar = false;
                 index += 1;
@@ -851,6 +859,7 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
         );
     }
     Ok(StartOptions {
+        client: client.unwrap_or_default(),
         saved: None,
         port,
         transcript,
@@ -8505,6 +8514,35 @@ mod tests {
             failure["message"],
             "playback worker disconnected during shutdown"
         );
+    }
+
+    #[test]
+    fn client_is_bounded_and_not_forwarded_as_a_speech_preference() {
+        let start = |flags: &[&str]| {
+            let mut all = vec!["berd-call", "start"];
+            all.extend_from_slice(flags);
+            all.extend(["--voice", "Aaron", "--language", "en-US"]);
+            parse_start_args(&args(&all))
+        };
+        assert_eq!(start(&[]).unwrap().client, telemetry::Client::Terminal);
+        for (value, expected) in [
+            ("terminal", telemetry::Client::Terminal),
+            ("buzz-plugin", telemetry::Client::BuzzPlugin),
+        ] {
+            let options = start(&["--client", value]).unwrap();
+            assert_eq!(options.client, expected);
+            assert_eq!(
+                options.session_arguments,
+                ["session", "--voice", "Aaron", "--language", "en-US"]
+            );
+        }
+        for args in [
+            &["--client"][..],
+            &["--client", "private"],
+            &["--client", "buzz-plugin", "--client", "terminal"],
+        ] {
+            assert!(start(args).is_err());
+        }
     }
 
     #[test]
