@@ -58,8 +58,8 @@ export function LocalSchedulesPanel() {
           size="xs"
           onClick={() => void schedulesQuery.refetch()}
           disabled={schedulesQuery.isFetching}
+          leftIcon={<IconRefresh aria-hidden="true" />}
         >
-          <IconRefresh aria-hidden="true" />
           {t("actions.refreshShort")}
         </Button>
       </div>

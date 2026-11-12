@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatDate } from "@/shared/i18n";
 import { listLocalSchedules } from "@/features/automations/api/localSchedules";
@@ -45,6 +46,35 @@ describe("LocalSchedulesPanel", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("0 9 * * 1-5")).toBeInTheDocument();
     expect(screen.getByText("Active")).toBeInTheDocument();
+  });
+
+  it("refreshes schedules with the shared button icon sizing", async () => {
+    const user = userEvent.setup();
+    let finishRefresh!: (schedules: (typeof schedule)[]) => void;
+    renderPanel();
+
+    expect(await screen.findByText("weekday-report")).toBeInTheDocument();
+    const refresh = screen.getByRole("button", { name: "Refresh" });
+    expect(refresh).toBeEnabled();
+    const icon = refresh.querySelector('[data-slot="button-left-icon"] svg');
+    expect(icon).toBeInTheDocument();
+    expect(icon).toHaveClass("size-3");
+    expect(icon).toHaveAttribute("aria-hidden", "true");
+
+    vi.mocked(listLocalSchedules).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishRefresh = resolve;
+        }),
+    );
+    await user.click(refresh);
+    expect(listLocalSchedules).toHaveBeenCalledTimes(2);
+    expect(refresh).toBeDisabled();
+
+    finishRefresh([{ ...schedule, paused: true }]);
+    expect(await screen.findByText("Paused")).toBeInTheDocument();
+    expect(refresh).toBeEnabled();
+    expect(refresh).toHaveAccessibleName("Refresh");
   });
 
   it("labels paused schedules instead of active", async () => {
