@@ -35,6 +35,30 @@ describe("text shimmer motion", () => {
   });
 });
 
+describe("global focus ring", () => {
+  // Tailwind v4.3.3 drops the whole parent selector when a `*`-led selector
+  // like `*:not(body):not(.focus-override)` uses `&` nesting, compiling it to a
+  // bare `:focus-visible` that matches every element. Keep these rules
+  // flattened until the upstream Tailwind bug is fixed.
+  it("keeps focus-visible selectors flattened", () => {
+    const cssWithoutVariantDefinitions = globalsCss
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("@custom-variant"))
+      .join("\n");
+
+    expect(cssWithoutVariantDefinitions).not.toMatch(/^\s*&/m);
+    expect(globalsCss).toContain(
+      "*:not(body):not(.focus-override):focus-visible {",
+    );
+    expect(globalsCss).toContain(
+      '[data-slot="menubar-sub-trigger"]\n    ):focus-visible {',
+    );
+    expect(globalsCss).toContain(
+      "*:not(body):not(.focus-override).link:focus-visible {",
+    );
+  });
+});
+
 describe("card-glass surface", () => {
   it("derives the glass panel fill from the card token in both themes", () => {
     const lightTheme = declarationsFor(":root {");
