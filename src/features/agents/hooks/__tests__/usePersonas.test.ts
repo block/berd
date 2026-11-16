@@ -12,7 +12,7 @@ const avatarApiMocks = vi.hoisted(() => ({
 vi.mock("@/shared/api/avatars", () => avatarApiMocks);
 
 vi.mock("@/shared/api/agents", () => ({
-  listPersonas: vi.fn().mockResolvedValue([]),
+  listAgentGallery: vi.fn().mockResolvedValue({ personas: [], drafts: [] }),
   createPersona: vi.fn().mockResolvedValue({
     id: "new-id",
     displayName: "Test",
@@ -32,7 +32,7 @@ vi.mock("@/shared/api/agents", () => ({
     updatedAt: "2026-01-01T00:00:00Z",
   }),
   deletePersona: vi.fn().mockResolvedValue(undefined),
-  refreshPersonas: vi.fn().mockResolvedValue([]),
+  refreshAgentGallery: vi.fn().mockResolvedValue({ personas: [], drafts: [] }),
 }));
 
 // Import the mocked module so we can inspect/adjust calls
@@ -42,6 +42,13 @@ import * as api from "@/shared/api/agents";
 import { usePersonas } from "../usePersonas";
 
 // ── helpers ──────────────────────────────────────────────────────────
+
+function gallery(
+  personas: Persona[],
+  drafts: api.AgentGalleryListing["drafts"] = [],
+): api.AgentGalleryListing {
+  return { personas, drafts };
+}
 
 function makePersona(overrides: Partial<Persona> = {}): Persona {
   return {
@@ -62,7 +69,7 @@ describe("usePersonas", () => {
   beforeEach(() => {
     // Re-establish default mock implementations (clearAllMocks would wipe them)
     avatarApiMocks.deleteUserAvatar.mockReset().mockResolvedValue(undefined);
-    vi.mocked(api.listPersonas).mockReset().mockResolvedValue([]);
+    vi.mocked(api.listAgentGallery).mockReset().mockResolvedValue(gallery([]));
     vi.mocked(api.createPersona).mockReset().mockResolvedValue({
       id: "new-id",
       displayName: "Test",
@@ -82,11 +89,14 @@ describe("usePersonas", () => {
       updatedAt: "2026-01-01T00:00:00Z",
     });
     vi.mocked(api.deletePersona).mockReset().mockResolvedValue(undefined);
-    vi.mocked(api.refreshPersonas).mockReset().mockResolvedValue([]);
+    vi.mocked(api.refreshAgentGallery)
+      .mockReset()
+      .mockResolvedValue(gallery([]));
 
     useAgentStore.setState({
       personas: [],
       personasLoading: false,
+      draftSources: [],
       agents: [],
       agentsLoading: false,
       activeAgentId: null,
@@ -101,25 +111,38 @@ describe("usePersonas", () => {
   // ── loading ────────────────────────────────────────────────────────
 
   describe("loading personas", () => {
-    it("loads personas on mount via listPersonas()", async () => {
+    it("loads personas and drafts on mount via listAgentGallery()", async () => {
       const personas = [makePersona({ id: "p1" }), makePersona({ id: "p2" })];
-      vi.mocked(api.listPersonas).mockResolvedValueOnce(personas);
+      const draft = {
+        type: "agent" as const,
+        path: "/Users/x/.agents/agents/untitled-agent-1.md",
+        name: "Untitled agent 1",
+        description: "Draft",
+        content: "Draft in progress.",
+        global: true,
+        writable: true,
+        properties: { draft: true, builderSessionId: "sess-1" },
+      };
+      vi.mocked(api.listAgentGallery).mockResolvedValueOnce(
+        gallery(personas, [draft]),
+      );
 
       const { result } = renderHook(() => usePersonas());
 
       await waitFor(() => {
-        expect(api.listPersonas).toHaveBeenCalledTimes(1);
+        expect(api.listAgentGallery).toHaveBeenCalledTimes(1);
       });
 
       await waitFor(() => {
         expect(result.current.personas).toEqual(personas);
       });
+      expect(useAgentStore.getState().draftSources).toEqual([draft]);
     });
 
     it("sets loading state correctly", async () => {
       // Create a deferred promise to control timing
-      let resolveList!: (value: Persona[]) => void;
-      vi.mocked(api.listPersonas).mockImplementationOnce(
+      let resolveList!: (value: api.AgentGalleryListing) => void;
+      vi.mocked(api.listAgentGallery).mockImplementationOnce(
         () =>
           new Promise((resolve) => {
             resolveList = resolve;
@@ -135,7 +158,7 @@ describe("usePersonas", () => {
 
       // Resolve the API call
       await act(async () => {
-        resolveList([]);
+        resolveList(gallery([]));
       });
 
       await waitFor(() => {
@@ -163,7 +186,7 @@ describe("usePersonas", () => {
 
       // Wait for initial load to fully complete
       await waitFor(() => {
-        expect(api.listPersonas).toHaveBeenCalledTimes(1);
+        expect(api.listAgentGallery).toHaveBeenCalledTimes(1);
         expect(result.current.isLoading).toBe(false);
       });
 
@@ -186,7 +209,9 @@ describe("usePersonas", () => {
     it("updatePersona calls API and updates store", async () => {
       const existing = makePersona({ id: "test-id", displayName: "Old" });
       // Return existing persona from initial load so the store has it
-      vi.mocked(api.listPersonas).mockResolvedValueOnce([existing]);
+      vi.mocked(api.listAgentGallery).mockResolvedValueOnce(
+        gallery([existing]),
+      );
 
       const updated = {
         id: "test-id",
@@ -229,7 +254,9 @@ describe("usePersonas", () => {
         id: "shared-id",
         avatar: "user-avatar:shared",
       });
-      vi.mocked(api.listPersonas).mockResolvedValueOnce([existing, shared]);
+      vi.mocked(api.listAgentGallery).mockResolvedValueOnce(
+        gallery([existing, shared]),
+      );
       vi.mocked(api.updatePersona).mockResolvedValue({
         ...existing,
         avatar: "user-avatar:new",
@@ -256,7 +283,9 @@ describe("usePersonas", () => {
 
     it("preserves gloopies displaced by overlapping updates", async () => {
       const existing = makePersona({ id: "test-id", avatar: "user-avatar:a" });
-      vi.mocked(api.listPersonas).mockResolvedValueOnce([existing]);
+      vi.mocked(api.listAgentGallery).mockResolvedValueOnce(
+        gallery([existing]),
+      );
       const first = makePersona({ id: "test-id", avatar: "user-avatar:b" });
       const second = makePersona({ id: "test-id", avatar: "user-avatar:c" });
       const firstResult = vi.fn<() => Promise<Persona>>();
@@ -294,7 +323,9 @@ describe("usePersonas", () => {
     it("deletePersona calls API and removes from store", async () => {
       const existing = makePersona({ id: "del-id" });
       // Return existing persona from initial load so the store has it
-      vi.mocked(api.listPersonas).mockResolvedValueOnce([existing]);
+      vi.mocked(api.listAgentGallery).mockResolvedValueOnce(
+        gallery([existing]),
+      );
 
       const { result } = renderHook(() => usePersonas());
 
@@ -322,7 +353,9 @@ describe("usePersonas", () => {
         id: "second",
         avatar: "user-avatar:shared",
       });
-      vi.mocked(api.listPersonas).mockResolvedValueOnce([first, second]);
+      vi.mocked(api.listAgentGallery).mockResolvedValueOnce(
+        gallery([first, second]),
+      );
       const { result } = renderHook(() => usePersonas());
       await waitFor(() => expect(result.current.personas).toHaveLength(2));
 
@@ -341,9 +374,11 @@ describe("usePersonas", () => {
   // ── refresh ────────────────────────────────────────────────────────
 
   describe("refresh", () => {
-    it("refreshFromDisk calls refreshPersonas() API", async () => {
+    it("refreshFromDisk calls refreshAgentGallery() API", async () => {
       const refreshed = [makePersona({ id: "refreshed-1" })];
-      vi.mocked(api.refreshPersonas).mockResolvedValueOnce(refreshed);
+      vi.mocked(api.refreshAgentGallery).mockResolvedValueOnce(
+        gallery(refreshed),
+      );
 
       const { result } = renderHook(() => usePersonas());
 
@@ -355,13 +390,13 @@ describe("usePersonas", () => {
         await result.current.refreshFromDisk();
       });
 
-      expect(api.refreshPersonas).toHaveBeenCalled();
+      expect(api.refreshAgentGallery).toHaveBeenCalled();
       expect(result.current.personas).toEqual(refreshed);
     });
 
     it("does not start overlapping refresh requests", async () => {
-      let resolveRefresh!: (value: Persona[]) => void;
-      vi.mocked(api.refreshPersonas).mockImplementationOnce(
+      let resolveRefresh!: (value: api.AgentGalleryListing) => void;
+      vi.mocked(api.refreshAgentGallery).mockImplementationOnce(
         () =>
           new Promise((resolve) => {
             resolveRefresh = resolve;
@@ -377,10 +412,10 @@ describe("usePersonas", () => {
       const firstRefresh = result.current.refreshFromDisk();
       const secondRefresh = result.current.refreshFromDisk();
 
-      expect(api.refreshPersonas).toHaveBeenCalledTimes(1);
+      expect(api.refreshAgentGallery).toHaveBeenCalledTimes(1);
 
       await act(async () => {
-        resolveRefresh([]);
+        resolveRefresh(gallery([]));
         await firstRefresh;
         await secondRefresh;
       });
@@ -389,8 +424,8 @@ describe("usePersonas", () => {
     it("ignores stale refresh results that started before a mutation", async () => {
       const stalePersona = makePersona({ id: "stale" });
       const createdPersona = makePersona({ id: "created" });
-      let resolveRefresh!: (value: Persona[]) => void;
-      vi.mocked(api.refreshPersonas).mockImplementationOnce(
+      let resolveRefresh!: (value: api.AgentGalleryListing) => void;
+      vi.mocked(api.refreshAgentGallery).mockImplementationOnce(
         () =>
           new Promise((resolve) => {
             resolveRefresh = resolve;
@@ -413,7 +448,7 @@ describe("usePersonas", () => {
       });
 
       await act(async () => {
-        resolveRefresh([stalePersona]);
+        resolveRefresh(gallery([stalePersona]));
         await refresh;
       });
 
