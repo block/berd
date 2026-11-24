@@ -38,7 +38,7 @@ const NON_BLOCKING_REQUIRES_DELIVERY: &str =
 const CLEAN_STOP: &str = "Berd Call stopped after a stop request. This is a clean shutdown, not a crash. Do not restart it unless asked.";
 // How long a restart waits for speech to finish before cutting it off: longer than a typical spoken reply.
 const RESTART_SPEECH_WAIT: Duration = Duration::from_secs(60);
-const INPUT_FRAME_SAMPLES: usize = 960;
+pub(crate) const INPUT_FRAME_SAMPLES: usize = 960;
 const MAX_AUDIO_RECORD_BYTES: usize = 4096 * std::mem::size_of::<f32>() + 16;
 
 pub(crate) fn run(options: StartOptions) -> Result<(), String> {
@@ -58,6 +58,10 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
             .unwrap_or_default(),
         status: None,
     }));
+    let mut pcm = options
+        .pcm_stream
+        .then(crate::host_pcm::PcmStream::start)
+        .transpose()?;
     let mut session = SessionStart {
         saved: options.saved.clone(),
         arguments: options.session_arguments,
@@ -79,6 +83,7 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
             &non_blocking,
             &stop_requested,
             &status_sounds,
+            pcm.as_mut(),
         ) {
             Ok(None) => break Ok(()),
             // A stop recorded while the old session was shutting down wins
@@ -194,7 +199,7 @@ fn input_activity_line(speaking: bool, recognizing: bool) -> String {
     )
 }
 
-fn print_flushed(line: &str) -> Result<(), String> {
+pub(crate) fn print_flushed(line: &str) -> Result<(), String> {
     let mut stdout = std::io::stdout().lock();
     writeln!(stdout, "{line}")
         .and_then(|()| stdout.flush())
@@ -218,6 +223,7 @@ fn run_session(
     non_blocking: &Arc<AtomicBool>,
     stop_requested: &Arc<AtomicBool>,
     status_sounds: &Arc<Mutex<StatusSounds>>,
+    mut pcm: Option<&mut crate::host_pcm::PcmStream>,
 ) -> Result<Option<SessionStart>, String> {
     let SessionStart {
         saved,
@@ -239,6 +245,7 @@ fn run_session(
         stop_requested,
         status_sounds,
         saved,
+        pcm.as_ref().map(|pcm| pcm.output.clone()),
     );
     let StartedSession {
         mut child,
@@ -279,6 +286,9 @@ fn run_session(
         if stop_requested.load(Ordering::SeqCst) {
             actor.stop()?;
         }
+        if let Some(pcm) = pcm.as_mut() {
+            actor.external_playing = pcm.poll(actor.pending_speak.is_some())?;
+        }
         actor.poll()?;
         if !actor.stopping {
             capture.poll(&mut actor)?;
@@ -296,6 +306,9 @@ fn run_session(
         thread::sleep(Duration::from_millis(2));
     }
     drop(capture);
+    if let Some(pcm) = pcm.as_mut() {
+        pcm.clear()?;
+    }
     child.wait_for_exit()?;
     let restart = actor.restart.take();
     actor.finish_pending(if restart.is_some() {
@@ -356,6 +369,7 @@ fn start_session(
     stop_requested: &Arc<AtomicBool>,
     status_sounds: &Arc<Mutex<StatusSounds>>,
     saved: Option<(std::path::PathBuf, crate::saved_settings::SavedSettings)>,
+    pcm: Option<crate::host_pcm::PcmOutput>,
 ) -> Result<StartedSession, String> {
     let mut child = SessionProcess::spawn(arguments.clone())?;
     let writer = Arc::new(Mutex::new(child.take_stdin()?));
@@ -368,6 +382,7 @@ fn start_session(
         Arc::clone(&writer),
         audio_command_rx,
         failure_tx.clone(),
+        pcm.clone(),
     )?;
 
     send_request(
@@ -429,6 +444,7 @@ fn start_session(
         failure_tx,
         actor.capture_muted.clone(),
         actor.capture_mute_epoch.clone(),
+        pcm,
     )?;
     actor.persist_settings(SavedPreference::SessionStart);
     let control = Arc::new(SessionControl {
@@ -811,6 +827,7 @@ struct SessionActor {
     audio_commands: SyncSender<AudioCommand>,
     next_id: u64,
     pending_speak: Option<PendingSpeak>,
+    external_playing: bool,
     pending_settings: std::collections::HashMap<u64, SyncSender<Result<Value, String>>>,
     waiting_speaks: VecDeque<ControlCommand>,
     session: Arc<Mutex<VoiceSessionSnapshot>>,
@@ -910,6 +927,7 @@ impl SessionActor {
             audio_commands,
             next_id: 2,
             pending_speak: None,
+            external_playing: false,
             pending_settings: std::collections::HashMap::new(),
             waiting_speaks: VecDeque::new(),
             session,
@@ -1029,7 +1047,7 @@ impl SessionActor {
             }
         }
         self.poll_input_requests()?;
-        if !self.stopping && self.pending_speak.is_none() {
+        if !self.stopping && self.pending_speak.is_none() && !self.external_playing {
             if let Some(command) = self.waiting_speaks.pop_front() {
                 self.handle_command(command)?;
             }
@@ -1196,7 +1214,7 @@ impl SessionActor {
                     let _ = response.send(Err(NON_BLOCKING_REQUIRES_DELIVERY.into()));
                     return Ok(());
                 }
-                if self.pending_speak.is_some() {
+                if self.pending_speak.is_some() || self.external_playing {
                     self.waiting_speaks.push_back(ControlCommand::Speak {
                         text,
                         acknowledgement,
@@ -1895,6 +1913,7 @@ struct DefaultInputCapture {
     next_check: Instant,
     muted: Arc<AtomicBool>,
     mute_epoch: Arc<AtomicU64>,
+    pcm: Option<crate::host_pcm::PcmOutput>,
 }
 
 fn default_input() -> Result<(String, cpal::Device), String> {
@@ -1922,6 +1941,7 @@ impl DefaultInputCapture {
         failures: SyncSender<String>,
         muted: Arc<AtomicBool>,
         mute_epoch: Arc<AtomicU64>,
+        pcm: Option<crate::host_pcm::PcmOutput>,
     ) -> Result<Self, String> {
         let (key, device) = default_input()?;
         let capture = InputCapture::start(
@@ -1930,6 +1950,7 @@ impl DefaultInputCapture {
             failures.clone(),
             muted.clone(),
             mute_epoch.clone(),
+            pcm.clone(),
         )?;
         Ok(Self {
             recovery: crate::microphone_recovery::MicrophoneRecovery::new(key, capture),
@@ -1938,6 +1959,7 @@ impl DefaultInputCapture {
             next_check: Instant::now() + Duration::from_millis(500),
             muted,
             mute_epoch,
+            pcm,
         })
     }
 
@@ -1981,6 +2003,7 @@ impl DefaultInputCapture {
                     failures.clone(),
                     self.muted.clone(),
                     self.mute_epoch.clone(),
+                    self.pcm.clone(),
                 )
             })?;
         if change.invalidated || change.opened {
@@ -2077,6 +2100,7 @@ impl InputCapture {
         failures: SyncSender<String>,
         muted: Arc<AtomicBool>,
         mute_epoch: Arc<AtomicU64>,
+        pcm: Option<crate::host_pcm::PcmOutput>,
     ) -> Result<Self, String> {
         let supported = device
             .default_input_config()
@@ -2095,6 +2119,14 @@ impl InputCapture {
             .name("berd-call-microphone-writer".into())
             .spawn(move || {
                 while let Ok(frame) = frames_rx.recv() {
+                    if let Some(pcm) = &pcm {
+                        pcm.frame(
+                            &frame.samples,
+                            frame.mute_epoch,
+                            &forwarding_muted,
+                            &forwarding_mute_epoch,
+                        );
+                    }
                     if let Err(message) = send_captured_pcm(
                         &writer,
                         &frame,
@@ -2282,11 +2314,29 @@ impl InputNormalizer {
     }
 }
 
+struct PlaybackTap {
+    output: crate::host_pcm::PcmOutput,
+    samples: VecDeque<f32>,
+    reported: u64,
+    normalizer: InputNormalizer,
+}
+
+impl PlaybackTap {
+    fn confirm(&mut self, played: u64) {
+        let count = (played.saturating_sub(self.reported) as usize).min(self.samples.len());
+        self.reported += count as u64;
+        for frame in self.normalizer.push(self.samples.drain(..count)) {
+            self.output.played("tts", &frame);
+        }
+    }
+}
+
 struct ActiveAudio {
     speech_id: u64,
     player: PocketAudioPlayer,
     last_played: u64,
     ended_sequence: Option<u64>,
+    tap: Option<PlaybackTap>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2347,6 +2397,7 @@ fn spawn_audio_host(
     writer: Arc<Mutex<ChildStdin>>,
     commands: Receiver<AudioCommand>,
     failures: SyncSender<String>,
+    output: Option<crate::host_pcm::PcmOutput>,
 ) -> Result<(), String> {
     let flags = unsafe { libc::fcntl(audio.as_raw_fd(), libc::F_GETFL) };
     if flags < 0
@@ -2381,9 +2432,13 @@ fn spawn_audio_host(
                 loop {
                     match take_audio_record(&mut bytes) {
                         Ok(Some((kind, payload))) => {
-                            if let Err(error) =
-                                handle_audio_record(kind, &payload, &writer, &mut playback)
-                            {
+                            if let Err(error) = handle_audio_record(
+                                kind,
+                                &payload,
+                                &writer,
+                                &mut playback,
+                                output.as_ref(),
+                            ) {
                                 report_failure(&failures, error);
                                 return;
                             }
@@ -2416,6 +2471,9 @@ fn spawn_audio_host(
                 }
                 let mut finished = None;
                 if let AudioPlaybackState::Playing(active) = &mut playback {
+                    if let Some(tap) = &mut active.tap {
+                        tap.confirm(active.player.completed_source_frames());
+                    }
                     if let Err(error) = active.player.check_health() {
                         let speech_id = active.speech_id;
                         let played_frames = active.player.played_frames();
@@ -2540,6 +2598,7 @@ fn handle_audio_record(
     payload: &[u8],
     writer: &Arc<Mutex<ChildStdin>>,
     playback: &mut AudioPlaybackState,
+    output: Option<&crate::host_pcm::PcmOutput>,
 ) -> Result<(), String> {
     match kind {
         AUDIO_BEGIN_KIND if payload.len() == 16 => {
@@ -2571,6 +2630,12 @@ fn handle_audio_record(
                 player,
                 last_played: 0,
                 ended_sequence: None,
+                tap: output.cloned().map(|output| PlaybackTap {
+                    output,
+                    samples: VecDeque::new(),
+                    reported: 0,
+                    normalizer: InputNormalizer::new((sample_rate as f32 * rate).round() as u32, 1),
+                }),
             });
             send_request(writer, &SessionRequest::AudioBeginAccepted { speech_id })
         }
@@ -2600,6 +2665,9 @@ fn handle_audio_record(
                         message,
                     },
                 );
+            }
+            if let Some(tap) = &mut active.tap {
+                tap.samples.extend(samples);
             }
             send_request(
                 writer,
@@ -2636,6 +2704,9 @@ fn handle_audio_record(
                 .playing_mut(speech_id)
                 .ok_or_else(|| "voice session cancelled inactive audio".to_string())?;
             let played_frames = active.player.played_frames();
+            if let Some(tap) = &mut active.tap {
+                tap.confirm(active.player.completed_source_frames());
+            }
             active.player.stop();
             playback.finish(speech_id, played_frames);
             send_request(
@@ -3752,7 +3823,7 @@ mod tests {
         let audio = unsafe { File::from_raw_fd(host.into_raw_fd()) };
         let (commands, commands_rx) = mpsc::channel();
         let (failures_tx, failures) = mpsc::sync_channel(1);
-        spawn_audio_host(audio, Arc::clone(&writer), commands_rx, failures_tx).unwrap();
+        spawn_audio_host(audio, Arc::clone(&writer), commands_rx, failures_tx, None).unwrap();
         let mut record = |kind, payload: &[u8]| {
             session.write_all(&AUDIO_FRAME_MAGIC).unwrap();
             session.write_all(&[AUDIO_FRAME_MARKER, kind]).unwrap();
