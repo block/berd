@@ -8578,13 +8578,23 @@ mod tests {
     #[test]
     fn pcm_stream_is_an_explicit_parent_only_option() {
         let start = |flags: &[&str]| {
-            let mut input = vec!["berd-call", "start"];
+            let mut input = vec![
+                "berd-call",
+                "start",
+                "--voice",
+                "Example",
+                "--language",
+                "en-US",
+            ];
             input.extend_from_slice(flags);
             parse_start_args(&args(&input))
         };
         let stream = start(&["--stream", "--pcm-stream"]).unwrap();
         assert!(stream.pcm_stream);
-        assert_eq!(stream.session_arguments, ["session"]);
+        assert_eq!(
+            stream.session_arguments,
+            ["session", "--voice", "Example", "--language", "en-US"]
+        );
         assert!(!start(&["--stream"]).unwrap().pcm_stream);
         assert!(start(&["--pcm-stream"]).is_err());
         assert!(start(&["--codex", "--pcm-stream"]).is_err());
