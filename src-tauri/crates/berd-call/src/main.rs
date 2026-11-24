@@ -46,6 +46,8 @@ mod host_control;
 #[cfg(unix)]
 mod host_lifetime;
 #[cfg(target_os = "macos")]
+mod host_pcm;
+#[cfg(target_os = "macos")]
 mod host_session;
 #[cfg(target_os = "macos")]
 mod menu_bar;
@@ -774,6 +776,7 @@ struct StartOptions {
     transcript: TranscriptDestination,
     menu_bar: bool,
     non_blocking: bool,
+    pcm_stream: bool,
     session_arguments: Vec<String>,
 }
 
@@ -799,6 +802,7 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
     let mut transcript = TranscriptDestination::None;
     let mut menu_bar = true;
     let mut non_blocking = false;
+    let mut pcm_stream = false;
     let mut session_arguments = vec!["session".to_string()];
     let mut index = 2;
     while index < args.len() {
@@ -820,6 +824,11 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
                 index += 1;
             }
             "--no-menu-bar" => return Err("--no-menu-bar may be provided only once".into()),
+            "--pcm-stream" if !pcm_stream => {
+                pcm_stream = true;
+                index += 1;
+            }
+            "--pcm-stream" => return Err("--pcm-stream may be provided only once".into()),
             "--non-blocking" if !non_blocking => {
                 non_blocking = true;
                 index += 1;
@@ -850,12 +859,16 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
                 .into(),
         );
     }
+    if pcm_stream && transcript != TranscriptDestination::Stdout {
+        return Err("--pcm-stream requires --stream".into());
+    }
     Ok(StartOptions {
         saved: None,
         port,
         transcript,
         menu_bar,
         non_blocking,
+        pcm_stream,
         session_arguments,
     })
 }
@@ -8560,6 +8573,31 @@ mod tests {
         assert!(start(&["--codex", "--stream"]).is_err());
         assert!(start(&["--codex", "--codex"]).is_err());
         assert!(start(&["--non-blocking"]).is_err());
+    }
+
+    #[test]
+    fn pcm_stream_is_an_explicit_parent_only_option() {
+        let start = |flags: &[&str]| {
+            let mut input = vec![
+                "berd-call",
+                "start",
+                "--voice",
+                "Example",
+                "--language",
+                "en-US",
+            ];
+            input.extend_from_slice(flags);
+            parse_start_args(&args(&input))
+        };
+        let stream = start(&["--stream", "--pcm-stream"]).unwrap();
+        assert!(stream.pcm_stream);
+        assert_eq!(
+            stream.session_arguments,
+            ["session", "--voice", "Example", "--language", "en-US"]
+        );
+        assert!(!start(&["--stream"]).unwrap().pcm_stream);
+        assert!(start(&["--pcm-stream"]).is_err());
+        assert!(start(&["--codex", "--pcm-stream"]).is_err());
     }
 
     #[test]

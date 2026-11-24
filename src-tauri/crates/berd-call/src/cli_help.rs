@@ -35,7 +35,7 @@ const START_HELP: &str = r#"Run a local voice call backed by the shared session 
 
 Usage:
   berd-call start [--port PORT] [--stream | --codex] [--non-blocking]
-    [--no-menu-bar]
+    [--no-menu-bar] [--pcm-stream]
     --voice NAME --language BCP47 [session options]
 
 The foreground process owns the default microphone and audio output. Session
@@ -44,6 +44,14 @@ internally. `--stream` prints cursor, role, and text as TSV. `--codex` delivers
 the same rows as `--stream` to the calling Codex task (requires CODEX_THREAD_ID). A
 menu-bar item controls speech rate, input muting, and ending the call; pass
 `--no-menu-bar` to omit it.
+
+With `--stream --pcm-stream`, cursorless "pcm" rows carry microphone frames.
+Write SOURCE:BASE64 on stdin to play one frame, or "flush" to cancel queued PCM.
+Frames are 20 ms of mono 48 kHz signed 16-bit little-endian PCM.
+A cursorless "pcm_played" row carries SOURCE:BASE64 for confirmed playback.
+The built-in voice uses source "tts". A "pcm_idle" row signals that external
+playback has drained.
+This audio exchange stays in the parent process's pipes.
 
 Accepted voice, rate, and input policy settings are saved for the next call.
 Microphone mute is temporary; each new call starts unmuted. Explicit startup
